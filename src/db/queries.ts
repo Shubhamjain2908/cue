@@ -140,3 +140,37 @@ export function closePosition(
   `);
   stmt.run({ id: positionId, exitDate, exitPrice });
 }
+
+export interface BacktestRunInsert {
+  runDate: string;
+  fromDate: string;
+  toDate: string;
+  cagr: number;
+  maxDrawdown: number;
+  winRate: number;
+  sharpeRatio: number;
+  totalTrades: number;
+  benchmarkCagr: number;
+}
+
+export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert): { lastInsertRowid: bigint } {
+  const stmt = db.prepare(`
+    INSERT INTO backtest_runs (
+      run_date, from_date, to_date, cagr, max_drawdown, win_rate, sharpe_ratio, total_trades, benchmark_cagr
+    ) VALUES (
+      @runDate, @fromDate, @toDate, @cagr, @maxDrawdown, @winRate, @sharpeRatio, @totalTrades, @benchmarkCagr
+    )
+  `);
+  const info = stmt.run({
+    runDate: row.runDate,
+    fromDate: row.fromDate,
+    toDate: row.toDate,
+    cagr: row.cagr,
+    maxDrawdown: row.maxDrawdown,
+    winRate: row.winRate,
+    sharpeRatio: row.sharpeRatio,
+    totalTrades: row.totalTrades,
+    benchmarkCagr: row.benchmarkCagr,
+  });
+  return { lastInsertRowid: BigInt(info.lastInsertRowid) };
+}
