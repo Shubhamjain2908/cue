@@ -6,7 +6,7 @@ import {
   type CachedOhlcvBundle,
 } from "./types.js";
 
-/** Polygon OHLCV file cache TTL (Section 4.2). */
+/** OHLCV file cache TTL for Massive daily aggregates (Section 4.2). */
 export const OHLCV_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function resolveCacheRoot(cacheDir: string): string {
