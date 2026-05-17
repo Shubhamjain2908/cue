@@ -66,7 +66,7 @@ describe("volumeRatio", () => {
   });
 
   it("computes ratio for liquid names", () => {
-    const vols = Array.from({ length: 60 }, (_, i) => (i < 40 ? 100_000 : 200_000));
+    const vols = Array.from({ length: 60 }, (_, i) => (i < 40 ? 50_000 : 200_000));
     expect(volumeRatio(vols)).toBeCloseTo(2, 5);
   });
 
