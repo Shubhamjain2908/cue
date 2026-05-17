@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   closePosition,
+  insertDailyPrices,
   insertPosition,
   insertSignal,
   listUnenrichedBuySignals,
@@ -88,6 +89,25 @@ describe("db queries", () => {
       alerted: number;
     }).alerted;
     expect(alerted).toBe(1);
+    db.close();
+  });
+
+  it("inserts daily prices and ignores duplicate ticker/date", () => {
+    const db = openMemoryDb();
+    const bars = [
+      { date: "2024-01-02", open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 },
+      { date: "2024-01-03", open: 1.5, high: 2.5, low: 1, close: 2, volume: 200 },
+    ];
+    insertDailyPrices(db, "AAA", bars);
+    insertDailyPrices(db, "aaa", bars);
+    const count = db.prepare(`SELECT COUNT(*) AS c FROM daily_prices`).get() as {
+      c: number;
+    };
+    expect(count.c).toBe(2);
+    const tickers = db
+      .prepare(`SELECT DISTINCT ticker FROM daily_prices ORDER BY ticker`)
+      .all() as Array<{ ticker: string }>;
+    expect(tickers).toEqual([{ ticker: "AAA" }]);
     db.close();
   });
 

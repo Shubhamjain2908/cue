@@ -24,6 +24,48 @@ export interface PositionInsert {
   status: PositionStatus;
 }
 
+export interface DailyPriceInsert {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/**
+ * Inserts daily OHLCV rows for one ticker. Uses a single transaction and
+ * `INSERT OR IGNORE` so duplicate (ticker, date) pairs are skipped safely.
+ */
+export function insertDailyPrices(
+  db: SqliteConnection,
+  ticker: string,
+  bars: DailyPriceInsert[],
+): void {
+  if (bars.length === 0) {
+    return;
+  }
+  const upper = ticker.toUpperCase();
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO daily_prices (ticker, date, open, high, low, close, volume)
+    VALUES (@ticker, @date, @open, @high, @low, @close, @volume)
+  `);
+  const runAll = db.transaction((rows: DailyPriceInsert[]) => {
+    for (const bar of rows) {
+      stmt.run({
+        ticker: upper,
+        date: bar.date,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
+      });
+    }
+  });
+  runAll(bars);
+}
+
 export function insertSignal(
   db: SqliteConnection,
   row: SignalInsert,
