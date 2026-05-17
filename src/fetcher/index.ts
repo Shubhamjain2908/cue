@@ -21,6 +21,40 @@ import {
   type MassiveStocksAggResult,
 } from "./types.js";
 
+function createHttpClient(): import("axios").AxiosInstance {
+  const client = axios.create({ timeout: 60_000 });
+
+  client.interceptors.response.use(
+    (response) => response,
+    async (error: unknown) => {
+      const axiosError = error as import("axios").AxiosError;
+      const config = axiosError.config as import("axios").InternalAxiosRequestConfig & {
+        _retryCount?: number;
+      };
+
+      if (config === undefined) {
+        return Promise.reject(error);
+      }
+
+      config._retryCount = config._retryCount ?? 0;
+      const status = axiosError.response?.status;
+      const shouldRetry =
+        config._retryCount < 3 && (status === 429 || status === 500 || status === 503);
+
+      if (!shouldRetry) {
+        return Promise.reject(error);
+      }
+
+      config._retryCount += 1;
+      const backoffMs = Math.pow(2, config._retryCount - 1) * 1000; // 1s, 2s, 4s
+      await delay(backoffMs);
+      return client(config);
+    },
+  );
+
+  return client;
+}
+
 const universeSchema = z.object({
   tickers: z.array(z.string().min(1)),
 });
@@ -159,8 +193,8 @@ async function fetchMassiveDailyAggs(input: {
       );
     }
     const url = ensureApiKeyOnUrl(nextUrl, input.apiKey);
-    const http = await axios.get<unknown>(url, {
-      timeout: 60_000,
+    const httpClient = createHttpClient();
+    const http = await httpClient.get<unknown>(url, {
       validateStatus: () => true,
     });
     if (http.status !== 200) {
