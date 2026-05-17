@@ -2,11 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  GetStocksAggregatesSortEnum,
-  GetStocksAggregatesTimespanEnum,
-  restClient,
-} from "@massive.com/client-js";
+import axios from "axios";
 import Database from "better-sqlite3";
 import { z } from "zod";
 import winston from "winston";
@@ -30,6 +26,8 @@ const universeSchema = z.object({
 });
 
 const MASSIVE_REST_BASE = "https://api.massive.com";
+const AGGS_PAGE_LIMIT = 50_000;
+const MAX_AGG_PAGES = 500;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -117,47 +115,82 @@ function openDb(dbPath: string): InstanceType<typeof Database> {
   return db;
 }
 
-type MassiveRestClient = ReturnType<typeof restClient>;
+function buildInitialAggsUrl(input: {
+  ticker: string;
+  start: string;
+  end: string;
+  apiKey: string;
+}): string {
+  const pathSeg = `/v2/aggs/ticker/${encodeURIComponent(input.ticker)}/range/1/day/${input.start}/${input.end}`;
+  const u = new URL(pathSeg, `${MASSIVE_REST_BASE}/`);
+  u.searchParams.set("adjusted", "true");
+  u.searchParams.set("sort", "asc");
+  u.searchParams.set("limit", String(AGGS_PAGE_LIMIT));
+  u.searchParams.set("apiKey", input.apiKey);
+  return u.toString();
+}
 
-async function fetchMassiveDailyAggs(
-  rest: MassiveRestClient,
-  input: {
-    ticker: string;
-    start: string;
-    end: string;
-  },
-): Promise<DailyOhlcvBar[]> {
-  let response: unknown;
-  try {
-    response = await rest.getStocksAggregates({
-      stocksTicker: input.ticker,
-      multiplier: 1,
-      timespan: GetStocksAggregatesTimespanEnum.Day,
-      from: input.start,
-      to: input.end,
-      adjusted: true,
-      sort: GetStocksAggregatesSortEnum.Asc,
-      limit: 50_000,
+/** Ensures `apiKey` is present (Massive `next_url` pages may omit it). */
+function ensureApiKeyOnUrl(url: string, apiKey: string): string {
+  const u = new URL(url);
+  if (!u.searchParams.has("apiKey")) {
+    u.searchParams.set("apiKey", apiKey);
+  }
+  return u.toString();
+}
+
+async function fetchMassiveDailyAggs(input: {
+  apiKey: string;
+  ticker: string;
+  start: string;
+  end: string;
+}): Promise<DailyOhlcvBar[]> {
+  const byTs = new Map<number, MassiveStocksAggResult>();
+  let nextUrl: string | null = buildInitialAggsUrl(input);
+  let pageIndex = 0;
+
+  while (nextUrl !== null) {
+    if (pageIndex > 0) {
+      await delay(12_000);
+    }
+    if (pageIndex >= MAX_AGG_PAGES) {
+      throw new Error(
+        `Massive aggs pagination exceeded ${String(MAX_AGG_PAGES)} pages`,
+      );
+    }
+    const url = ensureApiKeyOnUrl(nextUrl, input.apiKey);
+    const http = await axios.get<unknown>(url, {
+      timeout: 60_000,
+      validateStatus: () => true,
     });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Massive getStocksAggregates request failed: ${msg}`);
+    if (http.status !== 200) {
+      throw new Error(
+        `Massive HTTP ${String(http.status)}: ${JSON.stringify(http.data)}`,
+      );
+    }
+    const parsed = massiveStocksAggregatesResponseSchema.safeParse(http.data);
+    if (!parsed.success) {
+      throw new Error(
+        `Massive response validation failed: ${parsed.error.message}`,
+      );
+    }
+    const body = parsed.data;
+    if (body.status !== undefined && body.status.toUpperCase() === "ERROR") {
+      throw new Error(`Massive aggregates error: ${JSON.stringify(http.data)}`);
+    }
+    for (const r of body.results ?? []) {
+      byTs.set(r.t, r);
+    }
+    const rawNext = body.next_url;
+    nextUrl =
+      rawNext !== undefined && rawNext !== null && rawNext.length > 0
+        ? rawNext
+        : null;
+    pageIndex += 1;
   }
 
-  const parsed = massiveStocksAggregatesResponseSchema.safeParse(response);
-  if (!parsed.success) {
-    throw new Error(
-      `Massive response validation failed: ${parsed.error.message}`,
-    );
-  }
-  const body = parsed.data;
-  if (body.status !== undefined && body.status.toUpperCase() === "ERROR") {
-    throw new Error(
-      `Massive aggregates error: ${JSON.stringify(response)}`,
-    );
-  }
-  const results = body.results ?? [];
-  return mapMassiveResultsToBars(results);
+  const merged = [...byTs.values()].sort((a, b) => a.t - b.t);
+  return mapMassiveResultsToBars(merged);
 }
 
 async function run(): Promise<void> {
@@ -173,10 +206,6 @@ async function run(): Promise<void> {
 
   const rangeEnd = rangeEndYmd();
   const rangeStart = rangeStartYmdFiveYears(rangeEnd);
-
-  const rest = restClient(config.POLYGON_API_KEY, MASSIVE_REST_BASE, {
-    pagination: true,
-  });
 
   const db = openDb(config.DB_PATH);
   try {
@@ -200,7 +229,8 @@ async function run(): Promise<void> {
 
       let bars: DailyOhlcvBar[] = [];
       try {
-        bars = await fetchMassiveDailyAggs(rest, {
+        bars = await fetchMassiveDailyAggs({
+          apiKey: config.POLYGON_API_KEY,
           ticker,
           start: rangeStart,
           end: rangeEnd,

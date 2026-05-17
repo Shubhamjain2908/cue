@@ -25,7 +25,7 @@
     "rebuild:native": "pnpm rebuild better-sqlite3"
   },
   "dependencies": {
-    "@massive.com/client-js": "^10.7.0",
+    "axios": "^1.7.0",
     "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",

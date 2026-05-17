@@ -38,9 +38,8 @@ export const massiveStocksAggResultSchema = z.object({
 export type MassiveStocksAggResult = z.infer<typeof massiveStocksAggResultSchema>;
 
 /**
- * Envelope for Massive stocks aggregates (v2 aggs-style JSON).
- * `next_url` may be present when more pages exist; the official client with
- * `pagination: true` follows it and returns a merged payload.
+ * Envelope for Massive `GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}` JSON.
+ * When `next_url` is set, the fetcher loads further pages with axios (see `src/fetcher/index.ts`).
  */
 export const massiveStocksAggregatesResponseSchema = z
   .object({
@@ -49,6 +48,7 @@ export const massiveStocksAggregatesResponseSchema = z
     adjusted: z.boolean().optional(),
     queryCount: z.number().optional(),
     resultsCount: z.number().optional(),
+    count: z.number().optional(),
     request_id: z.string().optional(),
     results: z.array(massiveStocksAggResultSchema).optional(),
     next_url: z.string().optional(),
