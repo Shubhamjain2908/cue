@@ -14,6 +14,7 @@ import { computeBacktestMetrics, cagrPct } from "./metrics.js";
 import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
+  BACKTEST_MAX_HOLD_DAYS,
   BACKTEST_POSITION_USD,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
   BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
@@ -76,6 +77,29 @@ function addCalendarDays(iso: string, days: number): string {
   const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const d = String(dt.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * Count the number of dates in `tradingDates` that fall in the range
+ * (entryDate, asOf] — i.e. strictly after entry, up to and including asOf.
+ * Uses the sorted `sortedDates` array already built in runBacktest.
+ */
+function tradingDaysHeld(
+  sortedDates: readonly string[],
+  entryDate: string,
+  asOf: string,
+): number {
+  let count = 0;
+  for (const d of sortedDates) {
+    if (d <= entryDate) {
+      continue;
+    }
+    if (d > asOf) {
+      break;
+    }
+    count++;
+  }
+  return count;
 }
 
 function calendarYearFraction(fromIso: string, toIso: string): number {
@@ -361,7 +385,9 @@ export function runBacktest(
           const openPx = bar.open;
           const gapOrStop = openPx <= pos.stopLevel;
           const standard = pendingStandardExits.has(ticker);
-          if (gapOrStop || standard) {
+          const daysHeld = tradingDaysHeld(sortedDates, pos.entryDate, date);
+          const maxHoldBreached = daysHeld >= BACKTEST_MAX_HOLD_DAYS;
+          if (gapOrStop || standard || maxHoldBreached) {
             const exitFill = openPx * BACKTEST_SLIPPAGE_SELL_MULTIPLIER;
             const proceeds = pos.shares * exitFill;
             cash += proceeds;

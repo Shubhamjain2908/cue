@@ -3,6 +3,11 @@
  * Constants are used by the day-by-day runner; metric shapes are produced by `metrics.ts`.
  */
 
+import { getConfig } from "../config/index.js";
+
+/** Time-based exit: trading days after entry before force-exit at next open (from `MAX_HOLD_DAYS` env). */
+export const BACKTEST_MAX_HOLD_DAYS: number = getConfig().MAX_HOLD_DAYS;
+
 /** §7.2 — fixed USD notional per concurrent position. */
 export const BACKTEST_POSITION_USD = 400;
 
