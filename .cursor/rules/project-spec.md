@@ -73,7 +73,7 @@ Each stage is a discrete TypeScript module callable independently from the CLI. 
 ### 2.1  High-Level Data Flow
 
 ```
-Fetch (Polygon.io OHLCV + Alpha Vantage news/earnings)
+Fetch (Massive.com OHLCV + Alpha Vantage news/earnings)
   → Strategy Engine
   → SQLite
   → AI Enrichment (Claude API)
@@ -96,7 +96,7 @@ Fetch (Polygon.io OHLCV + Alpha Vantage news/earnings)
 
 | Module | Path | Role | CLI Command |
 |---|---|---|---|
-| Fetcher | `src/fetcher/` | Pulls OHLCV from Polygon.io; news/earnings/overview from Alpha Vantage; caches to disk + SQLite | `pnpm run fetch` |
+| Fetcher | `src/fetcher/` | Pulls OHLCV from Massive.com via `axios`; news/earnings/overview from Alpha Vantage; caches to disk + SQLite | `pnpm run fetch` |
 | Strategy | `src/strategy/` | Pure functions: RSI(14), 5-day momentum, volume ratio → signal | `pnpm run screen` |
 | Backtest | `src/backtest/` | Replays strategy on 3–5yr historical data; prints metrics | `pnpm run backtest` |
 | AI Enrichment | `src/ai/` | Calls Claude API per BUY signal: sentiment + earnings + sector | `pnpm run enrich` |
@@ -217,12 +217,12 @@ Cache location: `data/cache/<TICKER>_<endpoint>.json`.
 
 | Data Type | Source | Cache TTL | Rationale |
 |---|---|---|---|
-| OHLCV (daily bars) | Polygon.io | 24h | Full Nasdaq 100 refreshed daily; cache is fallback on API failure |
+| OHLCV (daily bars) | Massive.com | 24h | Full Nasdaq 100 refreshed daily; cache is fallback on API failure |
 | News Sentiment | Alpha Vantage | 24h | Fresh enough for daily signal enrichment |
 | Company Overview | Alpha Vantage | 7 days | Sector/industry is near-static; saves daily API budget |
 | Earnings Calendar | Alpha Vantage | 24h | Must check daily for upcoming earnings within 7 days |
 
-> **Alpha Vantage budget note:** 25 req/day is reserved entirely for enrichment (news, overview, earnings). OHLCV is handled exclusively by Polygon.io. With OVERVIEW cached at 7-day TTL, the effective Alpha Vantage cost per enrichment run is ~1 call per BUY signal (NEWS_SENTIMENT only). EARNINGS_CALENDAR is fetched once per day for the full universe, not per signal.
+> **Alpha Vantage budget note:** 25 req/day is reserved entirely for enrichment (news, overview, earnings). OHLCV is handled exclusively by Massive.com. With OVERVIEW cached at 7-day TTL, the effective Alpha Vantage cost per enrichment run is ~1 call per BUY signal (NEWS_SENTIMENT only). EARNINGS_CALENDAR is fetched once per day for the full universe, not per signal.
 
 ---
 
@@ -230,17 +230,28 @@ Cache location: `data/cache/<TICKER>_<endpoint>.json`.
 
 | Service | Purpose | Tier / Cost | Rate Limit | Env Var |
 |---|---|---|---|---|
-| Polygon.io | OHLCV daily bars for full Nasdaq 100 universe | Free — $0/mo | 5 req/min | `POLYGON_API_KEY` |
+| Massive.com | OHLCV daily bars for full Nasdaq 100 universe | Free — $0/mo | 5 req/min | `POLYGON_API_KEY` (legacy name; key from Massive dashboard) |
 | Alpha Vantage | News sentiment, earnings calendar, company overview (enrichment only) | Free — $0/mo | 25 req/day | `ALPHA_VANTAGE_API_KEY` |
 | Claude API | AI enrichment per BUY signal | ~$3–5/mo | 1000 req/day | `ANTHROPIC_API_KEY` |
 | Telegram Bot API | Alert delivery to personal chat | Free — $0/mo | 30 msg/sec | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | financialmodelingprep.com | Nasdaq 100 constituent list (one-time static JSON seed) | Free endpoint | One-time only | — (seed only) |
 
-### 5.1  Polygon.io Endpoints Used
+### 5.1  Massive.com — Daily aggregates (REST)
 
-| Endpoint | Function | Parameters | Used In |
-|---|---|---|---|
-| `/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}` | OHLCV daily bars | `adjusted=true&sort=asc&limit=5000` | fetcher, backtest |
+**Base:** `https://api.massive.com`  
+**Path:** `/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}` with `{from}` / `{to}` as `YYYY-MM-DD`.
+
+**Query parameters:** `adjusted=true`, `sort=asc`, `limit` (per page, up to 50_000), `apiKey` (same value as env `POLYGON_API_KEY`).
+
+**Pagination:** Responses may include `next_url`. The fetcher follows each page with `axios`, merges `results` (deduped by bar timestamp `t`), and waits **12 seconds** between HTTP calls so the free tier (5 req/min) is respected—including between `next_url` pages and between tickers on cache miss.
+
+```bash
+curl -s "https://api.massive.com/v2/aggs/ticker/AAPL/range/1/day/2025-11-03/2025-11-28?adjusted=true&sort=asc&limit=120&apiKey=$POLYGON_API_KEY"
+```
+
+Implementation lives in `src/fetcher/index.ts` using **`axios` only** (no Massive vendor SDK).
+
+> **Credentials:** Environment variable remains `POLYGON_API_KEY` for compatibility; keys are created in the [Massive dashboard](https://massive.com/) (Polygon.io rebranded to Massive on Oct 30, 2025; existing keys continue to work).
 
 ### 5.2  Alpha Vantage Endpoints Used
 
@@ -299,8 +310,8 @@ interface AIEnrichment {
 ### 6.1  Universe
 
 - **Nasdaq 100 constituents** — static JSON at `data/universe/nasdaq100.json`, refreshed manually each quarter.
-- **Full 100-ticker OHLCV refresh daily** via Polygon.io (5 req/min → completes in ~20 minutes).
-- No batching required — Polygon free tier has no daily call cap.
+- **Full 100-ticker OHLCV refresh daily** via Massive.com (5 req/min → completes in ~20 minutes).
+- No batching required — Massive free tier has no daily call cap.
 
 ### 6.2  Signal Rules — Exact Implementation
 
@@ -438,7 +449,7 @@ Enrichment runs after signals are written to SQLite. Processes only rows where `
 | Materials | Materials Select Sector SPDR | XLB |
 | Communication Services | Communication Services SPDR | XLC |
 
-> Sector ETF OHLCV is fetched via Polygon.io alongside the main universe — once per day, cached 24h. Sector 5-day performance is computed from `daily_prices` table, not via a separate API call.
+> Sector ETF OHLCV is fetched via Massive.com alongside the main universe — once per day, cached 24h. Sector 5-day performance is computed from `daily_prices` table, not via a separate API call.
 
 ---
 
@@ -501,7 +512,7 @@ Single static HTML file at `dist/dashboard.html`. Generated by `src/dashboard/ge
 
 | Variable | Required | Description |
 |---|---|---|
-| `POLYGON_API_KEY` | ✅ | Free API key from polygon.io — no daily call cap |
+| `POLYGON_API_KEY` | ✅ | Massive.com REST API key ([dashboard](https://massive.com/)); env name unchanged from Polygon.io era — no daily call cap |
 | `ALPHA_VANTAGE_API_KEY` | ✅ | Free key from alphavantage.co — 25 req/day; reserved for enrichment only |
 | `ANTHROPIC_API_KEY` | ✅ | Claude API key from console.anthropic.com |
 | `TELEGRAM_BOT_TOKEN` | ✅ | Bot token from @BotFather on Telegram |
@@ -527,7 +538,7 @@ Single static HTML file at `dist/dashboard.html`. Generated by `src/dashboard/ge
 | Package | Version | Purpose | Justification |
 |---|---|---|---|
 | `better-sqlite3` | ^9.x | SQLite client | Synchronous, zero-config, well-typed. No async overhead for local DB. |
-| `axios` | ^1.x | HTTP client | Interceptors for retry/backoff on Polygon + Alpha Vantage calls. |
+| `axios` | ^1.x | HTTP client | Massive OHLCV `GET /v2/aggs/...` + `next_url` pagination in `src/fetcher/index.ts`; Alpha Vantage wiring may share the same client. |
 | `node-cron` | ^3.x | Cron scheduler | In-process scheduling for daily pipeline at 4:10 PM ET. |
 | `dotenv` | ^16.x | Env var loading | Standard `.env` loading. |
 | `zod` | ^3.x | Runtime validation | Validates all external API responses. Prevents silent bad data. |
@@ -552,9 +563,9 @@ Single static HTML file at `dist/dashboard.html`. Generated by `src/dashboard/ge
 
 | Failure Mode | Behaviour | Implementation |
 |---|---|---|
-| Polygon.io rate limit (429) | Exponential backoff: 1s → 2s → 4s, max 3 retries | axios interceptor in `src/fetcher/` |
-| Polygon.io data gap | Skip ticker, log warning, continue pipeline | Guard in `src/strategy/signals.ts` |
-| Alpha Vantage 429 | Exponential backoff: 1s → 2s → 4s, max 3 retries | axios interceptor in `src/fetcher/` |
+| Massive.com rate limit (429) | Log warning; fixed 12s spacing between **every** OHLCV HTTP request (`next_url` pages and between tickers on cache miss) | `src/fetcher/index.ts` |
+| Massive.com data gap | Skip ticker, log warning, continue pipeline | Guard in `src/strategy/signals.ts` |
+| Alpha Vantage 429 | Exponential backoff: 1s → 2s → 4s, max 3 retries | Planned: HTTP client layer in `src/fetcher/` or `src/ai/` |
 | Alpha Vantage daily limit (25 req) | Stop enrichment fetches, use cached data, log warning | Cache-first check before every call |
 | Claude API failure | Log error, write signal without enrichment, alert without AI context | try/catch in `src/ai/enrichment.ts` |
 | Claude API returns invalid JSON | Retry once with same prompt, then skip enrichment | `zod.safeParse()` with fallback |
@@ -601,7 +612,7 @@ pnpm run backtest --from 2022-01-01 --to 2023-12-31  # prints metrics, writes to
 | SQLite schema | `src/db/` | `schema.ts` creates all 5 tables on first run | Tables exist after `pnpm run db:init` |
 | Indicator functions | `src/strategy/` | `rsi14()`, `momentum5d()`, `volumeRatio()` as pure functions | All unit tests pass |
 | Signal engine | `src/strategy/` | `generateSignal()` returns `BUY`\|`SELL`\|`HOLD` for given price array | All signal unit tests pass |
-| Polygon fetcher | `src/fetcher/` | Fetches + caches OHLCV for single ticker; writes to SQLite | `pnpm run fetch --ticker AAPL` works |
+| Massive OHLCV fetcher | `src/fetcher/` | Fetches + caches OHLCV for single ticker; writes to SQLite | `pnpm run fetch --ticker AAPL` works |
 | Full universe fetch | `src/fetcher/` | Fetches all 100 Nasdaq 100 tickers daily; respects 5 req/min limit | Completes without 429 errors |
 | Backtest runner | `src/backtest/` | Replays strategy, prints CAGR, drawdown, win rate, Sharpe vs SPY | `pnpm run backtest` completes |
 
@@ -678,7 +689,7 @@ If any gate fails, adjust RSI/momentum thresholds and re-run. Do not proceed to 
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Polygon.io free tier degradation or policy change | Low | Free tier currently unlimited daily calls at 5 req/min. Monitor; upgrade to Starter ($29/mo) if needed. |
+| Massive.com free tier degradation or policy change | Low | Free tier currently unlimited daily calls at 5 req/min. Monitor; upgrade to Starter ($29/mo) if needed. |
 | Alpha Vantage 25 req/day exhausted | Low | Reserved for enrichment only. OVERVIEW cached 7 days. ~1 call per BUY signal. |
 | Claude API returns invalid JSON | Low | `zod.safeParse()` with retry + graceful degradation to alert without AI context. |
 | RSI miscalculation from data gaps | Low | Min 28 bars required; ticker skipped if gap detected. |
@@ -698,7 +709,7 @@ This system is a personal research tool. It does not constitute financial advice
 | Command | Description |
 |---|---|
 | `pnpm run db:init` | Create SQLite schema — run once on initial setup |
-| `pnpm run fetch` | Fetch full Nasdaq 100 universe OHLCV via Polygon.io |
+| `pnpm run fetch` | Fetch full Nasdaq 100 universe OHLCV via Massive.com |
 | `pnpm run fetch --ticker AAPL` | Fetch single ticker (dev/test) |
 | `pnpm run screen` | Run signal engine on all cached tickers, write to DB |
 | `pnpm run backtest` | Replay strategy on full historical data, print metrics |

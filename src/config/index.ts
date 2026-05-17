@@ -4,6 +4,7 @@ import { z } from "zod";
 loadDotenv();
 
 const envSchema = z.object({
+  /** Massive.com REST key (https://massive.com/; rebranded from Polygon.io; same key). */
   POLYGON_API_KEY: z.string().min(1),
   ALPHA_VANTAGE_API_KEY: z.string().min(1),
   ANTHROPIC_API_KEY: z.string().min(1),
