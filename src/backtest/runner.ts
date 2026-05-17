@@ -278,10 +278,30 @@ export function runBacktest(
   const dataFrom = addCalendarDays(fromDate, -WARMUP_CALENDAR_DAYS);
   const dataTo = addCalendarDays(toDate, SETTLEMENT_EXTENSION_CALENDAR_DAYS);
   const rows = hydrateDailyPrices(db, allTickers, dataFrom, dataTo);
+  if (rows.length === 0) {
+    const span = db
+      .prepare(`SELECT MIN(date) AS lo, MAX(date) AS hi FROM daily_prices`)
+      .get() as { lo: string | null; hi: string | null };
+    console.warn(
+      [
+        "Backtest: hydrated 0 OHLCV rows (nothing to simulate).",
+        `Requested hydrate window: ${dataFrom} → ${dataTo} (warmup + settlement padding).`,
+        span.lo && span.hi
+          ? `Table daily_prices overall: ${span.lo} → ${span.hi}.`
+          : "Table daily_prices is empty.",
+        "Align --from/--to with loaded data, or run fetch for that range.",
+      ].join("\n"),
+    );
+  }
   const { byTicker, byDate } = indexByTickerAndDate(rows);
   const sortedDates = [...byDate.keys()].sort(compareIsoDate);
 
   const qqqBars = byTicker.get(BACKTEST_BENCHMARK_TICKER) ?? [];
+  if (rows.length > 0 && qqqBars.length === 0) {
+    console.warn(
+      `Backtest: no ${BACKTEST_BENCHMARK_TICKER} bars in the hydrated window; benchmark CAGR will be n/a (fetch ${BACKTEST_BENCHMARK_TICKER} for a baseline).`,
+    );
+  }
   const yearFraction = calendarYearFraction(fromDate, toDate);
   const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate, yearFraction);
 
@@ -477,8 +497,15 @@ if (isMain) {
     const result = runBacktest(db, from, to);
     printSummary(from, to, result.metrics, result.benchmarkCagrPct);
 
+    if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
+      console.warn(
+        "Backtest: 0 round-trip trades — no BUY signals passed the RSI/momentum/volume gates on this window and universe (strategy stayed in cash).",
+      );
+    }
+
     const runDate = new Date().toISOString().slice(0, 10);
-    insertBacktestRun(db, {
+    const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
+    const { lastInsertRowid } = insertBacktestRun(db, {
       runDate,
       fromDate: from,
       toDate: to,
@@ -489,6 +516,9 @@ if (isMain) {
       totalTrades: result.metrics.totalTrades,
       benchmarkCagr: realOrZero(result.benchmarkCagrPct),
     });
+    console.log(
+      `Saved backtest run to SQLite (id=${lastInsertRowid.toString()}, file=${dbAbsPath}). Point sqlite-cue / other tools at this path.`,
+    );
   } finally {
     db.close();
   }
