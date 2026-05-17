@@ -1,0 +1,50 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# local data (keep seeded universe + cache placeholder)
+data/cache/*
+!data/cache/.gitkeep
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.vscode/
+
+# coverage / caches
+coverage/
+.nyc_output/
+.cache/
+.turbo/
+
+# briefing artifacts
+briefings/
+
+spec/
+.cursor/plans/
+sync-db-to-vm.sh
+sync-env-to-vm.sh
