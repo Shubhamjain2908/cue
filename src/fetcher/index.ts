@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import axios from "axios";
+import {
+  GetStocksAggregatesSortEnum,
+  GetStocksAggregatesTimespanEnum,
+  restClient,
+} from "@massive.com/client-js";
 import Database from "better-sqlite3";
 import { z } from "zod";
 import winston from "winston";
@@ -17,15 +21,15 @@ import {
 import {
   type CachedOhlcvBundle,
   type DailyOhlcvBar,
-  polygonAggsResponseSchema,
-  type PolygonAggResult,
+  massiveStocksAggregatesResponseSchema,
+  type MassiveStocksAggResult,
 } from "./types.js";
 
 const universeSchema = z.object({
   tickers: z.array(z.string().min(1)),
 });
 
-const POLYGON_BASE = "https://api.polygon.io";
+const MASSIVE_REST_BASE = "https://api.massive.com";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -72,7 +76,7 @@ function barDateFromUnixMs(t: number): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-function mapPolygonResultsToBars(results: PolygonAggResult[]): DailyOhlcvBar[] {
+function mapMassiveResultsToBars(results: MassiveStocksAggResult[]): DailyOhlcvBar[] {
   const bars = results.map((r) => ({
     date: barDateFromUnixMs(r.t),
     open: r.o,
@@ -113,37 +117,47 @@ function openDb(dbPath: string): InstanceType<typeof Database> {
   return db;
 }
 
-async function fetchPolygonDailyAggs(input: {
-  apiKey: string;
-  ticker: string;
-  start: string;
-  end: string;
-}): Promise<DailyOhlcvBar[]> {
-  const url = `${POLYGON_BASE}/v2/aggs/ticker/${encodeURIComponent(
-    input.ticker,
-  )}/range/1/day/${input.start}/${input.end}`;
-  const response = await axios.get<unknown>(url, {
-    params: {
-      adjusted: "true",
-      sort: "asc",
-      apiKey: input.apiKey,
-    },
-    timeout: 60_000,
-    validateStatus: () => true,
-  });
-  if (response.status !== 200) {
-    throw new Error(
-      `Polygon HTTP ${String(response.status)}: ${JSON.stringify(response.data)}`,
-    );
+type MassiveRestClient = ReturnType<typeof restClient>;
+
+async function fetchMassiveDailyAggs(
+  rest: MassiveRestClient,
+  input: {
+    ticker: string;
+    start: string;
+    end: string;
+  },
+): Promise<DailyOhlcvBar[]> {
+  let response: unknown;
+  try {
+    response = await rest.getStocksAggregates({
+      stocksTicker: input.ticker,
+      multiplier: 1,
+      timespan: GetStocksAggregatesTimespanEnum.Day,
+      from: input.start,
+      to: input.end,
+      adjusted: true,
+      sort: GetStocksAggregatesSortEnum.Asc,
+      limit: 50_000,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Massive getStocksAggregates request failed: ${msg}`);
   }
-  const parsed = polygonAggsResponseSchema.safeParse(response.data);
+
+  const parsed = massiveStocksAggregatesResponseSchema.safeParse(response);
   if (!parsed.success) {
     throw new Error(
-      `Polygon response validation failed: ${parsed.error.message}`,
+      `Massive response validation failed: ${parsed.error.message}`,
     );
   }
-  const results = parsed.data.results ?? [];
-  return mapPolygonResultsToBars(results);
+  const body = parsed.data;
+  if (body.status !== undefined && body.status.toUpperCase() === "ERROR") {
+    throw new Error(
+      `Massive aggregates error: ${JSON.stringify(response)}`,
+    );
+  }
+  const results = body.results ?? [];
+  return mapMassiveResultsToBars(results);
 }
 
 async function run(): Promise<void> {
@@ -160,6 +174,10 @@ async function run(): Promise<void> {
   const rangeEnd = rangeEndYmd();
   const rangeStart = rangeStartYmdFiveYears(rangeEnd);
 
+  const rest = restClient(config.POLYGON_API_KEY, MASSIVE_REST_BASE, {
+    pagination: true,
+  });
+
   const db = openDb(config.DB_PATH);
   try {
     for (let i = 0; i < tickers.length; i++) {
@@ -171,7 +189,7 @@ async function run(): Promise<void> {
         rangeEnd,
       );
       if (cached !== null) {
-        logger.info("OHLCV cache hit; skipping API", {
+        logger.info("OHLCV cache hit; skipping Massive API", {
           ticker,
           rangeStart,
           rangeEnd,
@@ -182,8 +200,7 @@ async function run(): Promise<void> {
 
       let bars: DailyOhlcvBar[] = [];
       try {
-        bars = await fetchPolygonDailyAggs({
-          apiKey: config.POLYGON_API_KEY,
+        bars = await fetchMassiveDailyAggs(rest, {
           ticker,
           start: rangeStart,
           end: rangeEnd,
@@ -196,7 +213,7 @@ async function run(): Promise<void> {
         };
         writeCachedOhlcv(config.CACHE_DIR, bundle);
         insertDailyPrices(db, ticker, bars);
-        logger.info("Fetched OHLCV from Polygon", {
+        logger.info("Fetched OHLCV from Massive", {
           ticker,
           barCount: bars.length,
           rangeStart,
@@ -204,7 +221,7 @@ async function run(): Promise<void> {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.warn("Polygon fetch failed; skipping ticker", {
+        logger.warn("Massive fetch failed; skipping ticker", {
           ticker,
           error: message,
         });

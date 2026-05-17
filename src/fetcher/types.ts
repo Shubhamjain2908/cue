@@ -12,7 +12,7 @@ export const dailyOhlcvBarSchema = z.object({
 
 export type DailyOhlcvBar = z.infer<typeof dailyOhlcvBarSchema>;
 
-/** Payload written under `data/cache/` for Polygon daily aggregate ranges. */
+/** Payload written under `data/cache/` for daily aggregate ranges (Massive REST). */
 export const cachedOhlcvBundleSchema = z.object({
   ticker: z.string().min(1),
   rangeStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -22,8 +22,8 @@ export const cachedOhlcvBundleSchema = z.object({
 
 export type CachedOhlcvBundle = z.infer<typeof cachedOhlcvBundleSchema>;
 
-/** Single result object from Polygon `v2/aggs/ticker/.../range/1/day/...`. */
-export const polygonAggResultSchema = z.object({
+/** One aggregate bar from Massive `getStocksAggregates` (fields `o` / `h` / `l` / `c` / `v` / `t`; optional `vw`, `n`, `otc`). */
+export const massiveStocksAggResultSchema = z.object({
   v: z.number(),
   vw: z.number().optional(),
   o: z.number(),
@@ -32,20 +32,29 @@ export const polygonAggResultSchema = z.object({
   l: z.number(),
   t: z.number(),
   n: z.number().optional(),
+  otc: z.boolean().optional(),
 });
 
-export type PolygonAggResult = z.infer<typeof polygonAggResultSchema>;
+export type MassiveStocksAggResult = z.infer<typeof massiveStocksAggResultSchema>;
 
-/** Top-level Polygon aggregates response (fields vary; unknown keys are ignored). */
-export const polygonAggsResponseSchema = z
+/**
+ * Envelope for Massive stocks aggregates (v2 aggs-style JSON).
+ * `next_url` may be present when more pages exist; the official client with
+ * `pagination: true` follows it and returns a merged payload.
+ */
+export const massiveStocksAggregatesResponseSchema = z
   .object({
     ticker: z.string().optional(),
     status: z.string().optional(),
     adjusted: z.boolean().optional(),
     queryCount: z.number().optional(),
     resultsCount: z.number().optional(),
-    results: z.array(polygonAggResultSchema).optional(),
+    request_id: z.string().optional(),
+    results: z.array(massiveStocksAggResultSchema).optional(),
+    next_url: z.string().optional(),
   })
   .passthrough();
 
-export type PolygonAggsResponse = z.infer<typeof polygonAggsResponseSchema>;
+export type MassiveStocksAggregatesResponse = z.infer<
+  typeof massiveStocksAggregatesResponseSchema
+>;
