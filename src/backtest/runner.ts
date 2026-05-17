@@ -14,6 +14,7 @@ import { computeBacktestMetrics, cagrPct } from "./metrics.js";
 import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
+  BACKTEST_MAX_HOLD_DAYS,
   BACKTEST_POSITION_USD,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
   BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
@@ -78,6 +79,29 @@ function addCalendarDays(iso: string, days: number): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Count the number of dates in `tradingDates` that fall in the range
+ * (entryDate, asOf] — i.e. strictly after entry, up to and including asOf.
+ * Uses the sorted `sortedDates` array already built in runBacktest.
+ */
+function tradingDaysHeld(
+  sortedDates: readonly string[],
+  entryDate: string,
+  asOf: string,
+): number {
+  let count = 0;
+  for (const d of sortedDates) {
+    if (d <= entryDate) {
+      continue;
+    }
+    if (d > asOf) {
+      break;
+    }
+    count++;
+  }
+  return count;
+}
+
 function calendarYearFraction(fromIso: string, toIso: string): number {
   const raw = (parseIsoUtcMs(toIso) - parseIsoUtcMs(fromIso)) / 86_400_000 / 365.25;
   return Math.max(raw, 1e-9);
@@ -95,6 +119,23 @@ function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): num
       lo = mid + 1;
     } else {
       hi = mid - 1;
+    }
+  }
+  return ans;
+}
+
+/** Smallest index with `bars[i].date >= from` (bars sorted by date ascending). */
+function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): number {
+  let lo = 0;
+  let hi = bars.length - 1;
+  let ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid]!.date >= from) {
+      ans = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
     }
   }
   return ans;
@@ -126,10 +167,10 @@ function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
 function thresholdsFromConfig(): SignalThresholds {
   const c = getConfig();
   return {
-    buyRsiMax: c.BUY_RSI_THRESHOLD,
-    buyMomentumMaxPct: c.BUY_MOMENTUM_THRESHOLD,
+    buyRsiMin: c.BUY_RSI_THRESHOLD,
+    buyMomentumMinPct: c.BUY_MOMENTUM_THRESHOLD,
     buyVolumeRatioMin: c.BUY_VOLUME_RATIO,
-    exitRsiMin: c.EXIT_RSI_THRESHOLD,
+    exitRsiMax: c.EXIT_RSI_THRESHOLD,
     stopLossPct: c.STOP_LOSS_PCT,
   };
 }
@@ -196,16 +237,23 @@ function benchmarkBuyHoldCagrPct(
   qqqBars: readonly DailyBar[],
   fromDate: string,
   toDate: string,
-  yearFraction: number,
 ): number | null {
-  const ubFrom = upperBoundInclusiveByDate(qqqBars, fromDate);
-  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
-  if (ubFrom < 0 || ubTo < 0 || ubFrom > ubTo) {
+  if (qqqBars.length === 0) {
     return null;
   }
-  const start = qqqBars[ubFrom]!.close;
+  // First bar on or after `fromDate`. Using upperBound(fromDate) fails when the
+  // benchmark’s first print is after the window start (e.g. QQQ from 2021-05-17 vs --from 2021-01-01).
+  const lbFrom = lowerBoundInclusiveByDate(qqqBars, fromDate);
+  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
+  if (lbFrom < 0 || ubTo < 0 || lbFrom > ubTo) {
+    return null;
+  }
+  const start = qqqBars[lbFrom]!.close;
   const end = qqqBars[ubTo]!.close;
-  return cagrPct(start, end, yearFraction);
+  const spanFrom = qqqBars[lbFrom]!.date;
+  const spanTo = qqqBars[ubTo]!.date;
+  const yf = calendarYearFraction(spanFrom, spanTo);
+  return cagrPct(start, end, yf);
 }
 
 function fmtPct(x: number | null, digits = 2): string {
@@ -303,7 +351,7 @@ export function runBacktest(
     );
   }
   const yearFraction = calendarYearFraction(fromDate, toDate);
-  const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate, yearFraction);
+  const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate);
 
   let cash = INITIAL_CASH_USD;
   const positions = new Map<string, SimPosition>();
@@ -337,7 +385,9 @@ export function runBacktest(
           const openPx = bar.open;
           const gapOrStop = openPx <= pos.stopLevel;
           const standard = pendingStandardExits.has(ticker);
-          if (gapOrStop || standard) {
+          const daysHeld = tradingDaysHeld(sortedDates, pos.entryDate, date);
+          const maxHoldBreached = daysHeld >= BACKTEST_MAX_HOLD_DAYS;
+          if (gapOrStop || standard || maxHoldBreached) {
             const exitFill = openPx * BACKTEST_SLIPPAGE_SELL_MULTIPLIER;
             const proceeds = pos.shares * exitFill;
             cash += proceeds;

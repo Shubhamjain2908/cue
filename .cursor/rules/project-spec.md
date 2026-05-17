@@ -1,6 +1,6 @@
 # US EQUITY SIGNAL SYSTEM — Cue
 **Technical Specification & Architecture Document**
-*Version 1.1 · May 2026 · Phase-Wise Build Plan*
+*Version 1.2 · May 2026 · Phase-Wise Build Plan*
 
 | | |
 |---|---|
@@ -40,7 +40,7 @@
 
 This document is the single source of truth for the US Equity Signal System (**Cue**). It defines every component, interface, data flow, API contract, strategy rule, and phased delivery milestone required to implement the system from scratch using Cursor AI.
 
-The system screens the **Nasdaq 100** universe daily, generates quantitative BUY/SELL signals from a RSI + momentum strategy, enriches each signal with AI-driven news sentiment and earnings context, and delivers actionable alerts to the owner via Telegram. All trade execution is manual — the owner places orders independently via the IndMoney app.
+The system screens the **Nasdaq 100** universe daily, generates quantitative BUY/SELL signals from a momentum breakout strategy, enriches each signal with AI-driven news sentiment and earnings context, and delivers actionable alerts to the owner via Telegram. All trade execution is manual — the owner places orders independently via the IndMoney app.
 
 ### 1.1  Goals
 
@@ -321,16 +321,27 @@ interface AIEnrichment {
 
 | Condition | Formula | Threshold | Rationale |
 |---|---|---|---|
-| Oversold RSI | RSI(14) using Wilder's smoothed method on adjusted close | < 35 | Stock is technically oversold vs recent 14-day range |
-| Short-term selloff | `(close_today − close_5d_ago) / close_5d_ago × 100` | < −8% | Meaningful dip, not just normal noise |
-| Volume confirmation | `avg(volume, 20d) / avg(volume, 60d)` | > 1.5× | Elevated volume confirms institutional activity |
+| Momentum RSI | RSI(14) using Wilder's smoothed method on adjusted close | > 60 | Stock is in confirmed upward momentum, not yet exhausted |
+| Short-term breakout | `(close_today − close_5d_ago) / close_5d_ago × 100` | > +3% | Meaningful upward move confirming trend direction |
+| Volume confirmation | `avg(volume, 20d) / avg(volume, 60d)` | > 1.3× | Above-average volume confirms institutional participation |
 
 #### EXIT Signal — EITHER condition triggers exit
 
 | Condition | Formula | Threshold | Type |
 |---|---|---|---|
-| RSI recovery | RSI(14) on adjusted close | > 60 | Take-profit — stock exits oversold territory |
+| Momentum fade | RSI(14) on adjusted close | < 45 | Take-profit — momentum is losing steam |
 | Stop-loss hit | `(current_price − entry_price) / entry_price × 100` | < −5% | Hard stop — capital preservation |
+| Max hold breach | Trading days held since entry | ≥ MAX_HOLD_DAYS | Time stop — prevents dead-money positions |
+
+#### Strategy Rationale
+
+Nasdaq 100 is a structural momentum index. Backtesting on 2021–2025 data
+demonstrated that RSI dip-buying on individual growth stocks produces negative
+edge (CAGR −2%, win rate 17–28%) because deep dips with elevated volume in
+growth names are more often distribution events than reversal setups.
+A momentum/breakout signal — buying confirmed strength with volume — aligns
+with the index's structural bias and exit on momentum fade rather than RSI
+recovery.
 
 #### HOLD Signal
 
@@ -348,7 +359,8 @@ In live manual execution, stop-loss is monitored at end-of-day close. If close a
 | Max concurrent positions | 5 | Hard cap — alert suppressed if `positions WHERE status='OPEN'` count ≥ 5 |
 | Total capital deployed | ~$2,500 USD | Maps to ₹2L at current exchange rates |
 | Stop-loss level | Entry price × 0.95 | Stored in `signals` table; shown in Telegram alert |
-| Take-profit indicator | RSI(14) > 60 | Informational — not a hard price target |
+| Momentum fade indicator | RSI(14) < 45 | Informational — weakening momentum, not a hard price target |
+| Max hold period | `MAX_HOLD_DAYS` trading days | Time-based stop; force-exit at next-day open if breached |
 
 ### 6.4  Indicator Implementation Details
 
@@ -389,7 +401,7 @@ volume_ratio = avg(volume, last 20 days) / avg(volume, last 60 days)
 
 ### 7.1  Scope
 
-Validates the RSI + momentum strategy on 3–5 years of historical daily data. Uses OHLCV already stored in SQLite. The runner is a pure replay — iterates day-by-day, applies signal rules, simulates trades, and computes portfolio metrics.
+Validates the momentum breakout strategy (RSI > 60, 5d momentum > +3%, volume ratio > 1.3×; exit on RSI < 45 or −5% stop or MAX_HOLD_DAYS breach) on 3–5 years of historical daily data. Uses OHLCV already stored in SQLite. The runner is a pure replay — iterates day-by-day, applies signal rules, simulates trades, and computes portfolio metrics.
 
 ### 7.2  Simulation Rules
 
@@ -401,7 +413,7 @@ Validates the RSI + momentum strategy on 3–5 years of historical daily data. U
 - **No other transaction costs** in v1
 - **Max 5 concurrent open positions** enforced in simulation — new BUY is skipped if 5 are already open
 
-> **Future enhancement (Phase 2+):** Add max gap filter — if next-day open > 2% above prior close, skip entry. Prevents chasing gap-up opens that invalidate the oversold premise.
+> **Future enhancement (Phase 2+):** Add max gap filter — if next-day open > 2% above prior close, skip entry. Prevents chasing gap-up opens that overextend the breakout setup.
 
 ### 7.3  Output Metrics
 
@@ -523,10 +535,11 @@ Single static HTML file at `dist/dashboard.html`. Generated by `src/dashboard/ge
 | `MAX_POSITIONS` | — | Max concurrent open positions. Default: `5` |
 | `POSITION_SIZE_USD` | — | Fixed trade size in USD. Default: `400` |
 | `STOP_LOSS_PCT` | — | Stop-loss % below entry. Default: `5` |
-| `BUY_RSI_THRESHOLD` | — | RSI below this = oversold. Default: `35` |
-| `BUY_MOMENTUM_THRESHOLD` | — | 5-day return below this = selloff. Default: `-8` |
-| `BUY_VOLUME_RATIO` | — | Volume ratio above this = confirmation. Default: `1.5` |
-| `EXIT_RSI_THRESHOLD` | — | RSI above this = take profit. Default: `60` |
+| `BUY_RSI_THRESHOLD` | — | RSI above this = momentum confirmed. Default: `60` |
+| `BUY_MOMENTUM_THRESHOLD` | — | 5-day return above this % = breakout. Default: `3` |
+| `BUY_VOLUME_RATIO` | — | Volume ratio above this = confirmation. Default: `1.3` |
+| `EXIT_RSI_THRESHOLD` | — | RSI below this = momentum fading, exit. Default: `45` |
+| `MAX_HOLD_DAYS` | — | Force-exit after this many trading days. Default: `20` |
 | `LOG_LEVEL` | — | `debug` \| `info` \| `warn` \| `error`. Default: `info` |
 
 ---
@@ -605,6 +618,9 @@ pnpm run backtest --from 2022-01-01 --to 2023-12-31  # prints metrics, writes to
 ### Phase 1 — Core Signal Engine
 
 > **Goal:** A working backtest proves the strategy has edge before any live data flows.
+>
+> Validates the momentum breakout strategy (RSI > 60, 5d momentum > +3%,
+> volume ratio > 1.3×; exit on RSI < 45 or −5% stop or MAX_HOLD_DAYS breach)
 
 | Task | Module | Deliverable | Done When |
 |---|---|---|---|
@@ -694,6 +710,7 @@ If any gate fails, adjust RSI/momentum thresholds and re-run. Do not proceed to 
 | Claude API returns invalid JSON | Low | `zod.safeParse()` with retry + graceful degradation to alert without AI context. |
 | RSI miscalculation from data gaps | Low | Min 28 bars required; ticker skipped if gap detected. |
 | Backtest overfitting | Medium | Mandatory 6-month hold-out validation before Phase 2. |
+| Momentum strategy chases late-cycle entries near tops | Medium | MAX_HOLD_DAYS cap limits exposure per position. Monitor max drawdown gate (< 25%) in backtest; re-evaluate thresholds if breached. |
 | VPS downtime missing daily run | Low | PM2 auto-restart. Manual re-run via SSH as fallback. |
 | Survivorship bias in backtest | Medium | Backtest uses current Nasdaq 100 constituents only. CAGR likely overstated by 2–4% annually. Treat results as directional, not precise. Document known limitation. |
 | Stop-loss gap-down fill | Low | Backtest uses next-day open if below stop level. Live mode sends 2% proximity warning — user must act manually. |
@@ -723,4 +740,22 @@ This system is a personal research tool. It does not constitute financial advice
 
 ---
 
-*© 2026 · Private & Confidential · Cue v1.1*
+## Changelog
+
+### v1.2 — May 2026
+- Section 6.2: Replaced RSI dip-buy signal with momentum breakout signal.
+  BUY now requires RSI > 60 + 5d momentum > +3% + volume ratio > 1.3×.
+  EXIT take-profit changed from RSI > 60 to RSI < 45 (momentum fade).
+- Section 6.2: Added MAX_HOLD_DAYS time-based exit (default 20 trading days).
+- Section 6.3: Added MAX_HOLD_DAYS to position sizing table.
+- Section 11.1: Updated default values for BUY_RSI_THRESHOLD (35→60),
+  BUY_MOMENTUM_THRESHOLD (-8→3), BUY_VOLUME_RATIO (1.5→1.3),
+  EXIT_RSI_THRESHOLD (60→45). Added MAX_HOLD_DAYS=20.
+- Section 17.1: Added momentum late-entry risk note.
+- Rationale: 5-year backtest (2021–2025) showed dip-buy produced CAGR −2%,
+  win rate 17–28% on Nasdaq 100. Momentum strategy better fits the index's
+  structural upward bias.
+
+---
+
+*© 2026 · Private & Confidential · Cue v1.2*

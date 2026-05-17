@@ -33,7 +33,7 @@ function decideSide(
   const { rsi14: rsi, momentum5dPct: mom, volumeRatio: vol, lastClose } = metrics;
 
   if (position !== undefined && lastClose !== null) {
-    if (rsi !== null && rsi > thresholds.exitRsiMin) {
+    if (rsi !== null && rsi < thresholds.exitRsiMax) {
       return "SELL";
     }
     const stopReturnPct =
@@ -46,9 +46,9 @@ function decideSide(
 
   const buyOk =
     rsi !== null &&
-    rsi < thresholds.buyRsiMax &&
+    rsi > thresholds.buyRsiMin &&
     mom !== null &&
-    mom < thresholds.buyMomentumMaxPct &&
+    mom > thresholds.buyMomentumMinPct &&
     vol !== null &&
     vol > thresholds.buyVolumeRatioMin;
 
@@ -56,8 +56,8 @@ function decideSide(
 }
 
 /**
- * Pure signal engine: maps OHLCV arrays to BUY | SELL | HOLD using Cue spec §6.2–6.4.
- * No I/O, persistence, or environment reads — pass thresholds explicitly.
+ * Pure signal engine: maps OHLCV arrays to BUY | SELL | HOLD (momentum breakout entry,
+ * RSI fade + stop exit). Pass thresholds explicitly — no env reads.
  */
 export function generateSignal(input: {
   close: readonly number[];
