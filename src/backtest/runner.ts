@@ -100,6 +100,23 @@ function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): num
   return ans;
 }
 
+/** Smallest index with `bars[i].date >= from` (bars sorted by date ascending). */
+function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): number {
+  let lo = 0;
+  let hi = bars.length - 1;
+  let ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid]!.date >= from) {
+      ans = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return ans;
+}
+
 function sliceClosesVolumes(
   bars: readonly DailyBar[],
   asOf: string,
@@ -196,16 +213,23 @@ function benchmarkBuyHoldCagrPct(
   qqqBars: readonly DailyBar[],
   fromDate: string,
   toDate: string,
-  yearFraction: number,
 ): number | null {
-  const ubFrom = upperBoundInclusiveByDate(qqqBars, fromDate);
-  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
-  if (ubFrom < 0 || ubTo < 0 || ubFrom > ubTo) {
+  if (qqqBars.length === 0) {
     return null;
   }
-  const start = qqqBars[ubFrom]!.close;
+  // First bar on or after `fromDate`. Using upperBound(fromDate) fails when the
+  // benchmark’s first print is after the window start (e.g. QQQ from 2021-05-17 vs --from 2021-01-01).
+  const lbFrom = lowerBoundInclusiveByDate(qqqBars, fromDate);
+  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
+  if (lbFrom < 0 || ubTo < 0 || lbFrom > ubTo) {
+    return null;
+  }
+  const start = qqqBars[lbFrom]!.close;
   const end = qqqBars[ubTo]!.close;
-  return cagrPct(start, end, yearFraction);
+  const spanFrom = qqqBars[lbFrom]!.date;
+  const spanTo = qqqBars[ubTo]!.date;
+  const yf = calendarYearFraction(spanFrom, spanTo);
+  return cagrPct(start, end, yf);
 }
 
 function fmtPct(x: number | null, digits = 2): string {
@@ -303,7 +327,7 @@ export function runBacktest(
     );
   }
   const yearFraction = calendarYearFraction(fromDate, toDate);
-  const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate, yearFraction);
+  const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate);
 
   let cash = INITIAL_CASH_USD;
   const positions = new Map<string, SimPosition>();
