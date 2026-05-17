@@ -17,10 +17,10 @@ const envSchema = z.object({
   POSITION_SIZE_USD: z.coerce.number().positive().default(400),
   STOP_LOSS_PCT: z.coerce.number().positive().default(5),
   MAX_HOLD_DAYS: z.coerce.number().int().positive().default(20),
-  BUY_RSI_THRESHOLD: z.coerce.number().default(35),
-  BUY_MOMENTUM_THRESHOLD: z.coerce.number().default(-8),
-  BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.5),
-  EXIT_RSI_THRESHOLD: z.coerce.number().default(60),
+  BUY_RSI_THRESHOLD: z.coerce.number().default(60),
+  BUY_MOMENTUM_THRESHOLD: z.coerce.number().default(3),
+  BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.3),
+  EXIT_RSI_THRESHOLD: z.coerce.number().default(45),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),

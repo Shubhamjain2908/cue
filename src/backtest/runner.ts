@@ -167,10 +167,10 @@ function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
 function thresholdsFromConfig(): SignalThresholds {
   const c = getConfig();
   return {
-    buyRsiMax: c.BUY_RSI_THRESHOLD,
-    buyMomentumMaxPct: c.BUY_MOMENTUM_THRESHOLD,
+    buyRsiMin: c.BUY_RSI_THRESHOLD,
+    buyMomentumMinPct: c.BUY_MOMENTUM_THRESHOLD,
     buyVolumeRatioMin: c.BUY_VOLUME_RATIO,
-    exitRsiMin: c.EXIT_RSI_THRESHOLD,
+    exitRsiMax: c.EXIT_RSI_THRESHOLD,
     stopLossPct: c.STOP_LOSS_PCT,
   };
 }
