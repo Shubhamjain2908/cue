@@ -1,0 +1,116 @@
+import Database from "better-sqlite3";
+import { describe, expect, it } from "vitest";
+
+import {
+  closePosition,
+  insertPosition,
+  insertSignal,
+  listUnenrichedBuySignals,
+  markSignalAlerted,
+} from "../../src/db/queries.js";
+import { initSchema } from "../../src/db/schema.js";
+
+type SqliteConnection = InstanceType<typeof Database>;
+
+function openMemoryDb(): SqliteConnection {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  initSchema(db);
+  return db;
+}
+
+const sampleSignal = {
+  ticker: "TEST",
+  date: "2024-06-01",
+  signal: "BUY" as const,
+  price: 100,
+  rsi14: 30,
+  momentum5d: -10,
+  volumeRatio: 2,
+  stopLoss: 95,
+};
+
+describe("db queries", () => {
+  it("inserts a signal", () => {
+    const db = openMemoryDb();
+    const { changes } = insertSignal(db, sampleSignal);
+    expect(changes).toBe(1);
+    const row = db
+      .prepare(`SELECT ticker, date, signal, alerted FROM signals WHERE ticker = ?`)
+      .get(sampleSignal.ticker) as { ticker: string; date: string; signal: string; alerted: number };
+    expect(row.signal).toBe("BUY");
+    expect(row.alerted).toBe(0);
+    db.close();
+  });
+
+  it("ignores duplicate signal for same ticker and date", () => {
+    const db = openMemoryDb();
+    expect(insertSignal(db, sampleSignal).changes).toBe(1);
+    expect(insertSignal(db, sampleSignal).changes).toBe(0);
+    const count = db.prepare(`SELECT COUNT(*) AS c FROM signals`).get() as { c: number };
+    expect(count.c).toBe(1);
+    db.close();
+  });
+
+  it("lists BUY signals without enrichments", () => {
+    const db = openMemoryDb();
+    insertSignal(db, { ...sampleSignal, date: "2024-06-01" });
+    insertSignal(db, { ...sampleSignal, date: "2024-06-02", rsi14: 31 });
+
+    const firstId = (
+      db.prepare(`SELECT id FROM signals WHERE date = '2024-06-01'`).get() as { id: number }
+    ).id;
+    const secondId = (
+      db.prepare(`SELECT id FROM signals WHERE date = '2024-06-02'`).get() as { id: number }
+    ).id;
+
+    db.prepare(
+      `
+      INSERT INTO enrichments (signal_id, sentiment, rationale, headlines)
+      VALUES (@signalId, 'NEUTRAL', 'ok', @headlines)
+    `,
+    ).run({
+      signalId: firstId,
+      headlines: JSON.stringify(["h1", "h2", "h3"]),
+    });
+
+    const pending = listUnenrichedBuySignals(db);
+    expect(pending).toEqual([{ id: secondId, ticker: "TEST", date: "2024-06-02" }]);
+    db.close();
+  });
+
+  it("marks a signal as alerted", () => {
+    const db = openMemoryDb();
+    insertSignal(db, sampleSignal);
+    const id = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
+    markSignalAlerted(db, id);
+    const alerted = (db.prepare(`SELECT alerted FROM signals WHERE id = ?`).get(id) as {
+      alerted: number;
+    }).alerted;
+    expect(alerted).toBe(1);
+    db.close();
+  });
+
+  it("inserts a position and closes it", () => {
+    const db = openMemoryDb();
+    insertSignal(db, sampleSignal);
+    const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
+
+    const { lastInsertRowid } = insertPosition(db, {
+      signalId,
+      entryDate: "2024-06-03",
+      entryPrice: 99,
+      status: "OPEN",
+    });
+    const positionId = Number(lastInsertRowid);
+
+    closePosition(db, positionId, "2024-06-10", 105);
+    const row = db
+      .prepare(`SELECT status, exit_date, exit_price FROM positions WHERE id = ?`)
+      .get(positionId) as { status: string; exit_date: string | null; exit_price: number | null };
+    expect(row.status).toBe("CLOSED");
+    expect(row.exit_date).toBe("2024-06-10");
+    expect(row.exit_price).toBe(105);
+    db.close();
+  });
+});
