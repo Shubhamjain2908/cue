@@ -60,6 +60,26 @@ describe("createLlmProviderFromEnv", () => {
     expect(createLlmProviderFromEnv().name).toBe("google");
   });
 
+  it("returns vertex provider", () => {
+    setProviderEnv({
+      LLM_PROVIDER: "vertex",
+      VERTEX_PROJECT_ID: "test-project-123",
+    });
+    delete process.env.ANTHROPIC_API_KEY;
+    resetConfigCache();
+    expect(createLlmProviderFromEnv().name).toBe("vertex");
+  });
+
+  it("throws when vertex project id missing", () => {
+    setProviderEnv({
+      LLM_PROVIDER: "vertex",
+      VERTEX_PROJECT_ID: "",
+    });
+    delete process.env.ANTHROPIC_API_KEY;
+    resetConfigCache();
+    expect(() => createLlmProviderFromEnv()).toThrow(/VERTEX_PROJECT_ID/);
+  });
+
   it("throws when anthropic key missing", () => {
     setProviderEnv({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "" });
     expect(() => createLlmProviderFromEnv()).toThrow(/ANTHROPIC_API_KEY/);
