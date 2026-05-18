@@ -9,7 +9,10 @@ import { getConfig } from "../config/index.js";
 import { insertBacktestRun } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
 import { sma } from "../strategy/indicators.js";
-import { generateSignal } from "../strategy/signals.js";
+import {
+  createBuyGateFirstFailCounters,
+  generateSignal,
+} from "../strategy/signals.js";
 import type { SignalThresholds } from "../strategy/types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
 import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
@@ -320,6 +323,7 @@ export function runBacktest(
   }
 
   const thresholds = thresholdsFromConfig();
+  const buyGateFirstFail = createBuyGateFirstFailCounters();
   const universe = loadUniverseTickers();
   const allTickers = [...new Set([...universe, BACKTEST_BENCHMARK_TICKER])].sort((a, b) =>
     a.localeCompare(b),
@@ -524,6 +528,7 @@ export function runBacktest(
           volume: sliced.volume,
           thresholds,
           positionOpen: openPos !== undefined,
+          buyGateFirstFail,
         });
 
         if (openPos === undefined) {
@@ -588,6 +593,13 @@ export function runBacktest(
     exitCountStandardSell;
   const entryTotal =
     entryAboveSma200 + entryBelowSma200 + entryInsufficientSma200;
+  const buyGatePartitionSum =
+    buyGateFirstFail.failedSma200 +
+    buyGateFirstFail.failedSma50 +
+    buyGateFirstFail.failedRsiCeiling +
+    buyGateFirstFail.failedRsiTurn +
+    buyGateFirstFail.failedVolume +
+    buyGateFirstFail.passedAll;
   console.log(
     [
       "",
@@ -603,6 +615,16 @@ export function runBacktest(
       `  belowSma200 (entry <= SMA200): ${String(entryBelowSma200)}`,
       `  insufficientData (SMA200 null): ${String(entryInsufficientSma200)}`,
       `  sum of above:                   ${String(entryTotal)} (buy fills counted)`,
+      "",
+      "BUY gate first-fail (EOD signal pass, !open, len(closes) >= 200; first failure only):",
+      `  failedSma200:     ${String(buyGateFirstFail.failedSma200)}`,
+      `  failedSma50:      ${String(buyGateFirstFail.failedSma50)}`,
+      `  failedRsiCeiling: ${String(buyGateFirstFail.failedRsiCeiling)}`,
+      `  failedRsiTurn:    ${String(buyGateFirstFail.failedRsiTurn)}`,
+      `  failedVolume:     ${String(buyGateFirstFail.failedVolume)}`,
+      `  passedAll:        ${String(buyGateFirstFail.passedAll)}`,
+      `  (six-way sum):    ${String(buyGatePartitionSum)}`,
+      `  skippedNullIndicators: ${String(buyGateFirstFail.skippedNullIndicators)} (null SMA/RSI/volumeRatio; not in six-way sum)`,
     ].join("\n"),
   );
 
