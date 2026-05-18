@@ -117,8 +117,7 @@ export function decideSide(
 
   if (positionOpen) {
     const takeProfit = rsiToday >= thresholds.exitRsiThreshold;
-    const trendBreak = today < sma50;
-    if (takeProfit || trendBreak) {
+    if (takeProfit) {
       return "SELL";
     }
   }
@@ -166,7 +165,7 @@ export interface GenerateSignalInput {
 
 /**
  * Pure signal engine: exhaustion entry (trend + RSI turn + volume) and
- * RSI / short-SMA exits when `positionOpen` is true. Runner applies gap/stop
+ * RSI take-profit exit when `positionOpen` is true. Runner applies gap/stop
  * and max-hold at execution.
  */
 export function generateSignal(input: GenerateSignalInput): SignalDecision {

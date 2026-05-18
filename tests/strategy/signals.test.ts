@@ -87,15 +87,6 @@ describe("decideSide() — Exhaustion Entry", () => {
     expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("SELL");
   });
 
-  it("returns SELL when price crosses below SMA50 (trend break)", () => {
-    // Uptrend then sharp drop below SMA10
-    const base = makeCloses(205, 100, 0.3);
-    const crash = [base.at(-1)! - 10, base.at(-1)! - 12]; // below SMA10
-    const closes = [...base, ...crash];
-    const volumes = makeVolumes(closes.length);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("SELL");
-  });
-
   it("returns HOLD for open position when no exit condition is met", () => {
     // Oscillate with mild drift: RSI mid-range, last close above SMA10 and SMA200
     const closes = Array.from({ length: 210 }, (_, i) =>
