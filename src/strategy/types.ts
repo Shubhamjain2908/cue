@@ -37,24 +37,25 @@ export const DEFAULT_SIGNAL_THRESHOLDS: SignalThresholds = {
 export interface RankingConfig {
   lookbackDays: number; // default: 252  (12 months)
   skipDays: number; // default: 21   (1 month skip — avoids mean reversion)
-  topN: number; // default: 5
+  topN: number; // default: 3 (Test 7/8 locked)
   rebalanceDayOfWeek: number; // default: 5    (1=Mon … 5=Fri)
-  // Risk management (per §6.3)
+  // Risk management (per §6.3; ATR multipliers / tighten — Test 7/8 locked)
   atrPeriod: number; // default: 14
-  atrMultiplierBase: number; // default: 2.0
+  atrMultiplierBase: number; // default: 4.0
   atrMultiplierTight: number; // default: 1.5
-  atrTightenThresholdPct: number; // default: 15.0
-  maxHoldDays: number; // default: 40   (circuit breaker only)
+  atrTightenThresholdPct: number; // default: 25.0
+  maxHoldDays: number; // default: 40   (circuit breaker; Test 8)
   smaPeriod: number; // default: 200  (QQQ regime gate only)
 }
 
+/** Empirically validated defaults (Tests 7/8). */
 export const DEFAULT_RANKING_CONFIG: RankingConfig = {
   lookbackDays: 252,
   skipDays: 21,
-  topN: 5,
+  topN: 3,
   rebalanceDayOfWeek: 5,
   atrPeriod: 14,
-  atrMultiplierBase: 3.5,
+  atrMultiplierBase: 4.0,
   atrMultiplierTight: 1.5,
   atrTightenThresholdPct: 25.0,
   maxHoldDays: 40,
