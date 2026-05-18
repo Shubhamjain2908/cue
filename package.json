@@ -20,7 +20,8 @@
     "backtest": "tsx src/backtest/runner.ts",
     "enrich": "tsx src/ai/enrichment.ts",
     "alert": "tsx src/alerts/telegram.ts",
-    "dashboard": "tsx src/dashboard/generator.ts",
+    "dashboard": "tsx src/dashboard/index.ts",
+    "dashboard:open": "tsx src/dashboard/index.ts --open",
     "pipeline": "tsx src/pipeline.ts",
     "rebuild:native": "pnpm rebuild better-sqlite3"
   },

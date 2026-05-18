@@ -786,6 +786,7 @@ if (isMain) {
       sharpeRatio: realOrZero(result.metrics.sharpeRatio),
       totalTrades: result.metrics.totalTrades,
       benchmarkCagr: realOrZero(result.benchmarkCagrPct),
+      expectancy: realOrZero(expectancyPctPerTrade),
     });
     console.log(
       `Saved backtest run to SQLite (id=${lastInsertRowid.toString()}, file=${dbAbsPath}). Point sqlite-cue / other tools at this path.`,
