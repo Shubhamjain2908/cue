@@ -86,6 +86,7 @@ export function decideSide(
   const sma200 = sma(200, closes);
   const rsiToday = rsi14(closes);
   const rsiYest = rsi14(closes.slice(0, -1));
+  const rsi2DaysAgo = rsi14(closes.slice(0, -2));
   const volRatio = volumeRatio(volumes);
 
   if (
@@ -97,6 +98,7 @@ export function decideSide(
       sma200 === null ||
       rsiToday === null ||
       rsiYest === null ||
+      rsi2DaysAgo === null ||
       volRatio === null
     ) {
       buyGateFirstFail.skippedNullIndicators += 1;
@@ -106,7 +108,7 @@ export function decideSide(
       buyGateFirstFail.failedSma50 += 1;
     } else if (rsiToday > thresholds.buyRsiMax) {
       buyGateFirstFail.failedRsiCeiling += 1;
-    } else if (rsiToday <= rsiYest) {
+    } else if (!(rsiToday > rsiYest && rsiYest > rsi2DaysAgo)) {
       buyGateFirstFail.failedRsiTurn += 1;
     } else if (volRatio < thresholds.buyVolumeRatio) {
       buyGateFirstFail.failedVolume += 1;
@@ -120,6 +122,7 @@ export function decideSide(
     sma200 === null ||
     rsiToday === null ||
     rsiYest === null ||
+    rsi2DaysAgo === null ||
     volRatio === null
   ) {
     return { side: "HOLD" };
@@ -140,7 +143,7 @@ export function decideSide(
     const aboveSma200 = today > sma200;
     const aboveSma50 = today > sma50;
     const inPullback = rsiToday <= thresholds.buyRsiMax;
-    const rsiTurning = rsiToday > rsiYest;
+    const rsiTurning = rsiToday > rsiYest && rsiYest > rsi2DaysAgo;
     const volumeOk = volRatio >= thresholds.buyVolumeRatio;
     if (
       aboveSma200 &&
@@ -178,7 +181,7 @@ export interface GenerateSignalInput {
 }
 
 /**
- * Pure signal engine: exhaustion entry (trend + RSI turn + volume) and
+ * Pure signal engine: exhaustion entry (trend + two-day RSI turn + volume) and
  * RSI take-profit or short-SMA trend-break exit when `positionOpen` is true.
  * Runner applies gap/stop and max-hold at execution.
  */
