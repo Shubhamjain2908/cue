@@ -15,7 +15,11 @@ import {
 } from "../strategy/signals.js";
 import type { SignalThresholds } from "../strategy/types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
-import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
+import type {
+  BacktestExitReason,
+  ClosedBacktestTrade,
+  EquityPoint,
+} from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
   BACKTEST_MAX_HOLD_DAYS,
@@ -104,6 +108,70 @@ function tradingDaysHeld(
     count++;
   }
   return count;
+}
+
+/** Count of `sortedDates` in [entryDate, exitDate] inclusive (diagnostic hold span). */
+function tradingDaysHeldInclusive(
+  sortedDates: readonly string[],
+  entryDate: string,
+  exitDate: string,
+): number {
+  let count = 0;
+  for (const d of sortedDates) {
+    if (d < entryDate) {
+      continue;
+    }
+    if (d > exitDate) {
+      break;
+    }
+    count++;
+  }
+  return count;
+}
+
+function logExitDiagnostics(
+  sortedDates: readonly string[],
+  closedTrades: readonly ClosedBacktestTrade[],
+): void {
+  const sums = {
+    gapOrStop: { hold: 0, pnlPct: 0, n: 0 },
+    maxHoldDays: { hold: 0, pnlPct: 0, n: 0 },
+    standardSell: { hold: 0, pnlPct: 0, n: 0 },
+  };
+  for (const t of closedTrades) {
+    const bucket = sums[t.exitReason];
+    const holdDays = tradingDaysHeldInclusive(sortedDates, t.entryDate, t.exitDate);
+    const pnlPct =
+      t.entryFillPrice !== 0
+        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+        : 0;
+    bucket.hold += holdDays;
+    bucket.pnlPct += pnlPct;
+    bucket.n += 1;
+  }
+  const lines = [
+    "",
+    "avgHoldDays by exit type (TEMP diagnostic; inclusive trading days entryDate→exitDate):",
+  ];
+  const order: BacktestExitReason[] = ["gapOrStop", "maxHoldDays", "standardSell"];
+  for (const key of order) {
+    const { hold, n } = sums[key];
+    const avgHold = n > 0 ? hold / n : 0;
+    const label =
+      key === "standardSell" ? "pendingStandardExits" : key;
+    const note =
+      key === "maxHoldDays" ? "  (max-hold rule uses days after entry; inclusive span is often +1)" : "";
+    lines.push(`  ${label.padEnd(22, " ")}${avgHold.toFixed(2)} days avg${note}`);
+  }
+  lines.push("", "avg P&L % by exit type (TEMP diagnostic; (exitFill − entryFill) / entryFill × 100):");
+  for (const key of order) {
+    const { pnlPct, n } = sums[key];
+    const avgPnl = n > 0 ? pnlPct / n : 0;
+    const label =
+      key === "standardSell" ? "pendingStandardExits" : key;
+    lines.push(`  ${label.padEnd(22, " ")}${avgPnl.toFixed(2)}%  (n=${String(n)})`);
+  }
+  console.log(lines.join("\n"));
 }
 
 function calendarYearFraction(fromIso: string, toIso: string): number {
@@ -426,6 +494,9 @@ export function runBacktest(
               entryDate: pos.entryDate,
               exitDate: date,
               realizedPnlUsd: proceeds - costBasis,
+              exitReason,
+              entryFillPrice: pos.entryFillPrice,
+              exitFillPrice: exitFill,
             });
             positions.delete(ticker);
             pendingStandardExits.delete(ticker);
@@ -602,6 +673,8 @@ export function runBacktest(
       `  skippedNullIndicators: ${String(buyGateFirstFail.skippedNullIndicators)} (null SMA/RSI/volumeRatio; not in six-way sum)`,
     ].join("\n"),
   );
+
+  logExitDiagnostics(sortedDates, closedTrades);
 
   return { equityPoints, closedTrades, metrics, benchmarkCagrPct, yearFraction };
 }

@@ -37,6 +37,9 @@ export interface EquityPoint {
   equityUsd: number;
 }
 
+/** Exit path at next open (see `runBacktest` priority chain). */
+export type BacktestExitReason = "gapOrStop" | "maxHoldDays" | "standardSell";
+
 /** A completed round-trip from the simulator (win rate uses `realizedPnlUsd`). */
 export interface ClosedBacktestTrade {
   ticker: string;
@@ -44,6 +47,10 @@ export interface ClosedBacktestTrade {
   exitDate: string;
   /** Cash P&L for this position after slippage, vs flat cash baseline (not annualized). */
   realizedPnlUsd: number;
+  /** Fills used for round-trip % diagnostics (slippage-adjusted opens). */
+  exitReason: BacktestExitReason;
+  entryFillPrice: number;
+  exitFillPrice: number;
 }
 
 /** Values aligned with `backtest_runs` / CLI output: rates as percentage points (e.g. 12.3 = 12.3%). */
