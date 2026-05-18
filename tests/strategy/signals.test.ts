@@ -17,7 +17,7 @@ function makeVolumes(length: number, base = 1_000_000): number[] {
 describe("decideSide() — Exhaustion Entry", () => {
   const thresholds: SignalThresholds = {
     smaPeriod: 10, // short period so tests don't need 50+ bars
-    buyRsiMax: 50,
+    buyRsiMax: 60,
     buyVolumeRatio: 1.2,
     exitRsiThreshold: 70,
     stopLossPct: 5,
@@ -43,7 +43,7 @@ describe("decideSide() — Exhaustion Entry", () => {
   });
 
   it("returns HOLD when price is above SMA200/SMA10 but RSI > buyRsiMax (too hot)", () => {
-    // Steep uptrend: RSI will be well above 50
+    // Steep uptrend: RSI will be well above buyRsiMax (60)
     const closes = makeCloses(210, 100, 1.5);
     const volumes = makeVolumes(210);
     expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toBe("HOLD");
@@ -87,6 +87,14 @@ describe("decideSide() — Exhaustion Entry", () => {
     expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("SELL");
   });
 
+  it("returns SELL when price crosses below SMA50 (trend break)", () => {
+    const base = makeCloses(225, 100, 0.3);
+    const crash = [base.at(-1)! - 10, base.at(-1)! - 12];
+    const closes = [...base, ...crash];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("SELL");
+  });
+
   it("returns HOLD for open position when no exit condition is met", () => {
     // Oscillate with mild drift: RSI mid-range, last close above SMA10 and SMA200
     const closes = Array.from({ length: 210 }, (_, i) =>
@@ -100,7 +108,7 @@ describe("decideSide() — Exhaustion Entry", () => {
 describe("regime filter", () => {
   const thresholds: SignalThresholds = {
     smaPeriod: 10,
-    buyRsiMax: 50,
+    buyRsiMax: 60,
     buyVolumeRatio: 1.2,
     exitRsiThreshold: 70,
     stopLossPct: 5,
