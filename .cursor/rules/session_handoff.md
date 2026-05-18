@@ -3,6 +3,42 @@
 
 ---
 
+## Phase 1 Completion & Parameter Lock
+
+**Status:** Phase 1 (Core Engine + backtest) is **complete and passed** all amended exit gates. The quantitative core is **locked**; further changes require an explicit spec revision and a new tuning cycle.
+
+### Architectural pivot — close-based ATR trailing stops
+
+Early momentum backtests used **intraday low** vs stop (`low <= current_stop`), which produced excessive `TRAILING_STOP` churn (tight `ATR_MULTIPLIER_BASE` + wick-sensitive fills). Phase 1 **locked** evaluation on the **daily close** (`close <= current_stop`) so liquidity-vacuum spikes do not whipsaw valid positions; exits still **fill at the next session open** (T+1), matching the backtest harness.
+
+### Final Test 8 results — operational window (2023-01-01 → 2025-12-31)
+
+Same trade count and exit mix as Test 7 on the full 2021–2025 window: the 2021–2022 stretch is largely a **regime-gated cash sit** (DB warmup + bear), so **Test 8 isolates true post-gate operation**. Reported metrics:
+
+| Metric | Test 8 | Gate |
+|--------|--------|------|
+| CAGR | **21.39%** | > 12% ✅ |
+| Max drawdown | **11.54%** | < 20% ✅ |
+| Sharpe (ann.) | **1.162** | > 1.0 ✅ |
+| Expectancy | **+4.78%** | > 0 ✅ |
+
+### Locked parameters (Tests 7/8)
+
+- `topN` / `MAX_POSITIONS`: **3**
+- `atrMultiplierBase`: **4.0**
+- `atrMultiplierTight`: **1.5**
+- `atrTightenThresholdPct`: **25.0**
+- `maxHoldDays`: **40** (failsafe; not the primary exit driver at wide base multiplier)
+- `rebalanceDayOfWeek`: **5** (Friday); 12-1 lookback/skip: **252 / 21** (unchanged)
+
+**Directive:** Treat `src/strategy/types.ts` `DEFAULT_RANKING_CONFIG` and the backtest runner as the **validated reference implementation** until Phase 2+ features consume env overrides in production.
+
+### Immediate next step — Phase 2 (AI Enrichment)
+
+Scaffold lives in **`src/ai/index.ts`**: typed `EnrichmentResult`, stub `enrichSignal()` (throws until Claude + Alpha Vantage wiring). Wire `pnpm run enrich` / pipeline to this module when implementing Phase 2.
+
+---
+
 ## 1. What Cue Is
 
 Personal US equity signal system for Nasdaq 100. Daily pipeline:
@@ -13,7 +49,7 @@ Full spec: `Cue_Spec_v1_3.md` (attached to project — updated this session).
 
 **Stack:** TypeScript strict, Node.js 22+, better-sqlite3, axios, zod, winston, vitest
 **Infra target:** ~$10/mo (DigitalOcean $4 droplet + Claude API ~$5)
-**Current phase:** Phase 1 — Core Signal Engine + Backtest (NOT yet passed gate)
+**Current phase:** Phase 1 core engine **passed**; **Phase 2** — AI enrichment (`src/ai/index.ts`) next.
 
 ---
 

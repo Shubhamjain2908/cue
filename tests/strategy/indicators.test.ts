@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  atr,
   momentum5d,
   rsi14,
   sma,
@@ -106,5 +107,22 @@ describe("sma()", () => {
 
   it("handles all identical values", () => {
     expect(sma(4, [7, 7, 7, 7])).toBeCloseTo(7);
+  });
+});
+
+describe("atr", () => {
+  it("returns null when insufficient data", () => {
+    const arr10 = new Array(10).fill(100);
+    expect(atr(arr10, arr10, arr10, 14)).toBeNull();
+  });
+
+  it("returns a positive number for valid OHLCV data", () => {
+    const n = 50;
+    const highs = Array.from({ length: n }, (_, i) => 100 + i * 0.5 + 2);
+    const lows = Array.from({ length: n }, (_, i) => 100 + i * 0.5 - 2);
+    const closes = Array.from({ length: n }, (_, i) => 100 + i * 0.5);
+    const result = atr(highs, lows, closes, 14);
+    expect(result).not.toBeNull();
+    expect(result!).toBeGreaterThan(0);
   });
 });

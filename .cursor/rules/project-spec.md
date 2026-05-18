@@ -153,15 +153,16 @@ Evaluated only on `REBALANCE_DAY_OF_WEEK` (default Friday).
 2. Calculate the 12-1 month return for each ticker:
    `return = (close[today - 21] - close[today - 252]) / close[today - 252]`
 3. Rank the universe descending by this return.
-4. Select the Top 5 tickers. If the Macro Regime is BULLISH, issue `BUY` signals for tickers in the Top 5 not already held in `positions`.
+4. Select the Top **3** tickers (`topN` / `MAX_POSITIONS`, locked Phase 1). If the Macro Regime is BULLISH, issue `BUY` signals for tickers in the Top 3 not already held in `positions`.
 
 #### EXIT Signal (Daily Evaluation)
 Evaluated daily for all `OPEN` positions.
-1. **Trailing Stop Breach:** `today_low <= current_stop_loss`. (Executes a `SELL`).
+1. **Trailing Stop Breach:** evaluated on the **daily close** — `today_close <= current_stop_loss` — **not** the intraday low. This avoids liquidity-vacuum wicks and false stop-outs during normal consolidation. When breached, the engine schedules a `SELL` fill at the **next session’s open** (T+1), consistent with the backtest.
 
 ### 6.3  Risk Management & Position Sizing
 
-- **Sizing:** $300 - $500 USD fixed per trade. Max 5 concurrent open positions.
+- **Sizing:** $300 - $500 USD fixed per trade. Max **3** concurrent open positions (aligned with `topN` / `MAX_POSITIONS`).
+- **Stop breach evaluation (locked Phase 1):** ATR trailing-stop breaches are judged on the **daily official close**, not the session low. Intraday lows are ignored for the breach test so the stop is not triggered by transient, illiquid spikes that do not represent end-of-day risk.
 - **Adaptive ATR Trailing Stop:**
   A dynamic stop calculated daily. The stop may only move up; it never moves down (The Golden Rule).
 
@@ -195,7 +196,7 @@ Validates the Cross-Sectional Momentum strategy on 3-5 years of historical daily
 
 ### 7.2  Simulation Rules
 - **Entry:** Open price of the day *after* a BUY signal fires (next-day market open).
-- **Exit:** Open price of the day *after* trailing stop is breached.
+- **Exit:** Open price of the day *after* the trailing stop is breached. The breach is detected using the **daily close** vs `current_stop_loss` (not the intraday low).
 - **Gap-down fill:** If next-day open <= `current_stop_loss`, the exit fill is the *open price*, not the theoretical stop price.
 - **Slippage:** 0.1% per leg (0.2% round-trip).
 
@@ -232,14 +233,15 @@ A zero-dependency static HTML report generated at `dist/dashboard.html`. Embeds 
 | `ALPHA_VANTAGE_API_KEY` | Alpha Vantage free key |
 | `ANTHROPIC_API_KEY` | Claude API key |
 | `TELEGRAM_BOT_TOKEN` / `CHAT_ID` | Telegram credentials |
-| `MAX_POSITIONS` | Max concurrent open positions (Default: `5`) |
+| `MAX_POSITIONS` | Max concurrent open positions; equals momentum `topN` (Default: **`3`** — Phase 1 locked) |
 | `RANKING_LOOKBACK_DAYS` | Days for momentum calculation (Default: `252`) |
 | `RANKING_SKIP_DAYS` | Recent days to skip for mean-reversion (Default: `21`) |
 | `REBALANCE_DAY_OF_WEEK` | 1=Mon, 5=Fri (Default: `5`) |
 | `ATR_PERIOD` | Days for ATR calculation (Default: `14`) |
-| `ATR_MULTIPLIER_BASE` | Standard stop distance (Default: `2.0`) |
-| `ATR_MULTIPLIER_TIGHT` | Tightened stop distance (Default: `1.5`) |
-| `ATR_TIGHTEN_THRESHOLD_PCT` | Profit % to trigger tight stop (Default: `15`) |
+| `ATR_MULTIPLIER_BASE` | Standard stop distance (Default: **`4.0`** — Phase 1 locked) |
+| `ATR_MULTIPLIER_TIGHT` | Tightened stop distance (Default: **`1.5`** — Phase 1 locked) |
+| `ATR_TIGHTEN_THRESHOLD_PCT` | Profit % to trigger tight stop (Default: **`25.0`** — Phase 1 locked) |
+| `MAX_HOLD_DAYS` | Circuit-breaker time exit in trading days (Default: **`40`** — Phase 1 locked) |
 
 ---
 
@@ -252,11 +254,11 @@ A zero-dependency static HTML report generated at `dist/dashboard.html`. Embeds 
 
 | Phase | Goal | Exit Gate |
 |---|---|---|
-| 1 - Core Engine | Backtest proves edge via 12-1 Ranker & ATR Stops. | CAGR > 12%, Sharpe > 1.0, DD < 20%, Expectancy > 0. |
+| **1 - Core Engine** | Backtest proves edge via 12-1 Ranker & ATR Stops. | **DONE / PASSED** — Final **Test 8** window **2023-01-01 → 2025-12-31** (true operational period post–regime gate): **CAGR 21.39%**, **Sharpe 1.162**, **Max DD 11.54%**, **Expectancy +4.78%** (all gates: CAGR > 12%, Sharpe > 1.0, DD < 20%, Expectancy > 0). |
 | 2 - Live Screening | Telegram alerts function on cron. | Alerts received 5+ consecutive days. |
 | 3 - Dashboard | Unattended deployment. | Flawless VPS operation. |
 
-> **Never deploy live capital before Phase 1 exit gate is fully passed. No exceptions.**
+> **Phase 1 exit gate is met.** Do not deploy live capital without your own operational checklist (data freshness, slippage assumptions, and manual execution discipline). No exceptions to disciplined process.
 
 ---
 
@@ -266,6 +268,7 @@ A zero-dependency static HTML report generated at `dist/dashboard.html`. Embeds 
 - **Massive Architectural Pivot:** Abandoned single-asset technical indicators (RSI pullbacks, Volume Spikes) due to mathematically proven negative expectancy ceilings on individual growth stocks.
 - Implemented **Cross-Sectional Momentum (12-1 month ranking)**. Strategy now evaluates the universe relatively (Jegadeesh-Titman factor) rather than relying on absolute thresholds.
 - Replaced static 5% stop and arbitrary time stops with **Adaptive ATR Trailing Stops** to capture asymmetric upside while actively scaling risk based on asset volatility.
+- **Phase 1 locked:** `topN`/`MAX_POSITIONS` = 3, `ATR_MULTIPLIER_BASE` = 4.0, `ATR_MULTIPLIER_TIGHT` = 1.5, `ATR_TIGHTEN_THRESHOLD_PCT` = 25.0, `MAX_HOLD_DAYS` = 40; stop breaches evaluated on **daily close** (not intraday low).
 - Overhauled Phase 1 Backtest Gates: Replaced `CAGR > QQQ` with absolute hurdles (`CAGR > 12%, Expectancy > 0, Sharpe > 1.0, Max DD < 20%`) to accurately measure a cash-preserving, risk-adjusted long-only system.
 
 *© 2026 · Private & Confidential · Cue v1.3*

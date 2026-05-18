@@ -93,3 +93,42 @@ export function volumeRatio(volumes: readonly number[]): number | null {
   }
   return avg20 / avg60;
 }
+
+/**
+ * ATR — Wilder's Smoothed Average True Range (per §6.4)
+ * Requires parallel arrays: highs[i], lows[i], closes[i], all same length.
+ * Returns null if insufficient data (< period + 1 bars).
+ */
+export function atr(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 14,
+): number | null {
+  const n = closes.length;
+  if (n < period + 1) {
+    return null;
+  }
+
+  // True Range series
+  const tr: number[] = [];
+  for (let i = 1; i < n; i++) {
+    tr.push(
+      Math.max(
+        highs[i]! - lows[i]!,
+        Math.abs(highs[i]! - closes[i - 1]!),
+        Math.abs(lows[i]! - closes[i - 1]!),
+      ),
+    );
+  }
+
+  // Seed: simple average of first `period` TR values
+  let atrVal = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+  // Wilder smoothing for remaining bars
+  for (let i = period; i < tr.length; i++) {
+    atrVal = (atrVal * (period - 1) + tr[i]!) / period;
+  }
+
+  return atrVal;
+}
