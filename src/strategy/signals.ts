@@ -15,6 +15,9 @@ import type {
 } from "./types.js";
 import { DEFAULT_SIGNAL_THRESHOLDS } from "./types.js";
 
+/** Long-horizon trend filter (hard gate for BUY); not configurable in v1 Option A+SMA200. */
+const SMA_LONG_FILTER_PERIOD = 200;
+
 export function computeSignalMetrics(input: {
   close: readonly number[];
   volume: readonly number[];
@@ -43,6 +46,11 @@ export function decideSide(
     return "HOLD";
   }
 
+  const smaLong = sma(SMA_LONG_FILTER_PERIOD, closes);
+  if (smaLong === null || today <= smaLong) {
+    return "HOLD";
+  }
+
   const trendAboveSma = today > smaVal;
   const rsiInRange =
     currentRsi >= thresholds.buyRsiMin && currentRsi <= thresholds.buyRsiMax;
@@ -68,8 +76,8 @@ function signalThresholdsFromConfig(): SignalThresholds {
 
 /**
  * Pure signal engine: maps OHLCV arrays to BUY | SELL | HOLD (Option A: trend +
- * pullback entry). Exits from this layer are not used in Option A — the backtest
- * runner applies stop-loss and max-hold. Pass thresholds explicitly — no env reads.
+ * pullback entry, with SMA200 long-trend hard filter). Exits from this layer are
+ * not used in Option A — the backtest runner applies stop-loss and max-hold.
  */
 export function generateSignal(input: {
   close: readonly number[];

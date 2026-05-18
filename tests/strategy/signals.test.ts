@@ -18,8 +18,13 @@ describe("decideSide() — Option A: Trend + Pullback", () => {
   };
 
   it("returns BUY when price > SMA and RSI in [45, 55]", () => {
-    // Choppy climb: keeps RSI near 50 while the last close stays above SMA10.
-    const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i * 0.85) * 1.5 + i * 0.01);
+    // Needs ≥200 bars for SMA200; walk keeps RSI ~49 and price above SMA10 and SMA200.
+    const closes: number[] = [];
+    let x = 100;
+    for (let i = 0; i < 230; i++) {
+      x += 0.05 + Math.sin(i * 0.11) * 0.12;
+      closes.push(x);
+    }
     const result = decideSide(closes, [], thresholds);
     expect(result).toBe("BUY");
   });
@@ -54,8 +59,14 @@ describe("decideSide() — Option A: Trend + Pullback", () => {
     expect(result).toBe("HOLD");
   });
 
-  it("returns HOLD when insufficient data for SMA", () => {
-    // Only 5 bars — SMA10 returns null
+  it("returns HOLD when insufficient data for SMA200 (strict long filter)", () => {
+    // SMA10 + RSI ok on 60 bars, but SMA200 undefined → HOLD
+    const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i * 0.85) * 1.5 + i * 0.01);
+    const result = decideSide(closes, [], thresholds);
+    expect(result).toBe("HOLD");
+  });
+
+  it("returns HOLD when insufficient data for short SMA period", () => {
     const closes = [100, 101, 102, 103, 104];
     const result = decideSide(closes, [], thresholds);
     expect(result).toBe("HOLD");
