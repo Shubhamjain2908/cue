@@ -4,6 +4,9 @@
  */
 export type TradeSignal = "BUY" | "SELL" | "HOLD";
 
+/** Present on `signal: "SELL"` from `decideSide` / `generateSignal` when exiting an open position. */
+export type SignalExitReason = "TAKE_PROFIT" | "TREND_BREAK";
+
 export interface SignalThresholds {
   smaPeriod: number; // Short SMA period (default: 50)
   buyRsiMax: number; // RSI ceiling for pullback entry (default: 60)
@@ -36,4 +39,6 @@ export interface SignalMetrics {
 export interface SignalDecision {
   signal: TradeSignal;
   metrics: SignalMetrics;
+  /** Set when `signal === "SELL"` from the exit path (RSI take-profit vs SMA trend-break). */
+  reason?: SignalExitReason;
 }
