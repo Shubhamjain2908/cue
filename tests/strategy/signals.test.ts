@@ -3,72 +3,102 @@ import { describe, expect, it } from "vitest";
 import { decideSide } from "../../src/strategy/signals.js";
 import type { SignalThresholds } from "../../src/strategy/types.js";
 
-function makeTrendingCloses(length: number, start = 100, step = 0.5): number[] {
-  return Array.from({ length }, (_, i) => start + i * step);
+function makeCloses(length: number, start = 100, step = 0.3): number[] {
+  return Array.from({ length }, (_, i) => +(start + i * step).toFixed(4));
 }
 
-describe("decideSide() — Option A: Trend + Pullback", () => {
+function makeVolumes(length: number, base = 1_000_000): number[] {
+  // Last 20 days elevated vs prior 40 in the 60d window so 20d/60d >= 1.2
+  return Array.from({ length }, (_, i) =>
+    i >= length - 20 ? base * 1.4 : base,
+  );
+}
+
+describe("decideSide() — Exhaustion Entry", () => {
   const thresholds: SignalThresholds = {
     smaPeriod: 10, // short period so tests don't need 50+ bars
-    buyRsiMin: 45,
-    buyRsiMax: 55,
-    exitRsiThreshold: 0,
+    buyRsiMax: 50,
+    buyVolumeRatio: 1.2,
+    exitRsiThreshold: 70,
     stopLossPct: 5,
     maxHoldDays: 20,
   };
 
-  it("returns BUY when price > SMA and RSI in [45, 55]", () => {
-    // Needs ≥200 bars for SMA200; walk keeps RSI ~49 and price above SMA10 and SMA200.
-    const closes: number[] = [];
-    let x = 100;
-    for (let i = 0; i < 230; i++) {
-      x += 0.05 + Math.sin(i * 0.11) * 0.12;
-      closes.push(x);
-    }
-    const result = decideSide(closes, [], thresholds);
-    expect(result).toBe("BUY");
+  // --- ENTRY tests (positionOpen = false) ---
+
+  it("returns HOLD when closes.length < 200", () => {
+    const closes = makeCloses(150);
+    const volumes = makeVolumes(150);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("returns HOLD when price < SMA (downtrend)", () => {
-    // Declining closes: today is always below SMA10
-    const closes = makeTrendingCloses(30, 200, -0.8);
-    const result = decideSide(closes, [], thresholds);
-    expect(result).toBe("HOLD");
+  it("returns HOLD when price is below SMA200 (downtrend)", () => {
+    // Sharp decline: today always below SMA200
+    const closes = makeCloses(210, 200, -0.5);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("returns HOLD when price > SMA but RSI > buyRsiMax (too hot)", () => {
-    // Sharp uptrend: RSI will be well above 55
-    const closes = makeTrendingCloses(30, 100, 2.0);
-    const result = decideSide(closes, [], thresholds);
-    expect(result).toBe("HOLD");
+  it("returns HOLD when price is above SMA200/SMA10 but RSI > buyRsiMax (too hot)", () => {
+    // Steep uptrend: RSI will be well above 50
+    const closes = makeCloses(210, 100, 1.5);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("returns HOLD when price > SMA but RSI < buyRsiMin (too oversold)", () => {
-    // Strong uptrend then sharp 5-day drop: RSI will be < 45 but price may be
-    // above SMA. This tests the lower RSI bound.
-    const base = makeTrendingCloses(25, 100, 1.0);
-    const drop = [
-      base.at(-1)! - 2,
-      base.at(-1)! - 4,
-      base.at(-1)! - 6,
-      base.at(-1)! - 8,
-      base.at(-1)! - 10,
+  it("returns HOLD when volume ratio below buyVolumeRatio", () => {
+    // Flat volumes — ratio will be 1.0
+    const closes = makeCloses(210, 100, 0.2);
+    const volumes = Array(210).fill(1_000_000);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
+  });
+
+  // BUY case: gentle uptrend, dip to cool RSI, then shallow multi-bar recovery so
+  // price clears SMA10 while RSI stays <= buyRsiMax and rsiToday > rsiYest.
+  it("returns BUY when all 5 entry conditions are met", () => {
+    const base = makeCloses(200, 80, 0.25); // gentle uptrend → above SMA200 and SMA10
+    const dip = [
+      base.at(-1)! - 1.5,
+      base.at(-1)! - 2.5,
+      base.at(-1)! - 3.0,
+      base.at(-1)! - 3.5,
+      base.at(-1)! - 4.0,
     ];
-    const closes = [...base, ...drop];
-    const result = decideSide(closes, [], thresholds);
-    expect(result).toBe("HOLD");
+    let last = dip[dip.length - 1]!;
+    const recovery: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      last = +(last + 0.08).toFixed(4);
+      recovery.push(last);
+    }
+    const closes = [...base, ...dip, ...recovery];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("BUY");
   });
 
-  it("returns HOLD when insufficient data for SMA200 (strict long filter)", () => {
-    // SMA10 + RSI ok on 60 bars, but SMA200 undefined → HOLD
-    const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i * 0.85) * 1.5 + i * 0.01);
-    const result = decideSide(closes, [], thresholds);
-    expect(result).toBe("HOLD");
+  // --- EXIT tests (positionOpen = true) ---
+
+  it("returns SELL when RSI >= exitRsiThreshold (take-profit)", () => {
+    // Very steep uptrend at the end: RSI will be >= 70
+    const closes = makeCloses(210, 100, 2.0);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, true)).toBe("SELL");
   });
 
-  it("returns HOLD when insufficient data for short SMA period", () => {
-    const closes = [100, 101, 102, 103, 104];
-    const result = decideSide(closes, [], thresholds);
-    expect(result).toBe("HOLD");
+  it("returns SELL when price crosses below SMA50 (trend break)", () => {
+    // Uptrend then sharp drop below SMA10
+    const base = makeCloses(205, 100, 0.3);
+    const crash = [base.at(-1)! - 10, base.at(-1)! - 12]; // below SMA10
+    const closes = [...base, ...crash];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, thresholds, true)).toBe("SELL");
+  });
+
+  it("returns HOLD for open position when no exit condition is met", () => {
+    // Oscillate with mild drift: RSI mid-range, last close above SMA10 and SMA200
+    const closes = Array.from({ length: 210 }, (_, i) =>
+      +(100 + Math.sin(i * 0.35 + 1.8) * 1.2 + i * 0.015).toFixed(4),
+    );
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, true)).toBe("HOLD");
   });
 });
