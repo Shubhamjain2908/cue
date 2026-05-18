@@ -1,24 +1,26 @@
 export type TradeSignal = "BUY" | "SELL" | "HOLD";
 
 export interface SignalThresholds {
-  /** BUY when RSI is strictly above this value (momentum confirmation; default 60). */
-  buyRsiMin: number;
-  /** BUY when 5d momentum % is strictly above this value (default 3). */
-  buyMomentumMinPct: number;
-  /** BUY when volume ratio is strictly above this value (default 1.3). */
-  buyVolumeRatioMin: number;
-  /** SELL when RSI is strictly below this value (momentum fading; default 45). */
-  exitRsiMax: number;
-  /** SELL when price is down more than this percent from entry (spec default 5). */
-  stopLossPct: number;
+  // Trend filter
+  smaPeriod: number; // SMA period for trend filter (default: 50)
+
+  // Entry: RSI range for pullback within uptrend
+  buyRsiMin: number; // RSI lower bound (default: 45)
+  buyRsiMax: number; // RSI upper bound (default: 55)
+
+  // Exit conditions
+  exitRsiThreshold: number; // Not used in Option A — reserved, keep at 0
+  stopLossPct: number; // Hard stop % below entry (default: 5)
+  maxHoldDays: number; // Time-based exit in trading days (default: 20)
 }
 
 export const DEFAULT_SIGNAL_THRESHOLDS: SignalThresholds = {
-  buyRsiMin: 60,
-  buyMomentumMinPct: 3,
-  buyVolumeRatioMin: 1.3,
-  exitRsiMax: 45,
+  smaPeriod: 50,
+  buyRsiMin: 45,
+  buyRsiMax: 55,
+  exitRsiThreshold: 0,
   stopLossPct: 5,
+  maxHoldDays: 20,
 };
 
 export interface OpenPositionContext {
