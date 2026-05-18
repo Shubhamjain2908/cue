@@ -9,6 +9,30 @@ import { momentum5d, rsi14, sma, volumeRatio } from "./indicators.js";
 import type { SignalDecision, SignalMetrics, SignalThresholds } from "./types.js";
 import { DEFAULT_SIGNAL_THRESHOLDS } from "./types.js";
 
+/** Mutable counters: first failing BUY gate per bar (mutually exclusive when all indicators non-null). */
+export interface BuyGateFirstFailCounters {
+  failedSma200: number;
+  failedSma50: number;
+  failedRsiCeiling: number;
+  failedRsiTurn: number;
+  failedVolume: number;
+  passedAll: number;
+  /** Indicators null; excluded from the six-way first-fail partition. */
+  skippedNullIndicators: number;
+}
+
+export function createBuyGateFirstFailCounters(): BuyGateFirstFailCounters {
+  return {
+    failedSma200: 0,
+    failedSma50: 0,
+    failedRsiCeiling: 0,
+    failedRsiTurn: 0,
+    failedVolume: 0,
+    passedAll: 0,
+    skippedNullIndicators: 0,
+  };
+}
+
 export function computeSignalMetrics(input: {
   close: readonly number[];
   volume: readonly number[];
@@ -28,6 +52,7 @@ export function decideSide(
   volumes: number[],
   thresholds: SignalThresholds,
   positionOpen: boolean,
+  buyGateFirstFail?: BuyGateFirstFailCounters,
 ): "BUY" | "SELL" | "HOLD" {
   if (closes.length < 200) {
     return "HOLD";
@@ -39,6 +64,33 @@ export function decideSide(
   const rsiToday = rsi14(closes);
   const rsiYest = rsi14(closes.slice(0, -1));
   const volRatio = volumeRatio(volumes);
+
+  if (
+    buyGateFirstFail !== undefined &&
+    !positionOpen
+  ) {
+    if (
+      sma50 === null ||
+      sma200 === null ||
+      rsiToday === null ||
+      rsiYest === null ||
+      volRatio === null
+    ) {
+      buyGateFirstFail.skippedNullIndicators += 1;
+    } else if (today <= sma200) {
+      buyGateFirstFail.failedSma200 += 1;
+    } else if (today <= sma50) {
+      buyGateFirstFail.failedSma50 += 1;
+    } else if (rsiToday > thresholds.buyRsiMax) {
+      buyGateFirstFail.failedRsiCeiling += 1;
+    } else if (rsiToday <= rsiYest) {
+      buyGateFirstFail.failedRsiTurn += 1;
+    } else if (volRatio < thresholds.buyVolumeRatio) {
+      buyGateFirstFail.failedVolume += 1;
+    } else {
+      buyGateFirstFail.passedAll += 1;
+    }
+  }
 
   if (
     sma50 === null ||
@@ -100,6 +152,7 @@ export function generateSignal(input: {
   volume: readonly number[];
   thresholds?: SignalThresholds;
   positionOpen?: boolean;
+  buyGateFirstFail?: BuyGateFirstFailCounters;
 }): SignalDecision {
   const thresholds = input.thresholds ?? DEFAULT_SIGNAL_THRESHOLDS;
   const metrics = computeSignalMetrics({
@@ -112,6 +165,7 @@ export function generateSignal(input: {
     [...input.volume],
     thresholds,
     positionOpen,
+    input.buyGateFirstFail,
   );
   return { signal, metrics };
 }
