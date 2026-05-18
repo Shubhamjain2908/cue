@@ -25,10 +25,11 @@ const sampleSignal = {
   date: "2024-06-01",
   signal: "BUY" as const,
   price: 100,
-  rsi14: 30,
-  momentum5d: -10,
-  volumeRatio: 2,
-  stopLoss: 95,
+  momentumRank: 1,
+  universeRankedCount: 50,
+  momentum12_1Return: 0.12,
+  atr14: 2.5,
+  initialAtrStop: 90,
 };
 
 describe("db queries", () => {
@@ -56,7 +57,7 @@ describe("db queries", () => {
   it("lists BUY signals without enrichments", () => {
     const db = openMemoryDb();
     insertSignal(db, { ...sampleSignal, date: "2024-06-01" });
-    insertSignal(db, { ...sampleSignal, date: "2024-06-02", rsi14: 31 });
+    insertSignal(db, { ...sampleSignal, date: "2024-06-02", momentumRank: 2 });
 
     const firstId = (
       db.prepare(`SELECT id FROM signals WHERE date = '2024-06-01'`).get() as { id: number }
