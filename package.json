@@ -23,6 +23,7 @@
     "dashboard": "tsx src/dashboard/index.ts",
     "dashboard:open": "tsx src/dashboard/index.ts --open",
     "pipeline": "tsx src/pipeline.ts",
+    "pipeline:now": "tsx src/pipeline.ts --now",
     "rebuild:native": "pnpm rebuild better-sqlite3"
   },
   "dependencies": {
