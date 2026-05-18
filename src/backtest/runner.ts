@@ -8,25 +8,16 @@ import { z } from "zod";
 import { getConfig } from "../config/index.js";
 import { insertBacktestRun } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
-import { sma } from "../strategy/indicators.js";
-import {
-  createBuyGateFirstFailCounters,
-  generateSignal,
-} from "../strategy/signals.js";
-import type { SignalExitReason, SignalThresholds } from "../strategy/types.js";
+import { atr, sma } from "../strategy/indicators.js";
+import { computeTrailingStop, rankUniverse } from "../strategy/ranker.js";
+import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../strategy/types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
-import type {
-  BacktestExitReason,
-  ClosedBacktestTrade,
-  EquityPoint,
-} from "./types.js";
+import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
-  BACKTEST_MAX_HOLD_DAYS,
-  BACKTEST_POSITION_USD,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
   BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
-  BACKTEST_STOP_LOSS_FRACTION,
+  BACKTEST_POSITION_USD,
 } from "./types.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
@@ -40,10 +31,10 @@ export const BACKTEST_BENCHMARK_TICKER = "QQQ";
 
 const INITIAL_CASH_USD = 2500;
 
-/** Calendar days to pull before `fromDate` for RSI / volume windows. */
-const WARMUP_CALENDAR_DAYS = 200;
+/** Calendar days to pull before `fromDate` for momentum / SMA / ATR windows. */
+const WARMUP_CALENDAR_DAYS = 550;
 
-/** Calendar days after `toDate` to keep simulating T+1 fills for signals on `toDate`. */
+/** Calendar days after `toDate` to simulate pending fills through settlement extension. */
 const SETTLEMENT_EXTENSION_CALENDAR_DAYS = 45;
 
 interface DailyBar {
@@ -60,8 +51,16 @@ interface SimPosition {
   entryDate: string;
   entryFillPrice: number;
   shares: number;
-  stopLevel: number;
+  entryAtr: number;
+  currentStop: number;
+  highestCloseSinceEntry: number;
 }
+
+type StrategyExitReason =
+  | "TRAILING_STOP"
+  | "MAX_HOLD"
+  | "REBALANCE_DROP"
+  | "FORCED_CLOSE";
 
 function compareIsoDate(a: string, b: string): number {
   if (a < b) {
@@ -87,11 +86,15 @@ function addCalendarDays(iso: string, days: number): string {
   return `${y}-${m}-${d}`;
 }
 
-/**
- * Count the number of dates in `tradingDates` that fall in the range
- * (entryDate, asOf] — i.e. strictly after entry, up to and including asOf.
- * Uses the sorted `sortedDates` array already built in runBacktest.
- */
+/** 1 = Monday … 5 = Friday (ISO weekday, matches `Date#getUTCDay()` for Mon–Fri). */
+function isoWeekdayMon1ToFri5(iso: string): number {
+  const dow = new Date(parseIsoUtcMs(iso)).getUTCDay();
+  if (dow === 0 || dow === 6) {
+    return 0;
+  }
+  return dow;
+}
+
 function tradingDaysHeld(
   sortedDates: readonly string[],
   entryDate: string,
@@ -108,79 +111,6 @@ function tradingDaysHeld(
     count++;
   }
   return count;
-}
-
-/** Count of `sortedDates` in [entryDate, exitDate] inclusive (diagnostic hold span). */
-function tradingDaysHeldInclusive(
-  sortedDates: readonly string[],
-  entryDate: string,
-  exitDate: string,
-): number {
-  let count = 0;
-  for (const d of sortedDates) {
-    if (d < entryDate) {
-      continue;
-    }
-    if (d > exitDate) {
-      break;
-    }
-    count++;
-  }
-  return count;
-}
-
-function logExitDiagnostics(
-  sortedDates: readonly string[],
-  closedTrades: readonly ClosedBacktestTrade[],
-): void {
-  const sums = {
-    gapOrStop: { hold: 0, pnlPct: 0, n: 0 },
-    maxHoldDays: { hold: 0, pnlPct: 0, n: 0 },
-    standardTakeProfit: { hold: 0, pnlPct: 0, n: 0 },
-    standardTrendBreak: { hold: 0, pnlPct: 0, n: 0 },
-  };
-  for (const t of closedTrades) {
-    const bucket = sums[t.exitReason];
-    const holdDays = tradingDaysHeldInclusive(sortedDates, t.entryDate, t.exitDate);
-    const pnlPct =
-      t.entryFillPrice !== 0
-        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
-        : 0;
-    bucket.hold += holdDays;
-    bucket.pnlPct += pnlPct;
-    bucket.n += 1;
-  }
-  const lines = [
-    "",
-    "avgHoldDays by exit type (TEMP diagnostic; inclusive trading days entryDate→exitDate):",
-  ];
-  const order: BacktestExitReason[] = [
-    "gapOrStop",
-    "maxHoldDays",
-    "standardTakeProfit",
-    "standardTrendBreak",
-  ];
-  const labelFor = (key: BacktestExitReason): string => {
-    if (key === "standardTakeProfit") return "standard_TAKE_PROFIT";
-    if (key === "standardTrendBreak") return "standard_TREND_BREAK";
-    return key;
-  };
-  for (const key of order) {
-    const { hold, n } = sums[key];
-    const avgHold = n > 0 ? hold / n : 0;
-    const label = labelFor(key).padEnd(22, " ");
-    const note =
-      key === "maxHoldDays" ? "  (max-hold rule uses days after entry; inclusive span is often +1)" : "";
-    lines.push(`  ${label}${avgHold.toFixed(2)} days avg${note}`);
-  }
-  lines.push("", "avg P&L % by exit type (TEMP diagnostic; (exitFill − entryFill) / entryFill × 100):");
-  for (const key of order) {
-    const { pnlPct, n } = sums[key];
-    const avgPnl = n > 0 ? pnlPct / n : 0;
-    const label = labelFor(key).padEnd(22, " ");
-    lines.push(`  ${label}${avgPnl.toFixed(2)}%  (n=${String(n)})`);
-  }
-  console.log(lines.join("\n"));
 }
 
 function calendarYearFraction(fromIso: string, toIso: string): number {
@@ -205,7 +135,6 @@ function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): num
   return ans;
 }
 
-/** Smallest index with `bars[i].date >= from` (bars sorted by date ascending). */
 function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): number {
   let lo = 0;
   let hi = bars.length - 1;
@@ -222,19 +151,12 @@ function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): num
   return ans;
 }
 
-function sliceClosesVolumes(
-  bars: readonly DailyBar[],
-  asOf: string,
-): { close: readonly number[]; volume: readonly number[] } | null {
+function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] | null {
   const ub = upperBoundInclusiveByDate(bars, asOf);
   if (ub < 0) {
     return null;
   }
-  const slice = bars.slice(0, ub + 1);
-  return {
-    close: slice.map((b) => b.close),
-    volume: slice.map((b) => b.volume),
-  };
+  return bars.slice(0, ub + 1);
 }
 
 function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
@@ -245,16 +167,17 @@ function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
   return bars[ub]!.close;
 }
 
-function thresholdsFromConfig(): SignalThresholds {
-  const c = getConfig();
-  return {
-    smaPeriod: c.smaPeriod,
-    buyRsiMax: c.buyRsiMax,
-    buyVolumeRatio: c.buyVolumeRatio,
-    exitRsiThreshold: c.exitRsiThreshold,
-    stopLossPct: c.stopLossPct,
-    maxHoldDays: c.maxHoldDays,
-  };
+function loadQqqTradingDates(
+  db: SqliteConnection,
+  dateFrom: string,
+  dateTo: string,
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT date FROM daily_prices WHERE ticker = ? AND date >= ? AND date <= ? ORDER BY date ASC`,
+    )
+    .all(BACKTEST_BENCHMARK_TICKER, dateFrom, dateTo) as { date: string }[];
+  return rows.map((r) => r.date);
 }
 
 function loadUniverseTickers(): string[] {
@@ -289,22 +212,25 @@ function hydrateDailyPrices(
   return stmt.all(...tickers, dateFrom, dateTo) as DailyBar[];
 }
 
-function indexByTickerAndDate(rows: readonly DailyBar[]): {
-  byTicker: Map<string, DailyBar[]>;
-  byDate: Map<string, Map<string, DailyBar>>;
-} {
+function indexByTicker(rows: readonly DailyBar[]): Map<string, DailyBar[]> {
   const byTicker = new Map<string, DailyBar[]>();
-  const byDate = new Map<string, Map<string, DailyBar>>();
   for (const row of rows) {
     const t = row.ticker.toUpperCase();
-    const d = row.date;
     let arr = byTicker.get(t);
     if (!arr) {
       arr = [];
       byTicker.set(t, arr);
     }
-    arr.push({ ...row, ticker: t, date: d });
+    arr.push({ ...row, ticker: t, date: row.date });
+  }
+  return byTicker;
+}
 
+function indexByDate(rows: readonly DailyBar[]): Map<string, Map<string, DailyBar>> {
+  const byDate = new Map<string, Map<string, DailyBar>>();
+  for (const row of rows) {
+    const t = row.ticker.toUpperCase();
+    const d = row.date;
     let dayMap = byDate.get(d);
     if (!dayMap) {
       dayMap = new Map();
@@ -312,7 +238,7 @@ function indexByTickerAndDate(rows: readonly DailyBar[]): {
     }
     dayMap.set(t, { ...row, ticker: t, date: d });
   }
-  return { byTicker, byDate };
+  return byDate;
 }
 
 function benchmarkBuyHoldCagrPct(
@@ -323,8 +249,6 @@ function benchmarkBuyHoldCagrPct(
   if (qqqBars.length === 0) {
     return null;
   }
-  // First bar on or after `fromDate`. Using upperBound(fromDate) fails when the
-  // benchmark’s first print is after the window start (e.g. QQQ from 2021-05-17 vs --from 2021-01-01).
   const lbFrom = lowerBoundInclusiveByDate(qqqBars, fromDate);
   const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
   if (lbFrom < 0 || ubTo < 0 || lbFrom > ubTo) {
@@ -352,11 +276,37 @@ function fmtNum(x: number | null, digits = 3): string {
   return x.toFixed(digits);
 }
 
+function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitReason"] {
+  switch (r) {
+    case "TRAILING_STOP":
+      return "gapOrStop";
+    case "MAX_HOLD":
+      return "maxHoldDays";
+    case "REBALANCE_DROP":
+      return "standardTrendBreak";
+    case "FORCED_CLOSE":
+      return "standardTakeProfit";
+  }
+}
+
+function mean(nums: readonly number[]): number | null {
+  if (nums.length === 0) {
+    return null;
+  }
+  let s = 0;
+  for (const n of nums) {
+    s += n;
+  }
+  return s / nums.length;
+}
+
 function printSummary(
   fromDate: string,
   toDate: string,
   metrics: ReturnType<typeof computeBacktestMetrics>,
   benchmarkCagrPct: number | null,
+  expectancyPctPerTrade: number | null,
+  exitBuckets: Record<StrategyExitReason, number>,
 ): void {
   const rows: [string, string][] = [
     ["Window", `${fromDate} → ${toDate}`],
@@ -364,6 +314,7 @@ function printSummary(
     ["Max drawdown", fmtPct(metrics.maxDrawdownPct)],
     ["Win rate", fmtPct(metrics.winRatePct)],
     ["Sharpe (ann.)", fmtNum(metrics.sharpeRatio)],
+    ["Expectancy (avg P&L % / trade)", fmtPct(expectancyPctPerTrade, 3)],
     ["Total trades", String(metrics.totalTrades)],
     [`Benchmark (${BACKTEST_BENCHMARK_TICKER}) CAGR`, fmtPct(benchmarkCagrPct)],
   ];
@@ -376,6 +327,16 @@ function printSummary(
   }
   console.log("-".repeat(Math.max(40, labelW + 28)));
   console.log("");
+  console.log("Exit bucket breakdown (strategy labels):");
+  for (const k of [
+    "TRAILING_STOP",
+    "MAX_HOLD",
+    "REBALANCE_DROP",
+    "FORCED_CLOSE",
+  ] as const) {
+    console.log(`  ${k.padEnd(18)} ${String(exitBuckets[k])}`);
+  }
+  console.log("");
 }
 
 export interface RunBacktestResult {
@@ -386,9 +347,12 @@ export interface RunBacktestResult {
   yearFraction: number;
 }
 
+function rankingConfigFromDefaults(): RankingConfig {
+  return { ...DEFAULT_RANKING_CONFIG };
+}
+
 /**
- * Replay the strategy day-by-day (Cue spec §7.2): EOD signals on date T, fills on T+1 open,
- * MTM equity at each T close. Uses $2,500 starting cash and $400 per slot (see `types.ts`).
+ * Weekly rebalance cross-sectional momentum (§6.2) with ATR trailing stops (§6.3).
  */
 export function runBacktest(
   db: SqliteConnection,
@@ -399,8 +363,10 @@ export function runBacktest(
     throw new Error(`runBacktest: fromDate ${fromDate} is after toDate ${toDate}`);
   }
 
-  const thresholds = thresholdsFromConfig();
-  const buyGateFirstFail = createBuyGateFirstFailCounters();
+  const cfg = rankingConfigFromDefaults();
+  const appCfg = getConfig();
+  const positionUsd = appCfg.POSITION_SIZE_USD ?? BACKTEST_POSITION_USD;
+
   const universe = loadUniverseTickers();
   const allTickers = [...new Set([...universe, BACKTEST_BENCHMARK_TICKER])].sort((a, b) =>
     a.localeCompare(b),
@@ -424,12 +390,14 @@ export function runBacktest(
       ].join("\n"),
     );
   }
-  const { byTicker, byDate } = indexByTickerAndDate(rows);
-  const sortedDates = [...byDate.keys()].sort(compareIsoDate);
+
+  const byTicker = indexByTicker(rows);
+  const byDate = indexByDate(rows);
+  const sortedTradingDates = loadQqqTradingDates(db, dataFrom, dataTo);
 
   const qqqSeries = byTicker.get(BACKTEST_BENCHMARK_TICKER);
   if (!qqqSeries) {
-    throw new Error("QQQ not found in daily_prices — required for regime filter");
+    throw new Error("QQQ not found in daily_prices — required for calendar and regime filter");
   }
   const qqqBars = qqqSeries;
   const yearFraction = calendarYearFraction(fromDate, toDate);
@@ -437,201 +405,242 @@ export function runBacktest(
 
   let cash = INITIAL_CASH_USD;
   const positions = new Map<string, SimPosition>();
-  const pendingBuys = new Set<string>();
-  const pendingStandardExits = new Set<string>();
-  const pendingExitReasons = new Map<string, SignalExitReason>();
+  const pendingExitReason = new Map<string, StrategyExitReason>();
+  const pendingBuys = new Map<string, { entryAtr: number }>();
 
   const equityPoints: EquityPoint[] = [];
   const closedTrades: ClosedBacktestTrade[] = [];
 
-  let exitCountGapOrStop = 0;
-  let exitCountMaxHoldDays = 0;
-  let exitCountStandardTakeProfit = 0;
-  let exitCountStandardTrendBreak = 0;
+  const exitBuckets: Record<StrategyExitReason, number> = {
+    TRAILING_STOP: 0,
+    MAX_HOLD: 0,
+    REBALANCE_DROP: 0,
+    FORCED_CLOSE: 0,
+  };
 
-  let entryAboveSma200 = 0;
-  let entryBelowSma200 = 0;
-  let entryInsufficientSma200 = 0;
+  const datesLeqTo = sortedTradingDates.filter((d) => compareIsoDate(d, toDate) <= 0);
+  const finalBacktestDate =
+    datesLeqTo.length > 0 ? datesLeqTo[datesLeqTo.length - 1]! : null;
 
-  for (let i = 0; i < sortedDates.length; i++) {
-    const date = sortedDates[i]!;
+  const closePosition = (
+    ticker: string,
+    pos: SimPosition,
+    exitDate: string,
+    exitFillPrice: number,
+    reason: StrategyExitReason,
+  ): void => {
+    const proceeds = pos.shares * exitFillPrice;
+    cash += proceeds;
+    const costBasis = pos.shares * pos.entryFillPrice;
+    closedTrades.push({
+      ticker,
+      entryDate: pos.entryDate,
+      exitDate,
+      realizedPnlUsd: proceeds - costBasis,
+      exitReason: toBacktestExitReason(reason),
+      entryFillPrice: pos.entryFillPrice,
+      exitFillPrice,
+    });
+    exitBuckets[reason] += 1;
+    positions.delete(ticker);
+    pendingExitReason.delete(ticker);
+  };
 
-    if (i > 0) {
-      const dayMap = byDate.get(date);
-      if (dayMap) {
-        const tickersToExit: string[] = [];
-        for (const [ticker] of positions) {
-          tickersToExit.push(ticker);
-        }
-        tickersToExit.sort((a, b) => a.localeCompare(b));
+  for (let di = 0; di < sortedTradingDates.length; di++) {
+    const date = sortedTradingDates[di]!;
+    const dayMap = byDate.get(date);
+    if (!dayMap) {
+      continue;
+    }
 
-        for (const ticker of tickersToExit) {
-          const pos = positions.get(ticker);
-          if (!pos) {
-            continue;
-          }
+    if (di > 0) {
+      const tickersToTouch = new Set<string>([...positions.keys(), ...pendingExitReason.keys()]);
+      for (const t of pendingBuys.keys()) {
+        tickersToTouch.add(t);
+      }
+      const sortedTouch = [...tickersToTouch].sort((a, b) => a.localeCompare(b));
+
+      for (const ticker of sortedTouch) {
+        const exitReason = pendingExitReason.get(ticker);
+        const pos = positions.get(ticker);
+        if (exitReason !== undefined && pos !== undefined) {
           const bar = dayMap.get(ticker);
           if (!bar) {
             continue;
           }
-          const openPx = bar.open;
-          const gapOrStop = openPx <= pos.stopLevel;
-          const daysHeld = tradingDaysHeld(sortedDates, pos.entryDate, date);
-          const maxHoldBreached = daysHeld >= BACKTEST_MAX_HOLD_DAYS;
-          const standard = pendingStandardExits.has(ticker);
-          // Exit priority at next open: gap/stop → max hold → signal SELL
-          let exitReason: BacktestExitReason | null = null;
-          if (gapOrStop) {
-            exitReason = "gapOrStop";
-          } else if (maxHoldBreached) {
-            exitReason = "maxHoldDays";
-          } else if (standard) {
-            const sub = pendingExitReasons.get(ticker) ?? "TAKE_PROFIT";
-            exitReason = sub === "TREND_BREAK" ? "standardTrendBreak" : "standardTakeProfit";
-          }
-          if (exitReason !== null) {
-            if (exitReason === "gapOrStop") {
-              exitCountGapOrStop += 1;
-            } else if (exitReason === "maxHoldDays") {
-              exitCountMaxHoldDays += 1;
-            } else if (exitReason === "standardTakeProfit") {
-              exitCountStandardTakeProfit += 1;
-            } else {
-              exitCountStandardTrendBreak += 1;
-            }
-            const exitFill = openPx * BACKTEST_SLIPPAGE_SELL_MULTIPLIER;
-            const proceeds = pos.shares * exitFill;
-            cash += proceeds;
-            const costBasis = pos.shares * pos.entryFillPrice;
-            closedTrades.push({
-              ticker,
-              entryDate: pos.entryDate,
-              exitDate: date,
-              realizedPnlUsd: proceeds - costBasis,
-              exitReason,
-              entryFillPrice: pos.entryFillPrice,
-              exitFillPrice: exitFill,
-            });
-            positions.delete(ticker);
-            pendingStandardExits.delete(ticker);
-            pendingExitReasons.delete(ticker);
-          }
+          const exitFill = bar.open * BACKTEST_SLIPPAGE_SELL_MULTIPLIER;
+          closePosition(ticker, pos, date, exitFill, exitReason);
         }
+      }
 
-        const pendingSorted = [...pendingBuys].sort((a, b) => a.localeCompare(b));
-        for (const ticker of pendingSorted) {
-          if (positions.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
-            break;
-          }
-          if (positions.has(ticker)) {
-            pendingBuys.delete(ticker);
-            continue;
-          }
-          const bar = dayMap.get(ticker);
-          if (!bar) {
-            continue;
-          }
-          const buyFill = bar.open * BACKTEST_SLIPPAGE_BUY_MULTIPLIER;
-          const allocation = BACKTEST_POSITION_USD;
-          if (cash < allocation) {
-            continue;
-          }
-          const shares = allocation / buyFill;
-          const cost = shares * buyFill;
-          if (cost > cash + 1e-6) {
-            continue;
-          }
-          cash -= cost;
-          positions.set(ticker, {
-            entryDate: date,
-            entryFillPrice: buyFill,
-            shares,
-            stopLevel: buyFill * (1 - BACKTEST_STOP_LOSS_FRACTION),
-          });
+      const buyOrder = [...pendingBuys.keys()].sort((a, b) => a.localeCompare(b));
+      for (const ticker of buyOrder) {
+        if (positions.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
+          break;
+        }
+        if (positions.has(ticker)) {
           pendingBuys.delete(ticker);
+          continue;
+        }
+        const meta = pendingBuys.get(ticker);
+        if (!meta) {
+          continue;
+        }
+        const bar = dayMap.get(ticker);
+        if (!bar) {
+          continue;
+        }
+        const buyFill = bar.open * BACKTEST_SLIPPAGE_BUY_MULTIPLIER;
+        if (cash < positionUsd) {
+          continue;
+        }
+        const shares = positionUsd / buyFill;
+        const cost = shares * buyFill;
+        if (cost > cash + 1e-6) {
+          continue;
+        }
+        cash -= cost;
+        const initialStop = buyFill - cfg.atrMultiplierBase * meta.entryAtr;
+        positions.set(ticker, {
+          entryDate: date,
+          entryFillPrice: buyFill,
+          shares,
+          entryAtr: meta.entryAtr,
+          currentStop: initialStop,
+          highestCloseSinceEntry: Math.max(buyFill, bar.close),
+        });
+        pendingBuys.delete(ticker);
+      }
+    }
 
-          // Entry vs SMA200: SMA uses closes through prior session (no lookahead on fill-day close).
-          const priorDate = sortedDates[i - 1]!;
-          const entrySeries = byTicker.get(ticker);
-          const slicedForSma200 =
-            entrySeries !== undefined
-              ? sliceClosesVolumes(entrySeries, priorDate)
-              : null;
-          if (slicedForSma200 === null) {
-            entryInsufficientSma200 += 1;
-          } else {
-            const sma200Val = sma(200, Array.from(slicedForSma200.close));
-            if (sma200Val === null) {
-              entryInsufficientSma200 += 1;
-            } else if (buyFill > sma200Val) {
-              entryAboveSma200 += 1;
-            } else {
-              entryBelowSma200 += 1;
-            }
-          }
+    const qqqBar = dayMap.get(BACKTEST_BENCHMARK_TICKER);
+    if (qqqBar) {
+      for (const [ticker, pos] of [...positions.entries()]) {
+        const bar = dayMap.get(ticker);
+        if (!bar) {
+          continue;
+        }
+        if (bar.low <= pos.currentStop && !pendingExitReason.has(ticker)) {
+          pendingExitReason.set(ticker, "TRAILING_STOP");
         }
       }
     }
 
-    const inSignalWindow = compareIsoDate(date, fromDate) >= 0 && compareIsoDate(date, toDate) <= 0;
-    if (inSignalWindow) {
-      const nextBuys = new Set<string>();
-      const nextStandardExits = new Set<string>();
-      const nextPendingExitReasons = new Map<string, SignalExitReason>();
+    const inSignalWindow =
+      compareIsoDate(date, fromDate) >= 0 && compareIsoDate(date, toDate) <= 0;
 
-      const slotsAvailable = BACKTEST_MAX_CONCURRENT_POSITIONS - positions.size;
-      let slotsLeft = slotsAvailable;
-      const sortedUniverse = [...universe].sort((a, b) => a.localeCompare(b));
+    const dow = isoWeekdayMon1ToFri5(date);
+    const isRebalance = dow === cfg.rebalanceDayOfWeek;
+    if (isRebalance && qqqBar && inSignalWindow) {
+      const qqqSlice = sliceBarsThrough(qqqBars, date);
+      const qqqCloses = qqqSlice?.map((b) => b.close) ?? [];
+      const smaRegime = sma(cfg.smaPeriod, qqqCloses);
+      const regimeOk = smaRegime !== null && qqqBar.close > smaRegime;
 
-      const qqqSlice = sliceClosesVolumes(qqqSeries, date);
-      const qqqCloses = qqqSlice?.close ?? [];
-
-      for (const ticker of sortedUniverse) {
-        const series = byTicker.get(ticker);
-        if (!series) {
-          continue;
+      if (regimeOk) {
+        const priceMap = new Map<string, number[]>();
+        for (const t of universe) {
+          const series = byTicker.get(t);
+          if (!series) {
+            continue;
+          }
+          const slice = sliceBarsThrough(series, date);
+          if (!slice || slice.length < cfg.lookbackDays) {
+            continue;
+          }
+          priceMap.set(t, slice.map((b) => b.close));
         }
-        const sliced = sliceClosesVolumes(series, date);
-        if (!sliced) {
-          continue;
-        }
 
-        const openPos = positions.get(ticker);
-
-        const { signal, reason } = generateSignal({
-          close: sliced.close,
-          volume: sliced.volume,
-          qqqCloses,
-          thresholds,
-          positionOpen: openPos !== undefined,
-          buyGateFirstFail,
+        const ranked = rankUniverse(priceMap, {
+          lookbackDays: cfg.lookbackDays,
+          skipDays: cfg.skipDays,
+          topN: cfg.topN,
         });
+        const topSet = new Set(ranked.slice(0, cfg.topN).map((r) => r.ticker));
 
-        if (openPos === undefined) {
-          if (signal === "BUY" && slotsLeft > 0) {
-            nextBuys.add(ticker);
-            slotsLeft -= 1;
-          }
-        } else {
-          if (signal === "SELL") {
-            nextStandardExits.add(ticker);
-            nextPendingExitReasons.set(ticker, reason ?? "TAKE_PROFIT");
+        for (const [ticker] of [...positions.entries()]) {
+          if (!topSet.has(ticker) && !pendingExitReason.has(ticker)) {
+            pendingExitReason.set(ticker, "REBALANCE_DROP");
           }
         }
-      }
 
-      pendingBuys.clear();
-      pendingStandardExits.clear();
-      pendingExitReasons.clear();
-      for (const t of nextBuys) {
-        pendingBuys.add(t);
-      }
-      for (const t of nextStandardExits) {
-        pendingStandardExits.add(t);
-        const r = nextPendingExitReasons.get(t);
-        if (r !== undefined) {
-          pendingExitReasons.set(t, r);
+        for (const t of ranked.slice(0, cfg.topN)) {
+          if (positions.size + pendingBuys.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
+            break;
+          }
+          if (positions.has(t.ticker) || pendingBuys.has(t.ticker)) {
+            continue;
+          }
+          const series = byTicker.get(t.ticker);
+          if (!series) {
+            continue;
+          }
+          const slice = sliceBarsThrough(series, date);
+          if (!slice || slice.length < cfg.lookbackDays) {
+            continue;
+          }
+          const highs = slice.map((b) => b.high);
+          const lows = slice.map((b) => b.low);
+          const closes = slice.map((b) => b.close);
+          const entryAtrVal = atr(highs, lows, closes, cfg.atrPeriod);
+          if (entryAtrVal === null) {
+            continue;
+          }
+          pendingBuys.set(t.ticker, { entryAtr: entryAtrVal });
         }
+      }
+    }
+
+    for (const [ticker, pos] of [...positions.entries()]) {
+      const bar = dayMap.get(ticker);
+      if (!bar) {
+        continue;
+      }
+      const nextHigh = Math.max(pos.highestCloseSinceEntry, bar.close);
+      const series = byTicker.get(ticker);
+      const slice = series ? sliceBarsThrough(series, date) : null;
+      if (!slice || slice.length === 0) {
+        continue;
+      }
+      const highs = slice.map((b) => b.high);
+      const lows = slice.map((b) => b.low);
+      const closes = slice.map((b) => b.close);
+      const atrToday = atr(highs, lows, closes, cfg.atrPeriod);
+      if (atrToday === null) {
+        continue;
+      }
+      const newStop = computeTrailingStop(
+        pos.currentStop,
+        nextHigh,
+        pos.entryFillPrice,
+        atrToday,
+        cfg.atrMultiplierBase,
+        cfg.atrMultiplierTight,
+        cfg.atrTightenThresholdPct,
+      );
+      positions.set(ticker, {
+        ...pos,
+        highestCloseSinceEntry: nextHigh,
+        currentStop: newStop,
+      });
+    }
+
+    for (const [ticker, pos] of [...positions.entries()]) {
+      if (tradingDaysHeld(sortedTradingDates, pos.entryDate, date) >= cfg.maxHoldDays) {
+        if (!pendingExitReason.has(ticker)) {
+          pendingExitReason.set(ticker, "MAX_HOLD");
+        }
+      }
+    }
+
+    if (finalBacktestDate !== null && date === finalBacktestDate) {
+      for (const [ticker, pos] of [...positions.entries()]) {
+        const bar = dayMap.get(ticker);
+        if (!bar) {
+          continue;
+        }
+        const exitFill = bar.close * BACKTEST_SLIPPAGE_SELL_MULTIPLIER;
+        closePosition(ticker, pos, date, exitFill, "FORCED_CLOSE");
       }
     }
 
@@ -657,50 +666,6 @@ export function runBacktest(
     closedTrades,
     yearFraction,
   });
-
-  const exitTotal =
-    exitCountGapOrStop +
-    exitCountMaxHoldDays +
-    exitCountStandardTakeProfit +
-    exitCountStandardTrendBreak;
-  const entryTotal =
-    entryAboveSma200 + entryBelowSma200 + entryInsufficientSma200;
-  const buyGatePartitionSum =
-    buyGateFirstFail.failedSma200 +
-    buyGateFirstFail.failedSma50 +
-    buyGateFirstFail.failedRsiCeiling +
-    buyGateFirstFail.failedRsiTurn +
-    buyGateFirstFail.failedVolume +
-    buyGateFirstFail.passedAll;
-  console.log(
-    [
-      "",
-      "Exit reason counts (closed trades):",
-      `  gapOrStop (stop-loss):     ${String(exitCountGapOrStop)}`,
-      `  maxHoldDays:              ${String(exitCountMaxHoldDays)}`,
-      `  standard_TAKE_PROFIT:     ${String(exitCountStandardTakeProfit)}`,
-      `  standard_TREND_BREAK:     ${String(exitCountStandardTrendBreak)}`,
-      `  sum of above:             ${String(exitTotal)} (closed trades: ${String(closedTrades.length)})`,
-      "",
-      "Entry vs SMA200 at fill (SMA200 from closes through prior session; entry = fill open):",
-      `  aboveSma200 (entry > SMA200): ${String(entryAboveSma200)}`,
-      `  belowSma200 (entry <= SMA200): ${String(entryBelowSma200)}`,
-      `  insufficientData (SMA200 null): ${String(entryInsufficientSma200)}`,
-      `  sum of above:                   ${String(entryTotal)} (buy fills counted)`,
-      "",
-      "BUY gate first-fail (EOD signal pass, !open, len(closes) >= 200; first failure only):",
-      `  failedSma200:     ${String(buyGateFirstFail.failedSma200)}`,
-      `  failedSma50:      ${String(buyGateFirstFail.failedSma50)}`,
-      `  failedRsiCeiling: ${String(buyGateFirstFail.failedRsiCeiling)}`,
-      `  failedRsiTurn:    ${String(buyGateFirstFail.failedRsiTurn)}`,
-      `  failedVolume:     ${String(buyGateFirstFail.failedVolume)}`,
-      `  passedAll:        ${String(buyGateFirstFail.passedAll)}`,
-      `  (six-way sum):    ${String(buyGatePartitionSum)}`,
-      `  skippedNullIndicators: ${String(buyGateFirstFail.skippedNullIndicators)} (null SMA/RSI/volumeRatio; not in six-way sum)`,
-    ].join("\n"),
-  );
-
-  logExitDiagnostics(sortedDates, closedTrades);
 
   return { equityPoints, closedTrades, metrics, benchmarkCagrPct, yearFraction };
 }
@@ -734,11 +699,36 @@ if (isMain) {
   try {
     initSchema(db);
     const result = runBacktest(db, from, to);
-    printSummary(from, to, result.metrics, result.benchmarkCagrPct);
+    const expectancyPctPerTrade = mean(
+      result.closedTrades.map((t) =>
+        t.entryFillPrice !== 0
+          ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+          : 0,
+      ),
+    );
+    const exitBuckets: Record<StrategyExitReason, number> = {
+      TRAILING_STOP: 0,
+      MAX_HOLD: 0,
+      REBALANCE_DROP: 0,
+      FORCED_CLOSE: 0,
+    };
+    for (const t of result.closedTrades) {
+      const r = t.exitReason;
+      if (r === "gapOrStop") {
+        exitBuckets.TRAILING_STOP += 1;
+      } else if (r === "maxHoldDays") {
+        exitBuckets.MAX_HOLD += 1;
+      } else if (r === "standardTrendBreak") {
+        exitBuckets.REBALANCE_DROP += 1;
+      } else {
+        exitBuckets.FORCED_CLOSE += 1;
+      }
+    }
+    printSummary(from, to, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade, exitBuckets);
 
     if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
       console.warn(
-        "Backtest: 0 round-trip trades — no BUY signals passed the trend + pullback gates on this window and universe (strategy stayed in cash).",
+        "Backtest: 0 round-trip trades — regime gate, ranking, or data window produced no fills.",
       );
     }
 
