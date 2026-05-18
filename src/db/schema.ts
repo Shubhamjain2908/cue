@@ -30,11 +30,12 @@ CREATE TABLE IF NOT EXISTS signals (
   date TEXT NOT NULL,
   signal TEXT NOT NULL,
   price REAL NOT NULL,
-  rsi14 REAL NOT NULL,
-  momentum_5d REAL NOT NULL,
-  volume_ratio REAL NOT NULL,
-  stop_loss REAL NOT NULL,
   alerted INTEGER NOT NULL DEFAULT 0,
+  momentum_rank INTEGER,
+  universe_ranked_count INTEGER,
+  momentum_12_1_return REAL,
+  atr14 REAL,
+  initial_atr_stop REAL,
   UNIQUE (ticker, date)
 );
 
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS enrichments (
   sector TEXT,
   sector_trend TEXT,
   headlines TEXT NOT NULL,
+  confidence TEXT NOT NULL DEFAULT 'LOW',
   created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
 
@@ -75,8 +77,93 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 `;
 
+function signalColumnNames(db: SqliteConnection): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(signals)`).all() as Array<{ name: string }>;
+  return new Set(rows.map((r) => r.name));
+}
+
+function enrichmentColumnNames(db: SqliteConnection): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(enrichments)`).all() as Array<{ name: string }>;
+  return new Set(rows.map((r) => r.name));
+}
+
+/**
+ * Idempotent migrations for existing SQLite files.
+ * - Replaces pre–Phase-2 `signals` (RSI-era columns) with momentum-capable layout.
+ * - Adds `enrichments.confidence` when missing.
+ *
+ * If `signals` still has `rsi14`, rebuilds `signals` in place (FK off) preserving ids for enrichments/positions.
+ */
+export function migrateSchema(db: SqliteConnection): void {
+  const sigCols = signalColumnNames(db);
+  if (sigCols.size === 0) {
+    return;
+  }
+
+  if (sigCols.has("rsi14")) {
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      CREATE TABLE signals_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker TEXT NOT NULL,
+        date TEXT NOT NULL,
+        signal TEXT NOT NULL,
+        price REAL NOT NULL,
+        alerted INTEGER NOT NULL DEFAULT 0,
+        momentum_rank INTEGER,
+        universe_ranked_count INTEGER,
+        momentum_12_1_return REAL,
+        atr14 REAL,
+        initial_atr_stop REAL,
+        UNIQUE (ticker, date)
+      );
+      INSERT INTO signals_migrated (
+        id, ticker, date, signal, price, alerted,
+        momentum_rank, universe_ranked_count, momentum_12_1_return, atr14, initial_atr_stop
+      )
+      SELECT
+        id, ticker, date, signal, price, alerted,
+        NULL, NULL, NULL, NULL, NULL
+      FROM signals;
+      DROP TABLE signals;
+      ALTER TABLE signals_migrated RENAME TO signals;
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+  } else {
+    const stmts: string[] = [];
+    if (!sigCols.has("momentum_rank")) {
+      stmts.push(`ALTER TABLE signals ADD COLUMN momentum_rank INTEGER`);
+    }
+    if (!sigCols.has("universe_ranked_count")) {
+      stmts.push(`ALTER TABLE signals ADD COLUMN universe_ranked_count INTEGER`);
+    }
+    if (!sigCols.has("momentum_12_1_return")) {
+      stmts.push(`ALTER TABLE signals ADD COLUMN momentum_12_1_return REAL`);
+    }
+    if (!sigCols.has("atr14")) {
+      stmts.push(`ALTER TABLE signals ADD COLUMN atr14 REAL`);
+    }
+    if (!sigCols.has("initial_atr_stop")) {
+      stmts.push(`ALTER TABLE signals ADD COLUMN initial_atr_stop REAL`);
+    }
+    for (const sql of stmts) {
+      db.exec(sql);
+    }
+  }
+
+  const encCols = enrichmentColumnNames(db);
+  if (encCols.size > 0 && !encCols.has("confidence")) {
+    db.exec(
+      `ALTER TABLE enrichments ADD COLUMN confidence TEXT NOT NULL DEFAULT 'LOW'`,
+    );
+  }
+}
+
 export function initSchema(db: SqliteConnection): void {
   db.exec(SCHEMA_SQL);
+  migrateSchema(db);
 }
 
 function runDbInit(): void {

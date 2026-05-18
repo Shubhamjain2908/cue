@@ -5,11 +5,12 @@ import type { SignalThresholds } from "../strategy/types.js";
 
 loadDotenv();
 
-const envSchema = z.object({
+const providerKeySchema = z.enum(["anthropic", "openai", "google"]);
+
+const baseEnvSchema = z.object({
   /** Massive.com REST key (https://massive.com/; rebranded from Polygon.io; same key). */
   POLYGON_API_KEY: z.string().min(1),
-  ALPHA_VANTAGE_API_KEY: z.string().min(1),
-  ANTHROPIC_API_KEY: z.string().min(1),
+  ALPHA_VANTAGE_API_KEY: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_CHAT_ID: z.string().min(1),
   DB_PATH: z.string().default("./db/cue.db"),
@@ -23,12 +24,19 @@ const envSchema = z.object({
   BUY_RSI_MAX: z.coerce.number().default(60),
   BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.2),
   EXIT_RSI_THRESHOLD: z.coerce.number().default(75),
+  LLM_PROVIDER: providerKeySchema.default("anthropic"),
+  LLM_MAX_TOKENS: z.coerce.number().int().positive().default(600),
+  OPENAI_API_KEY: z.string().optional(),
+  GOOGLE_AI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
 });
 
-export type AppConfig = z.infer<typeof envSchema> & SignalThresholds;
+export type LlmProviderKey = z.infer<typeof providerKeySchema>;
+
+export type AppConfig = z.infer<typeof baseEnvSchema> & SignalThresholds;
 
 let cached: AppConfig | undefined;
 
@@ -36,12 +44,22 @@ export function getConfig(): AppConfig {
   if (cached) {
     return cached;
   }
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = baseEnvSchema.safeParse(process.env);
   if (!parsed.success) {
     const msg = parsed.error.flatten().fieldErrors;
     throw new Error(`Invalid environment: ${JSON.stringify(msg)}`);
   }
   const d = parsed.data;
+  const provider = d.LLM_PROVIDER;
+  if (provider === "anthropic" && (!d.ANTHROPIC_API_KEY || d.ANTHROPIC_API_KEY.length === 0)) {
+    throw new Error("Invalid environment: ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic");
+  }
+  if (provider === "openai" && (!d.OPENAI_API_KEY || d.OPENAI_API_KEY.length === 0)) {
+    throw new Error("Invalid environment: OPENAI_API_KEY is required when LLM_PROVIDER=openai");
+  }
+  if (provider === "google" && (!d.GOOGLE_AI_API_KEY || d.GOOGLE_AI_API_KEY.length === 0)) {
+    throw new Error("Invalid environment: GOOGLE_AI_API_KEY is required when LLM_PROVIDER=google");
+  }
   cached = {
     ...d,
     smaPeriod: d.SMA_PERIOD,
