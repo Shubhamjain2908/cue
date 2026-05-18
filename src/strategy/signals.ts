@@ -1,7 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { momentum5d, rsi14, volumeRatio } from "./indicators.js";
+import Database from "better-sqlite3";
+
+import { getConfig } from "../config/index.js";
+import { initSchema } from "../db/schema.js";
+import { momentum5d, rsi14, sma, volumeRatio } from "./indicators.js";
 import type {
   OpenPositionContext,
   SignalDecision,
@@ -25,39 +29,47 @@ export function computeSignalMetrics(input: {
   };
 }
 
-function decideSide(
-  metrics: SignalMetrics,
+export function decideSide(
+  closes: number[],
+  volumes: number[],
   thresholds: SignalThresholds,
-  position: OpenPositionContext | undefined,
 ): TradeSignal {
-  const { rsi14: rsi, momentum5dPct: mom, volumeRatio: vol, lastClose } = metrics;
+  void volumes;
+  const smaVal = sma(thresholds.smaPeriod, closes);
+  const currentRsi = rsi14(closes);
+  const today = closes[closes.length - 1]!;
 
-  if (position !== undefined && lastClose !== null) {
-    if (rsi !== null && rsi < thresholds.exitRsiMax) {
-      return "SELL";
-    }
-    const stopReturnPct =
-      ((lastClose - position.entryPrice) / position.entryPrice) * 100;
-    if (stopReturnPct < -thresholds.stopLossPct) {
-      return "SELL";
-    }
+  if (smaVal === null || currentRsi === null) {
     return "HOLD";
   }
 
-  const buyOk =
-    rsi !== null &&
-    rsi > thresholds.buyRsiMin &&
-    mom !== null &&
-    mom > thresholds.buyMomentumMinPct &&
-    vol !== null &&
-    vol > thresholds.buyVolumeRatioMin;
+  const trendAboveSma = today > smaVal;
+  const rsiInRange =
+    currentRsi >= thresholds.buyRsiMin && currentRsi <= thresholds.buyRsiMax;
 
-  return buyOk ? "BUY" : "HOLD";
+  if (trendAboveSma && rsiInRange) {
+    return "BUY";
+  }
+
+  return "HOLD";
+}
+
+function signalThresholdsFromConfig(): SignalThresholds {
+  const c = getConfig();
+  return {
+    smaPeriod: c.smaPeriod,
+    buyRsiMin: c.buyRsiMin,
+    buyRsiMax: c.buyRsiMax,
+    exitRsiThreshold: c.exitRsiThreshold,
+    stopLossPct: c.stopLossPct,
+    maxHoldDays: c.maxHoldDays,
+  };
 }
 
 /**
- * Pure signal engine: maps OHLCV arrays to BUY | SELL | HOLD (momentum breakout entry,
- * RSI fade + stop exit). Pass thresholds explicitly — no env reads.
+ * Pure signal engine: maps OHLCV arrays to BUY | SELL | HOLD (Option A: trend +
+ * pullback entry). Exits from this layer are not used in Option A — the backtest
+ * runner applies stop-loss and max-hold. Pass thresholds explicitly — no env reads.
  */
 export function generateSignal(input: {
   close: readonly number[];
@@ -70,10 +82,17 @@ export function generateSignal(input: {
     close: input.close,
     volume: input.volume,
   });
-  return {
-    signal: decideSide(metrics, thresholds, input.position),
-    metrics,
-  };
+
+  if (input.position !== undefined) {
+    return { signal: "HOLD", metrics };
+  }
+
+  const signal = decideSide(
+    [...input.close],
+    [...input.volume],
+    thresholds,
+  );
+  return { signal, metrics };
 }
 
 const isMain =
@@ -81,9 +100,34 @@ const isMain =
   path.resolve(process.argv[1] ?? "");
 
 if (isMain) {
-  // Phase 1 stops before live screening; `pnpm run screen` is wired for later phases.
-  console.error(
-    "screen is not implemented in Phase 1 (fetcher + DB-backed screener come later).",
-  );
-  process.exit(1);
+  const argv = process.argv.slice(2);
+  const idx = argv.indexOf("--ticker");
+  const raw = idx >= 0 ? argv[idx + 1] : undefined;
+  if (!raw) {
+    console.error("Usage: pnpm run screen -- --ticker SYMBOL");
+    process.exit(1);
+  }
+  const ticker = raw.toUpperCase();
+  const config = getConfig();
+  const db = new Database(config.DB_PATH);
+  try {
+    initSchema(db);
+    const rows = db
+      .prepare(
+        `SELECT close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
+      )
+      .all(ticker) as Array<{ close: number; volume: number }>;
+    if (rows.length === 0) {
+      console.log("HOLD");
+      process.exit(0);
+    }
+    const { signal } = generateSignal({
+      close: rows.map((r) => r.close),
+      volume: rows.map((r) => r.volume),
+      thresholds: signalThresholdsFromConfig(),
+    });
+    console.log(signal === "BUY" ? "BUY" : "HOLD");
+  } finally {
+    db.close();
+  }
 }
