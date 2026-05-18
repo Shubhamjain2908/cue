@@ -76,15 +76,18 @@ function main() {
     initSchema(db);
 
     const tickers = loadTickers();
+    const tickersForHydrate = [...new Set([...tickers, "QQQ"])].sort((a, b) =>
+        a.localeCompare(b),
+    );
     const dataFrom = addDays(from, -200);
 
     const rows = db.prepare(`
     SELECT ticker, date, open, high, low, close, volume
     FROM daily_prices
-    WHERE ticker IN (${tickers.map(() => "?").join(",")})
+    WHERE ticker IN (${tickersForHydrate.map(() => "?").join(",")})
       AND date >= ? AND date <= ?
     ORDER BY date ASC, ticker ASC
-  `).all(...tickers, dataFrom, to) as DailyBar[];
+  `).all(...tickersForHydrate, dataFrom, to) as DailyBar[];
 
     // Index by ticker
     const byTicker = new Map<string, DailyBar[]>();
@@ -112,8 +115,16 @@ function main() {
     // Count signals per date
     const crowding: Array<{ date: string; count: number; tickers: string[] }> = [];
 
+    const qqqSeries = byTicker.get("QQQ");
+    if (!qqqSeries) {
+        throw new Error("QQQ not found in daily_prices — required for regime filter");
+    }
+
     for (const date of allDates) {
         const hits: string[] = [];
+        const qqqUb = ubInclusive(qqqSeries, date);
+        const qqqCloses =
+            qqqUb >= 0 ? qqqSeries.slice(0, qqqUb + 1).map((b) => b.close) : [];
         for (const ticker of tickers) {
             const series = byTicker.get(ticker);
             if (!series) continue;
@@ -123,6 +134,7 @@ function main() {
             const { signal } = generateSignal({
                 close:  slice.map(b => b.close),
                 volume: slice.map(b => b.volume),
+                qqqCloses,
                 thresholds,
             });
             if (signal === "BUY") hits.push(ticker);
