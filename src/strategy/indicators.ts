@@ -49,6 +49,16 @@ export function rsi14(closes: readonly number[]): number | null {
 }
 
 /**
+ * Simple Moving Average over the last `period` values of `closes`.
+ * Returns null if closes.length < period (insufficient data).
+ */
+export function sma(period: number, closes: number[]): number | null {
+  if (closes.length < period) return null;
+  const window = closes.slice(-period);
+  return window.reduce((sum, v) => sum + v, 0) / period;
+}
+
+/**
  * 5-day momentum % on adjusted close (Cue spec §6.4).
  * Uses the most recent close vs the close 5 trading days earlier.
  */

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { momentum5d, rsi14, volumeRatio } from "../../src/strategy/indicators.js";
+import {
+  momentum5d,
+  rsi14,
+  sma,
+  volumeRatio,
+} from "../../src/strategy/indicators.js";
 
 describe("rsi14", () => {
   it("returns null when fewer than 28 closes", () => {
@@ -78,5 +83,28 @@ describe("volumeRatio", () => {
   it("returns null when 60d average volume is zero", () => {
     const vols = Array.from({ length: 60 }, () => 0);
     expect(volumeRatio(vols)).toBeNull();
+  });
+});
+
+describe("sma()", () => {
+  it("returns correct average for exact window", () => {
+    expect(sma(3, [10, 20, 30])).toBeCloseTo(20);
+  });
+
+  it("uses only the last `period` values from a longer array", () => {
+    // mean of [30, 40, 50] = 40; first two values ignored
+    expect(sma(3, [10, 20, 30, 40, 50])).toBeCloseTo(40);
+  });
+
+  it("returns null when closes.length < period", () => {
+    expect(sma(5, [10, 20])).toBeNull();
+  });
+
+  it("returns the single value when period === 1", () => {
+    expect(sma(1, [42])).toBeCloseTo(42);
+  });
+
+  it("handles all identical values", () => {
+    expect(sma(4, [7, 7, 7, 7])).toBeCloseTo(7);
   });
 });

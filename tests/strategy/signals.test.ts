@@ -1,126 +1,104 @@
 import { describe, expect, it } from "vitest";
 
-import { generateSignal } from "../../src/strategy/signals.js";
+import { decideSide } from "../../src/strategy/signals.js";
 import type { SignalThresholds } from "../../src/strategy/types.js";
 
-const thresholds: SignalThresholds = {
-  buyRsiMin: 60,
-  buyMomentumMinPct: 3,
-  buyVolumeRatioMin: 1.3,
-  exitRsiMax: 45,
-  stopLossPct: 5,
-};
-
-function makeBars(input: {
-  closes: number[];
-  volumes: number[];
-}): { close: number[]; volume: number[] } {
-  return { close: input.closes, volume: input.volumes };
+function makeCloses(length: number, start = 100, step = 0.3): number[] {
+  return Array.from({ length }, (_, i) => +(start + i * step).toFixed(4));
 }
 
-describe("generateSignal", () => {
-  it("emits BUY when RSI, momentum, and volume ratio all pass (momentum breakout)", () => {
-    const base = Array.from({ length: 50 }, (_, i) => 100 + i * 0.08);
-    const ramp = Array.from({ length: 10 }, (_, i) => 104 + i * 2.8);
-    const close = [...base, ...ramp];
-    const volume = [...Array(40).fill(70_000), ...Array(20).fill(240_000)];
-    const { signal, metrics } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-    });
-    expect(metrics.rsi14).not.toBeNull();
-    expect(metrics.momentum5dPct).not.toBeNull();
-    expect(metrics.volumeRatio).not.toBeNull();
-    expect(metrics.rsi14!).toBeGreaterThan(thresholds.buyRsiMin);
-    expect(metrics.momentum5dPct!).toBeGreaterThan(thresholds.buyMomentumMinPct);
-    expect(metrics.volumeRatio!).toBeGreaterThan(thresholds.buyVolumeRatioMin);
-    expect(signal).toBe("BUY");
+function makeVolumes(length: number, base = 1_000_000): number[] {
+  // Last 20 days elevated vs prior 40 in the 60d window so 20d/60d >= 1.2
+  return Array.from({ length }, (_, i) =>
+    i >= length - 20 ? base * 1.4 : base,
+  );
+}
+
+describe("decideSide() — Exhaustion Entry", () => {
+  const thresholds: SignalThresholds = {
+    smaPeriod: 10, // short period so tests don't need 50+ bars
+    buyRsiMax: 50,
+    buyVolumeRatio: 1.2,
+    exitRsiThreshold: 70,
+    stopLossPct: 5,
+    maxHoldDays: 20,
+  };
+
+  // --- ENTRY tests (positionOpen = false) ---
+
+  it("returns HOLD when closes.length < 200", () => {
+    const closes = makeCloses(150);
+    const volumes = makeVolumes(150);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("does not emit BUY when RSI fails", () => {
-    const close = Array.from({ length: 60 }, () => 100);
-    const volume = [...Array(40).fill(80_000), ...Array(20).fill(200_000)];
-    const { signal, metrics } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-    });
-    expect(metrics.rsi14).toBe(50);
-    expect(signal).toBe("HOLD");
+  it("returns HOLD when price is below SMA200 (downtrend)", () => {
+    // Sharp decline: today always below SMA200
+    const closes = makeCloses(210, 200, -0.5);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("does not emit BUY when momentum fails", () => {
-    const rally = Array.from({ length: 40 }, (_, i) => 100 + i * 1.4);
-    const flat = Array(20).fill(rally[rally.length - 1]!);
-    const close = [...rally, ...flat];
-    const volume = [...Array(40).fill(80_000), ...Array(20).fill(200_000)];
-    const { signal, metrics } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-    });
-    expect(metrics.momentum5dPct).not.toBeNull();
-    expect(metrics.momentum5dPct!).toBeLessThanOrEqual(thresholds.buyMomentumMinPct);
-    expect(signal).toBe("HOLD");
+  it("returns HOLD when price is above SMA200/SMA10 but RSI > buyRsiMax (too hot)", () => {
+    // Steep uptrend: RSI will be well above 50
+    const closes = makeCloses(210, 100, 1.5);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("does not emit BUY when volume ratio fails", () => {
-    const base = Array.from({ length: 50 }, (_, i) => 100 + i * 0.08);
-    const ramp = Array.from({ length: 10 }, (_, i) => 104 + i * 2.8);
-    const close = [...base, ...ramp];
-    const volume = Array.from({ length: 60 }, () => 100_000);
-    const { signal, metrics } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-    });
-    expect(metrics.volumeRatio).toBeCloseTo(1, 5);
-    expect(signal).toBe("HOLD");
+  it("returns HOLD when volume ratio below buyVolumeRatio", () => {
+    // Flat volumes — ratio will be 1.0
+    const closes = makeCloses(210, 100, 0.2);
+    const volumes = Array(210).fill(1_000_000);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
   });
 
-  it("emits SELL on RSI fade when a position is open", () => {
-    const rise = Array.from({ length: 35 }, (_, i) => 50 + i * 3);
-    const fall = Array.from({ length: 25 }, (_, i) => 155 - i * 4.5);
-    const close = [...rise, ...fall];
-    const volume = Array.from({ length: 60 }, () => 200_000);
-    const { signal, metrics } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-      position: { entryPrice: 50 },
-    });
-    expect(metrics.rsi14).not.toBeNull();
-    expect(metrics.rsi14!).toBeLessThan(thresholds.exitRsiMax);
-    expect(signal).toBe("SELL");
+  // BUY case: gentle uptrend, dip to cool RSI, then shallow multi-bar recovery so
+  // price clears SMA10 while RSI stays <= buyRsiMax and rsiToday > rsiYest.
+  it("returns BUY when all 5 entry conditions are met", () => {
+    const base = makeCloses(200, 80, 0.25); // gentle uptrend → above SMA200 and SMA10
+    const dip = [
+      base.at(-1)! - 1.5,
+      base.at(-1)! - 2.5,
+      base.at(-1)! - 3.0,
+      base.at(-1)! - 3.5,
+      base.at(-1)! - 4.0,
+    ];
+    let last = dip[dip.length - 1]!;
+    const recovery: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      last = +(last + 0.08).toFixed(4);
+      recovery.push(last);
+    }
+    const closes = [...base, ...dip, ...recovery];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, thresholds, false)).toBe("BUY");
   });
 
-  it("emits SELL on stop-loss when a position is open", () => {
-    const close = Array.from({ length: 60 }, () => 100);
-    const volume = Array.from({ length: 60 }, () => 200_000);
-    const { signal } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-      position: { entryPrice: 110 },
-    });
-    expect(signal).toBe("SELL");
+  // --- EXIT tests (positionOpen = true) ---
+
+  it("returns SELL when RSI >= exitRsiThreshold (take-profit)", () => {
+    // Very steep uptrend at the end: RSI will be >= 70
+    const closes = makeCloses(210, 100, 2.0);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, true)).toBe("SELL");
   });
 
-  it("defaults to HOLD when not a BUY and no exit applies", () => {
-    const close = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i / 3) * 0.2);
-    const volume = Array.from({ length: 60 }, () => 120_000);
-    const { signal } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-    });
-    expect(signal).toBe("HOLD");
+  it("returns SELL when price crosses below SMA50 (trend break)", () => {
+    // Uptrend then sharp drop below SMA10
+    const base = makeCloses(205, 100, 0.3);
+    const crash = [base.at(-1)! - 10, base.at(-1)! - 12]; // below SMA10
+    const closes = [...base, ...crash];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, thresholds, true)).toBe("SELL");
   });
 
-  it("does not emit BUY while a position is open even if entry conditions repeat", () => {
-    const base = Array.from({ length: 50 }, (_, i) => 100 + i * 0.08);
-    const ramp = Array.from({ length: 10 }, (_, i) => 104 + i * 2.8);
-    const close = [...base, ...ramp];
-    const volume = [...Array(40).fill(70_000), ...Array(20).fill(240_000)];
-    const { signal } = generateSignal({
-      ...makeBars({ closes: close, volumes: volume }),
-      thresholds,
-      position: { entryPrice: 95 },
-    });
-    expect(signal).toBe("HOLD");
+  it("returns HOLD for open position when no exit condition is met", () => {
+    // Oscillate with mild drift: RSI mid-range, last close above SMA10 and SMA200
+    const closes = Array.from({ length: 210 }, (_, i) =>
+      +(100 + Math.sin(i * 0.35 + 1.8) * 1.2 + i * 0.015).toFixed(4),
+    );
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, thresholds, true)).toBe("HOLD");
   });
 });
