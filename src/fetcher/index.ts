@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import util from "node:util";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
@@ -306,11 +307,16 @@ const isMain =
   path.resolve(process.argv[1] ?? "");
 
 if (isMain) {
-  run().catch((err) => {
+  run().catch((err: unknown) => {
     const logger = winston.createLogger({
       transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
     });
-    logger.error("Fetcher fatal error", { err });
+    const message =
+      err instanceof Error ? err.message : util.inspect(err, { depth: 8 });
+    logger.error(`Fetcher fatal error: ${message}`);
+    if (err instanceof Error && err.stack !== undefined && err.stack.length > 0) {
+      logger.error(err.stack);
+    }
     process.exitCode = 1;
   });
 }

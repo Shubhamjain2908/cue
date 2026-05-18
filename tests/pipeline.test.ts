@@ -86,11 +86,11 @@ describe("formatEtYmd / getEtMinutesSinceMidnight", () => {
 
 describe("runPipeline", () => {
   it("returns 1 and does not run downstream when fetch fails (critical)", () => {
-    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns => {
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       if (args?.[1] === "fetch") {
-        return { status: 1 } as SpawnSyncReturns;
+        return { status: 1 } as SpawnSyncReturns<Buffer>;
       }
-      return { status: 0 } as SpawnSyncReturns;
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
     const code = runPipeline("stop", { spawn });
@@ -100,15 +100,15 @@ describe("runPipeline", () => {
 
   it("continues after enrich fails and still runs alert and dashboard", () => {
     const scripts: string[] = [];
-    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns => {
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       const script = args?.[1];
       if (script !== undefined) {
         scripts.push(script);
       }
       if (script === "enrich") {
-        return { status: 1 } as SpawnSyncReturns;
+        return { status: 1 } as SpawnSyncReturns<Buffer>;
       }
-      return { status: 0 } as SpawnSyncReturns;
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
     const code = runPipeline("rebalance", { spawn });
