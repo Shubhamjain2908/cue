@@ -289,6 +289,59 @@ function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitR
   }
 }
 
+function strategyBucketFromClosedTrade(t: ClosedBacktestTrade): StrategyExitReason {
+  switch (t.exitReason) {
+    case "gapOrStop":
+      return "TRAILING_STOP";
+    case "maxHoldDays":
+      return "MAX_HOLD";
+    case "standardTrendBreak":
+      return "REBALANCE_DROP";
+    case "standardTakeProfit":
+      return "FORCED_CLOSE";
+  }
+}
+
+/** Calendar days between exit and entry (UTC midnight ISO dates). */
+function calendarHoldDaysHeld(entryDate: string, exitDate: string): number {
+  return (parseIsoUtcMs(exitDate) - parseIsoUtcMs(entryDate)) / (1000 * 60 * 60 * 24);
+}
+
+interface ExitBucketAgg {
+  count: number;
+  sumPnlPct: number;
+  sumHoldDays: number;
+}
+
+function emptyExitBucketAgg(): Record<StrategyExitReason, ExitBucketAgg> {
+  return {
+    TRAILING_STOP: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+    MAX_HOLD: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+    REBALANCE_DROP: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+    FORCED_CLOSE: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+  };
+}
+
+function aggregateExitBuckets(closedTrades: readonly ClosedBacktestTrade[]): Record<
+  StrategyExitReason,
+  ExitBucketAgg
+> {
+  const out = emptyExitBucketAgg();
+  for (const t of closedTrades) {
+    const bucket = strategyBucketFromClosedTrade(t);
+    const pnlPct =
+      t.entryFillPrice !== 0
+        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+        : 0;
+    const holdDays = calendarHoldDaysHeld(t.entryDate, t.exitDate);
+    const cell = out[bucket];
+    cell.count += 1;
+    cell.sumPnlPct += pnlPct;
+    cell.sumHoldDays += holdDays;
+  }
+  return out;
+}
+
 function mean(nums: readonly number[]): number | null {
   if (nums.length === 0) {
     return null;
@@ -306,7 +359,7 @@ function printSummary(
   metrics: ReturnType<typeof computeBacktestMetrics>,
   benchmarkCagrPct: number | null,
   expectancyPctPerTrade: number | null,
-  exitBuckets: Record<StrategyExitReason, number>,
+  exitAgg: Record<StrategyExitReason, ExitBucketAgg>,
 ): void {
   const rows: [string, string][] = [
     ["Window", `${fromDate} → ${toDate}`],
@@ -334,7 +387,13 @@ function printSummary(
     "REBALANCE_DROP",
     "FORCED_CLOSE",
   ] as const) {
-    console.log(`  ${k.padEnd(18)} ${String(exitBuckets[k])}`);
+    const { count, sumPnlPct, sumHoldDays } = exitAgg[k];
+    const avgPnl = count > 0 ? sumPnlPct / count : 0;
+    const avgHold = count > 0 ? sumHoldDays / count : 0;
+    const label = k;
+    console.log(
+      `  ${label.padEnd(18)} ${count.toString().padEnd(4)} | Avg P&L: ${avgPnl.toFixed(2)}% | Avg Hold: ${avgHold.toFixed(1)} days`,
+    );
   }
   console.log("");
 }
@@ -706,25 +765,8 @@ if (isMain) {
           : 0,
       ),
     );
-    const exitBuckets: Record<StrategyExitReason, number> = {
-      TRAILING_STOP: 0,
-      MAX_HOLD: 0,
-      REBALANCE_DROP: 0,
-      FORCED_CLOSE: 0,
-    };
-    for (const t of result.closedTrades) {
-      const r = t.exitReason;
-      if (r === "gapOrStop") {
-        exitBuckets.TRAILING_STOP += 1;
-      } else if (r === "maxHoldDays") {
-        exitBuckets.MAX_HOLD += 1;
-      } else if (r === "standardTrendBreak") {
-        exitBuckets.REBALANCE_DROP += 1;
-      } else {
-        exitBuckets.FORCED_CLOSE += 1;
-      }
-    }
-    printSummary(from, to, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade, exitBuckets);
+    const exitAgg = aggregateExitBuckets(result.closedTrades);
+    printSummary(from, to, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade, exitAgg);
 
     if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
       console.warn(
