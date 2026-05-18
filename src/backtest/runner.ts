@@ -579,7 +579,7 @@ export function runBacktest(
         if (!bar) {
           continue;
         }
-        if (bar.low <= pos.currentStop && !pendingExitReason.has(ticker)) {
+        if (bar.close <= pos.currentStop && !pendingExitReason.has(ticker)) {
           pendingExitReason.set(ticker, "TRAILING_STOP");
         }
       }
