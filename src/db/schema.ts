@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
   win_rate REAL NOT NULL,
   sharpe_ratio REAL NOT NULL,
   total_trades INTEGER NOT NULL,
-  benchmark_cagr REAL NOT NULL
+  benchmark_cagr REAL NOT NULL,
+  expectancy REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -84,6 +85,11 @@ function signalColumnNames(db: SqliteConnection): Set<string> {
 
 function enrichmentColumnNames(db: SqliteConnection): Set<string> {
   const rows = db.prepare(`PRAGMA table_info(enrichments)`).all() as Array<{ name: string }>;
+  return new Set(rows.map((r) => r.name));
+}
+
+function backtestRunColumnNames(db: SqliteConnection): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(backtest_runs)`).all() as Array<{ name: string }>;
   return new Set(rows.map((r) => r.name));
 }
 
@@ -158,6 +164,11 @@ export function migrateSchema(db: SqliteConnection): void {
     db.exec(
       `ALTER TABLE enrichments ADD COLUMN confidence TEXT NOT NULL DEFAULT 'LOW'`,
     );
+  }
+
+  const btCols = backtestRunColumnNames(db);
+  if (btCols.size > 0 && !btCols.has("expectancy")) {
+    db.exec(`ALTER TABLE backtest_runs ADD COLUMN expectancy REAL NOT NULL DEFAULT 0`);
   }
 }
 

@@ -326,14 +326,18 @@ export interface BacktestRunInsert {
   sharpeRatio: number;
   totalTrades: number;
   benchmarkCagr: number;
+  /** Mean per-trade return, percentage points (e.g. 4.78 = +4.78% avg). */
+  expectancy: number;
 }
 
 export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert): { lastInsertRowid: bigint } {
   const stmt = db.prepare(`
     INSERT INTO backtest_runs (
-      run_date, from_date, to_date, cagr, max_drawdown, win_rate, sharpe_ratio, total_trades, benchmark_cagr
+      run_date, from_date, to_date, cagr, max_drawdown, win_rate, sharpe_ratio, total_trades, benchmark_cagr,
+      expectancy
     ) VALUES (
-      @runDate, @fromDate, @toDate, @cagr, @maxDrawdown, @winRate, @sharpeRatio, @totalTrades, @benchmarkCagr
+      @runDate, @fromDate, @toDate, @cagr, @maxDrawdown, @winRate, @sharpeRatio, @totalTrades, @benchmarkCagr,
+      @expectancy
     )
   `);
   const info = stmt.run({
@@ -346,6 +350,7 @@ export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert):
     sharpeRatio: row.sharpeRatio,
     totalTrades: row.totalTrades,
     benchmarkCagr: row.benchmarkCagr,
+    expectancy: row.expectancy,
   });
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }

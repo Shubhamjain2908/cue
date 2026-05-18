@@ -1,0 +1,176 @@
+import type { DashboardPayload } from "./queries.js";
+
+export function renderHtml(payload: DashboardPayload): string {
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+
+  return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cue — Signal Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e;
+      --green: #3fb950; --red: #f85149; --amber: #d29922;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; padding: 24px; }
+    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 4px; }
+    .meta { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge-green { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid var(--green); }
+    .badge-red   { background: rgba(248,81,73,.15);  color: var(--red);   border: 1px solid var(--red); }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .card-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+    .card-value { font-size: 1.5rem; font-weight: 700; }
+    .card-value.green { color: var(--green); }
+    .card-value.red   { color: var(--red); }
+    .card-value.amber { color: var(--amber); }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .section-title { font-size: 1rem; font-weight: 600; margin: 24px 0 12px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    canvas { max-height: 200px; }
+    .ticker { font-weight: 700; color: var(--accent); }
+    .stop { color: var(--red); }
+  </style>
+</head>
+<body>
+  <script>window.__CUE__ = ${json};</script>
+
+  <h1>Cue — Nasdaq 100 Signal Engine</h1>
+  <p class="meta" id="meta"></p>
+
+  <div class="grid-4" id="kpi-row"></div>
+
+  <h2 class="section-title">Open Positions</h2>
+  <div class="card">
+    <table id="positions-table">
+      <thead><tr>
+        <th>Ticker</th><th>Entry Date</th><th>Entry Price</th>
+        <th>Trailing Stop</th><th>High Since Entry</th>
+        <th>Days Held</th><th>Momentum Rank</th><th>12-1 Return</th>
+      </tr></thead>
+      <tbody id="positions-body"></tbody>
+    </table>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <h2 class="section-title">Recent Signals (Last 20)</h2>
+      <div class="card">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Ticker</th><th>Type</th><th>Sector</th><th>Sentiment</th><th>Rationale</th>
+          </tr></thead>
+          <tbody id="signals-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h2 class="section-title">Sector Allocation</h2>
+      <div class="card"><canvas id="sector-chart"></canvas></div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Backtest (Latest Run)</h2>
+  <div class="grid-4" id="backtest-row"></div>
+
+  <script>
+    const d = window.__CUE__;
+
+    // Meta
+    document.getElementById('meta').innerHTML =
+      'Generated: ' + new Date(d.generated_at).toLocaleString() +
+      ' &nbsp;|&nbsp; Regime: ' +
+      (d.regime_active
+        ? '<span class="badge badge-green">BULLISH — QQQ &gt; SMA200</span>'
+        : '<span class="badge badge-red">BEARISH — BUY SIGNALS SUPPRESSED</span>');
+
+    // KPI row
+    const kpis = [
+      { label: 'Open Positions', value: d.open_positions.length, cls: '' },
+      { label: 'Recent Signals (20d)', value: d.recent_signals.length, cls: '' },
+      { label: 'Regime', value: d.regime_active ? 'BULLISH' : 'BEARISH', cls: d.regime_active ? 'green' : 'red' },
+      { label: 'Sectors Held', value: d.sector_allocation.length, cls: '' },
+    ];
+    document.getElementById('kpi-row').innerHTML = kpis.map(k =>
+      '<div class="card"><div class="card-label">' + k.label + '</div>' +
+      '<div class="card-value ' + k.cls + '">' + k.value + '</div></div>'
+    ).join('');
+
+    // Positions table
+    const pBody = document.getElementById('positions-body');
+    if (d.open_positions.length === 0) {
+      pBody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center">No open positions</td></tr>';
+    } else {
+      pBody.innerHTML = d.open_positions.map(p =>
+        '<tr>' +
+        '<td class="ticker">' + p.ticker + '</td>' +
+        '<td>' + p.entry_date + '</td>' +
+        '<td>$' + p.entry_price.toFixed(2) + '</td>' +
+        '<td class="stop">$' + p.current_stop_loss.toFixed(2) + '</td>' +
+        '<td>$' + p.highest_close_since_entry.toFixed(2) + '</td>' +
+        '<td>' + p.days_held + '</td>' +
+        '<td>' + (p.momentum_rank == null ? '—' : ('#' + p.momentum_rank)) + '</td>' +
+        '<td>' + (p.momentum_12_1_return == null ? '—' : ((p.momentum_12_1_return * 100).toFixed(1) + '%')) + '</td>' +
+        '</tr>'
+      ).join('');
+    }
+
+    // Signals table
+    const sentimentColor = s => s === 'BULLISH' ? 'var(--green)' : s === 'BEARISH' ? 'var(--red)' : 'var(--amber)';
+    document.getElementById('signals-body').innerHTML = d.recent_signals.map(s => {
+      const rat = s.rationale;
+      const ratCell = !rat ? '—' : (rat.length > 80 ? rat.slice(0, 80) + '…' : rat);
+      return (
+        '<tr>' +
+        '<td>' + s.signal_date + '</td>' +
+        '<td class="ticker">' + s.ticker + '</td>' +
+        '<td><span class="badge ' + (s.signal_type === 'BUY' ? 'badge-green' : 'badge-red') + '">' + s.signal_type + '</span></td>' +
+        '<td>' + (s.sector ?? '—') + '</td>' +
+        '<td style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</td>' +
+        '<td style="color:var(--muted);font-size:12px">' + ratCell + '</td>' +
+        '</tr>'
+      );
+    }).join('');
+
+    // Sector doughnut
+    if (d.sector_allocation.length > 0) {
+      new Chart(document.getElementById('sector-chart'), {
+        type: 'doughnut',
+        data: {
+          labels: d.sector_allocation.map(x => x.sector),
+          datasets: [{ data: d.sector_allocation.map(x => x.count),
+            backgroundColor: ['#58a6ff','#3fb950','#d29922','#f85149','#bc8cff','#79c0ff','#56d364'] }]
+        },
+        options: { plugins: { legend: { labels: { color: '#e6edf3', font: { size: 11 } } } } }
+      });
+    } else {
+      document.getElementById('sector-chart').parentElement.innerHTML =
+        '<p style="color:var(--muted);text-align:center;padding:40px 0">No sector data for open positions</p>';
+    }
+
+    // Backtest KPIs
+    const bt = d.backtest_summary;
+    const btKpis = bt ? [
+      { label: 'CAGR',         value: (bt.cagr * 100).toFixed(2) + '%',         cls: bt.cagr > 0.12 ? 'green' : 'red' },
+      { label: 'Sharpe',       value: bt.sharpe.toFixed(3),                      cls: bt.sharpe > 1.0 ? 'green' : 'red' },
+      { label: 'Max Drawdown', value: (bt.max_drawdown * 100).toFixed(2) + '%',  cls: bt.max_drawdown < 0.20 ? 'green' : 'red' },
+      { label: 'Expectancy',   value: (bt.expectancy * 100).toFixed(2) + '%',    cls: bt.expectancy > 0 ? 'green' : 'red' },
+    ] : [{ label: 'Backtest', value: 'No data', cls: 'amber' }];
+    document.getElementById('backtest-row').innerHTML = btKpis.map(k =>
+      '<div class="card"><div class="card-label">' + k.label + '</div>' +
+      '<div class="card-value ' + k.cls + '">' + k.value + '</div></div>'
+    ).join('');
+  </script>
+</body>
+</html>`;
+}
