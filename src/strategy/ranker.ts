@@ -74,7 +74,7 @@ export function computeTrailingStop(
   highestCloseSinceEntry: number,
   entryPrice: number,
   atrToday: number,
-  atrMultiplierBase: number = 3.0,
+  atrMultiplierBase: number = 3.5,
   atrMultiplierTight: number = 1.5,
   atrTightenThresholdPct: number = 25.0,
 ): number {

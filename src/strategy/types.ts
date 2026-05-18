@@ -54,7 +54,7 @@ export const DEFAULT_RANKING_CONFIG: RankingConfig = {
   topN: 5,
   rebalanceDayOfWeek: 5,
   atrPeriod: 14,
-  atrMultiplierBase: 3.0,
+  atrMultiplierBase: 3.5,
   atrMultiplierTight: 1.5,
   atrTightenThresholdPct: 25.0,
   maxHoldDays: 40,
