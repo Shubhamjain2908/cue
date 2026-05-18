@@ -74,9 +74,9 @@ export function computeTrailingStop(
   highestCloseSinceEntry: number,
   entryPrice: number,
   atrToday: number,
-  atrMultiplierBase: number = 2.0,
+  atrMultiplierBase: number = 3.0,
   atrMultiplierTight: number = 1.5,
-  atrTightenThresholdPct: number = 15.0,
+  atrTightenThresholdPct: number = 25.0,
 ): number {
   const unrealizedPct = ((highestCloseSinceEntry - entryPrice) / entryPrice) * 100;
 
