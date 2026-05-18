@@ -13,9 +13,13 @@ import {
   createBuyGateFirstFailCounters,
   generateSignal,
 } from "../strategy/signals.js";
-import type { SignalThresholds } from "../strategy/types.js";
+import type { SignalExitReason, SignalThresholds } from "../strategy/types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
-import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
+import type {
+  BacktestExitReason,
+  ClosedBacktestTrade,
+  EquityPoint,
+} from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
   BACKTEST_MAX_HOLD_DAYS,
@@ -104,6 +108,79 @@ function tradingDaysHeld(
     count++;
   }
   return count;
+}
+
+/** Count of `sortedDates` in [entryDate, exitDate] inclusive (diagnostic hold span). */
+function tradingDaysHeldInclusive(
+  sortedDates: readonly string[],
+  entryDate: string,
+  exitDate: string,
+): number {
+  let count = 0;
+  for (const d of sortedDates) {
+    if (d < entryDate) {
+      continue;
+    }
+    if (d > exitDate) {
+      break;
+    }
+    count++;
+  }
+  return count;
+}
+
+function logExitDiagnostics(
+  sortedDates: readonly string[],
+  closedTrades: readonly ClosedBacktestTrade[],
+): void {
+  const sums = {
+    gapOrStop: { hold: 0, pnlPct: 0, n: 0 },
+    maxHoldDays: { hold: 0, pnlPct: 0, n: 0 },
+    standardTakeProfit: { hold: 0, pnlPct: 0, n: 0 },
+    standardTrendBreak: { hold: 0, pnlPct: 0, n: 0 },
+  };
+  for (const t of closedTrades) {
+    const bucket = sums[t.exitReason];
+    const holdDays = tradingDaysHeldInclusive(sortedDates, t.entryDate, t.exitDate);
+    const pnlPct =
+      t.entryFillPrice !== 0
+        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+        : 0;
+    bucket.hold += holdDays;
+    bucket.pnlPct += pnlPct;
+    bucket.n += 1;
+  }
+  const lines = [
+    "",
+    "avgHoldDays by exit type (TEMP diagnostic; inclusive trading days entryDate→exitDate):",
+  ];
+  const order: BacktestExitReason[] = [
+    "gapOrStop",
+    "maxHoldDays",
+    "standardTakeProfit",
+    "standardTrendBreak",
+  ];
+  const labelFor = (key: BacktestExitReason): string => {
+    if (key === "standardTakeProfit") return "standard_TAKE_PROFIT";
+    if (key === "standardTrendBreak") return "standard_TREND_BREAK";
+    return key;
+  };
+  for (const key of order) {
+    const { hold, n } = sums[key];
+    const avgHold = n > 0 ? hold / n : 0;
+    const label = labelFor(key).padEnd(22, " ");
+    const note =
+      key === "maxHoldDays" ? "  (max-hold rule uses days after entry; inclusive span is often +1)" : "";
+    lines.push(`  ${label}${avgHold.toFixed(2)} days avg${note}`);
+  }
+  lines.push("", "avg P&L % by exit type (TEMP diagnostic; (exitFill − entryFill) / entryFill × 100):");
+  for (const key of order) {
+    const { pnlPct, n } = sums[key];
+    const avgPnl = n > 0 ? pnlPct / n : 0;
+    const label = labelFor(key).padEnd(22, " ");
+    lines.push(`  ${label}${avgPnl.toFixed(2)}%  (n=${String(n)})`);
+  }
+  console.log(lines.join("\n"));
 }
 
 function calendarYearFraction(fromIso: string, toIso: string): number {
@@ -350,12 +427,11 @@ export function runBacktest(
   const { byTicker, byDate } = indexByTickerAndDate(rows);
   const sortedDates = [...byDate.keys()].sort(compareIsoDate);
 
-  const qqqBars = byTicker.get(BACKTEST_BENCHMARK_TICKER) ?? [];
-  if (rows.length > 0 && qqqBars.length === 0) {
-    console.warn(
-      `Backtest: no ${BACKTEST_BENCHMARK_TICKER} bars in the hydrated window; benchmark CAGR will be n/a (fetch ${BACKTEST_BENCHMARK_TICKER} for a baseline).`,
-    );
+  const qqqSeries = byTicker.get(BACKTEST_BENCHMARK_TICKER);
+  if (!qqqSeries) {
+    throw new Error("QQQ not found in daily_prices — required for regime filter");
   }
+  const qqqBars = qqqSeries;
   const yearFraction = calendarYearFraction(fromDate, toDate);
   const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate);
 
@@ -363,15 +439,15 @@ export function runBacktest(
   const positions = new Map<string, SimPosition>();
   const pendingBuys = new Set<string>();
   const pendingStandardExits = new Set<string>();
-  const pendingSmaCrossUnderExits = new Set<string>();
+  const pendingExitReasons = new Map<string, SignalExitReason>();
 
   const equityPoints: EquityPoint[] = [];
   const closedTrades: ClosedBacktestTrade[] = [];
 
   let exitCountGapOrStop = 0;
-  let exitCountSmaCrossUnder = 0;
   let exitCountMaxHoldDays = 0;
-  let exitCountStandardSell = 0;
+  let exitCountStandardTakeProfit = 0;
+  let exitCountStandardTrendBreak = 0;
 
   let entryAboveSma200 = 0;
   let entryBelowSma200 = 0;
@@ -400,35 +476,28 @@ export function runBacktest(
           }
           const openPx = bar.open;
           const gapOrStop = openPx <= pos.stopLevel;
-          const smaCrossUnder = pendingSmaCrossUnderExits.has(ticker);
           const daysHeld = tradingDaysHeld(sortedDates, pos.entryDate, date);
           const maxHoldBreached = daysHeld >= BACKTEST_MAX_HOLD_DAYS;
           const standard = pendingStandardExits.has(ticker);
-          // Exit priority at next open: gap/stop → SMA cross-under (EOD) → max hold → signal SELL
-          let exitReason:
-            | "gapOrStop"
-            | "smaCrossUnder"
-            | "maxHoldDays"
-            | "standardSell"
-            | null = null;
+          // Exit priority at next open: gap/stop → max hold → signal SELL
+          let exitReason: BacktestExitReason | null = null;
           if (gapOrStop) {
             exitReason = "gapOrStop";
-          } else if (smaCrossUnder) {
-            exitReason = "smaCrossUnder";
           } else if (maxHoldBreached) {
             exitReason = "maxHoldDays";
           } else if (standard) {
-            exitReason = "standardSell";
+            const sub = pendingExitReasons.get(ticker) ?? "TAKE_PROFIT";
+            exitReason = sub === "TREND_BREAK" ? "standardTrendBreak" : "standardTakeProfit";
           }
           if (exitReason !== null) {
             if (exitReason === "gapOrStop") {
               exitCountGapOrStop += 1;
-            } else if (exitReason === "smaCrossUnder") {
-              exitCountSmaCrossUnder += 1;
             } else if (exitReason === "maxHoldDays") {
               exitCountMaxHoldDays += 1;
+            } else if (exitReason === "standardTakeProfit") {
+              exitCountStandardTakeProfit += 1;
             } else {
-              exitCountStandardSell += 1;
+              exitCountStandardTrendBreak += 1;
             }
             const exitFill = openPx * BACKTEST_SLIPPAGE_SELL_MULTIPLIER;
             const proceeds = pos.shares * exitFill;
@@ -439,10 +508,13 @@ export function runBacktest(
               entryDate: pos.entryDate,
               exitDate: date,
               realizedPnlUsd: proceeds - costBasis,
+              exitReason,
+              entryFillPrice: pos.entryFillPrice,
+              exitFillPrice: exitFill,
             });
             positions.delete(ticker);
             pendingStandardExits.delete(ticker);
-            pendingSmaCrossUnderExits.delete(ticker);
+            pendingExitReasons.delete(ticker);
           }
         }
 
@@ -505,11 +577,14 @@ export function runBacktest(
     if (inSignalWindow) {
       const nextBuys = new Set<string>();
       const nextStandardExits = new Set<string>();
-      const nextSmaCrossUnderExits = new Set<string>();
+      const nextPendingExitReasons = new Map<string, SignalExitReason>();
 
       const slotsAvailable = BACKTEST_MAX_CONCURRENT_POSITIONS - positions.size;
       let slotsLeft = slotsAvailable;
       const sortedUniverse = [...universe].sort((a, b) => a.localeCompare(b));
+
+      const qqqSlice = sliceClosesVolumes(qqqSeries, date);
+      const qqqCloses = qqqSlice?.close ?? [];
 
       for (const ticker of sortedUniverse) {
         const series = byTicker.get(ticker);
@@ -523,9 +598,10 @@ export function runBacktest(
 
         const openPos = positions.get(ticker);
 
-        const { signal } = generateSignal({
+        const { signal, reason } = generateSignal({
           close: sliced.close,
           volume: sliced.volume,
+          qqqCloses,
           thresholds,
           positionOpen: openPos !== undefined,
           buyGateFirstFail,
@@ -539,27 +615,23 @@ export function runBacktest(
         } else {
           if (signal === "SELL") {
             nextStandardExits.add(ticker);
-          }
-          const closesToDate = Array.from(sliced.close);
-          const smaNow = sma(thresholds.smaPeriod, closesToDate);
-          const todayClose = closesToDate[closesToDate.length - 1]!;
-          if (smaNow !== null && todayClose < smaNow) {
-            nextSmaCrossUnderExits.add(ticker);
+            nextPendingExitReasons.set(ticker, reason ?? "TAKE_PROFIT");
           }
         }
       }
 
       pendingBuys.clear();
       pendingStandardExits.clear();
-      pendingSmaCrossUnderExits.clear();
+      pendingExitReasons.clear();
       for (const t of nextBuys) {
         pendingBuys.add(t);
       }
       for (const t of nextStandardExits) {
         pendingStandardExits.add(t);
-      }
-      for (const t of nextSmaCrossUnderExits) {
-        pendingSmaCrossUnderExits.add(t);
+        const r = nextPendingExitReasons.get(t);
+        if (r !== undefined) {
+          pendingExitReasons.set(t, r);
+        }
       }
     }
 
@@ -588,9 +660,9 @@ export function runBacktest(
 
   const exitTotal =
     exitCountGapOrStop +
-    exitCountSmaCrossUnder +
     exitCountMaxHoldDays +
-    exitCountStandardSell;
+    exitCountStandardTakeProfit +
+    exitCountStandardTrendBreak;
   const entryTotal =
     entryAboveSma200 + entryBelowSma200 + entryInsufficientSma200;
   const buyGatePartitionSum =
@@ -605,9 +677,9 @@ export function runBacktest(
       "",
       "Exit reason counts (closed trades):",
       `  gapOrStop (stop-loss):     ${String(exitCountGapOrStop)}`,
-      `  SMA cross-under:          ${String(exitCountSmaCrossUnder)}`,
       `  maxHoldDays:              ${String(exitCountMaxHoldDays)}`,
-      `  pendingStandardExits:     ${String(exitCountStandardSell)}`,
+      `  standard_TAKE_PROFIT:     ${String(exitCountStandardTakeProfit)}`,
+      `  standard_TREND_BREAK:     ${String(exitCountStandardTrendBreak)}`,
       `  sum of above:             ${String(exitTotal)} (closed trades: ${String(closedTrades.length)})`,
       "",
       "Entry vs SMA200 at fill (SMA200 from closes through prior session; entry = fill open):",
@@ -627,6 +699,8 @@ export function runBacktest(
       `  skippedNullIndicators: ${String(buyGateFirstFail.skippedNullIndicators)} (null SMA/RSI/volumeRatio; not in six-way sum)`,
     ].join("\n"),
   );
+
+  logExitDiagnostics(sortedDates, closedTrades);
 
   return { equityPoints, closedTrades, metrics, benchmarkCagrPct, yearFraction };
 }

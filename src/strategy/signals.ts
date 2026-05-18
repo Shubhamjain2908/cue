@@ -6,7 +6,12 @@ import Database from "better-sqlite3";
 import { getConfig } from "../config/index.js";
 import { initSchema } from "../db/schema.js";
 import { momentum5d, rsi14, sma, volumeRatio } from "./indicators.js";
-import type { SignalDecision, SignalMetrics, SignalThresholds } from "./types.js";
+import type {
+  SignalDecision,
+  SignalExitReason,
+  SignalMetrics,
+  SignalThresholds,
+} from "./types.js";
 import { DEFAULT_SIGNAL_THRESHOLDS } from "./types.js";
 
 /** Mutable counters: first failing BUY gate per bar (mutually exclusive when all indicators non-null). */
@@ -47,15 +52,33 @@ export function computeSignalMetrics(input: {
   };
 }
 
+export type DecideSideResult =
+  | { side: "HOLD" }
+  | { side: "BUY" }
+  | { side: "SELL"; reason: SignalExitReason };
+
 export function decideSide(
   closes: number[],
   volumes: number[],
+  qqqCloses: readonly number[],
   thresholds: SignalThresholds,
   positionOpen: boolean,
   buyGateFirstFail?: BuyGateFirstFailCounters,
-): "BUY" | "SELL" | "HOLD" {
+): DecideSideResult {
+  // Regime filter — first gate in entry path
+  // EXIT path is unaffected: open positions can still be exited in bear regime
+  if (!positionOpen) {
+    const qqqSma200 = sma(200, [...qqqCloses]);
+    if (
+      qqqSma200 === null ||
+      qqqCloses[qqqCloses.length - 1]! <= qqqSma200
+    ) {
+      return { side: "HOLD" };
+    }
+  }
+
   if (closes.length < 200) {
-    return "HOLD";
+    return { side: "HOLD" };
   }
 
   const today = closes[closes.length - 1]!;
@@ -63,6 +86,7 @@ export function decideSide(
   const sma200 = sma(200, closes);
   const rsiToday = rsi14(closes);
   const rsiYest = rsi14(closes.slice(0, -1));
+  const rsi2DaysAgo = rsi14(closes.slice(0, -2));
   const volRatio = volumeRatio(volumes);
 
   if (
@@ -74,6 +98,7 @@ export function decideSide(
       sma200 === null ||
       rsiToday === null ||
       rsiYest === null ||
+      rsi2DaysAgo === null ||
       volRatio === null
     ) {
       buyGateFirstFail.skippedNullIndicators += 1;
@@ -83,7 +108,7 @@ export function decideSide(
       buyGateFirstFail.failedSma50 += 1;
     } else if (rsiToday > thresholds.buyRsiMax) {
       buyGateFirstFail.failedRsiCeiling += 1;
-    } else if (rsiToday <= rsiYest) {
+    } else if (!(rsiToday > rsiYest && rsiYest > rsi2DaysAgo)) {
       buyGateFirstFail.failedRsiTurn += 1;
     } else if (volRatio < thresholds.buyVolumeRatio) {
       buyGateFirstFail.failedVolume += 1;
@@ -97,16 +122,20 @@ export function decideSide(
     sma200 === null ||
     rsiToday === null ||
     rsiYest === null ||
+    rsi2DaysAgo === null ||
     volRatio === null
   ) {
-    return "HOLD";
+    return { side: "HOLD" };
   }
 
   if (positionOpen) {
     const takeProfit = rsiToday >= thresholds.exitRsiThreshold;
     const trendBreak = today < sma50;
-    if (takeProfit || trendBreak) {
-      return "SELL";
+    if (takeProfit) {
+      return { side: "SELL", reason: "TAKE_PROFIT" };
+    }
+    if (trendBreak) {
+      return { side: "SELL", reason: "TREND_BREAK" };
     }
   }
 
@@ -114,7 +143,7 @@ export function decideSide(
     const aboveSma200 = today > sma200;
     const aboveSma50 = today > sma50;
     const inPullback = rsiToday <= thresholds.buyRsiMax;
-    const rsiTurning = rsiToday > rsiYest;
+    const rsiTurning = rsiToday > rsiYest && rsiYest > rsi2DaysAgo;
     const volumeOk = volRatio >= thresholds.buyVolumeRatio;
     if (
       aboveSma200 &&
@@ -123,11 +152,11 @@ export function decideSide(
       rsiTurning &&
       volumeOk
     ) {
-      return "BUY";
+      return { side: "BUY" };
     }
   }
 
-  return "HOLD";
+  return { side: "HOLD" };
 }
 
 function signalThresholdsFromConfig(): SignalThresholds {
@@ -142,32 +171,37 @@ function signalThresholdsFromConfig(): SignalThresholds {
   };
 }
 
-/**
- * Pure signal engine: exhaustion entry (trend + RSI turn + volume) and
- * RSI / short-SMA exits when `positionOpen` is true. Runner applies gap/stop
- * and max-hold at execution.
- */
-export function generateSignal(input: {
+export interface GenerateSignalInput {
   close: readonly number[];
   volume: readonly number[];
+  qqqCloses: readonly number[];
   thresholds?: SignalThresholds;
   positionOpen?: boolean;
   buyGateFirstFail?: BuyGateFirstFailCounters;
-}): SignalDecision {
+}
+
+/**
+ * Pure signal engine: exhaustion entry (trend + two-day RSI turn + volume) and
+ * RSI take-profit or short-SMA trend-break exit when `positionOpen` is true.
+ * Runner applies gap/stop and max-hold at execution.
+ */
+export function generateSignal(input: GenerateSignalInput): SignalDecision {
   const thresholds = input.thresholds ?? DEFAULT_SIGNAL_THRESHOLDS;
   const metrics = computeSignalMetrics({
     close: input.close,
     volume: input.volume,
   });
   const positionOpen = input.positionOpen ?? false;
-  const signal = decideSide(
+  const result = decideSide(
     [...input.close],
     [...input.volume],
+    input.qqqCloses,
     thresholds,
     positionOpen,
     input.buyGateFirstFail,
   );
-  return { signal, metrics };
+  const reason = result.side === "SELL" ? result.reason : undefined;
+  return { signal: result.side, reason, metrics };
 }
 
 const isMain =
@@ -189,16 +223,27 @@ if (isMain) {
     initSchema(db);
     const rows = db
       .prepare(
-        `SELECT close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
+        `SELECT date, close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
       )
-      .all(ticker) as Array<{ close: number; volume: number }>;
+      .all(ticker) as Array<{ date: string; close: number; volume: number }>;
     if (rows.length === 0) {
       console.log("HOLD");
       process.exit(0);
     }
+    const lastDate = rows[rows.length - 1]!.date;
+    const qqqRows = db
+      .prepare(
+        `SELECT close FROM daily_prices WHERE ticker = 'QQQ' AND date <= ? ORDER BY date ASC`,
+      )
+      .all(lastDate) as Array<{ close: number }>;
+    if (qqqRows.length === 0) {
+      console.error("QQQ not found in daily_prices — required for regime filter");
+      process.exit(1);
+    }
     const { signal } = generateSignal({
       close: rows.map((r) => r.close),
       volume: rows.map((r) => r.volume),
+      qqqCloses: qqqRows.map((r) => r.close),
       thresholds: signalThresholdsFromConfig(),
       positionOpen: false,
     });

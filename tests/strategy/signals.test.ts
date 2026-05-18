@@ -17,46 +17,117 @@ function makeVolumes(length: number, base = 1_000_000): number[] {
 describe("decideSide() — Exhaustion Entry", () => {
   const thresholds: SignalThresholds = {
     smaPeriod: 10, // short period so tests don't need 50+ bars
-    buyRsiMax: 50,
+    buyRsiMax: 60,
     buyVolumeRatio: 1.2,
     exitRsiThreshold: 70,
     stopLossPct: 5,
     maxHoldDays: 20,
   };
 
+  // Dummy QQQ in bull regime — use in all non-regime tests
+  const bullQqq = makeCloses(220, 300, 0.5);
+
   // --- ENTRY tests (positionOpen = false) ---
 
   it("returns HOLD when closes.length < 200", () => {
     const closes = makeCloses(150);
     const volumes = makeVolumes(150);
-    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns HOLD when price is below SMA200 (downtrend)", () => {
     // Sharp decline: today always below SMA200
     const closes = makeCloses(210, 200, -0.5);
     const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns HOLD when price is above SMA200/SMA10 but RSI > buyRsiMax (too hot)", () => {
-    // Steep uptrend: RSI will be well above 50
+    // Steep uptrend: RSI will be well above buyRsiMax (60)
     const closes = makeCloses(210, 100, 1.5);
     const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns HOLD when volume ratio below buyVolumeRatio", () => {
     // Flat volumes — ratio will be 1.0
     const closes = makeCloses(210, 100, 0.2);
     const volumes = Array(210).fill(1_000_000);
-    expect(decideSide(closes, volumes, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
-  // BUY case: gentle uptrend, dip to cool RSI, then shallow multi-bar recovery so
-  // price clears SMA10 while RSI stays <= buyRsiMax and rsiToday > rsiYest.
+  // BUY case: gentle uptrend, dip to cool RSI, then recovery with two consecutive
+  // up closes so RSI improves: rsiToday > rsiYest > rsi2DaysAgo.
   it("returns BUY when all 5 entry conditions are met", () => {
     const base = makeCloses(200, 80, 0.25); // gentle uptrend → above SMA200 and SMA10
+    const dip = [
+      base.at(-1)! - 1.5,
+      base.at(-1)! - 2.5,
+      base.at(-1)! - 3.0,
+      base.at(-1)! - 3.5,
+      base.at(-1)! - 4.0,
+    ];
+    let last = dip[dip.length - 1]!;
+    const recovery: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      last = +(last + 0.05).toFixed(4);
+      recovery.push(last);
+    }
+    last = +(last + 0.35).toFixed(4);
+    recovery.push(last);
+    last = +(last + 0.45).toFixed(4);
+    recovery.push(last);
+    const closes = [...base, ...dip, ...recovery];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "BUY" });
+  });
+
+  // --- EXIT tests (positionOpen = true) ---
+
+  it("returns SELL when RSI >= exitRsiThreshold (take-profit)", () => {
+    // Very steep uptrend at the end: RSI will be >= 70
+    const closes = makeCloses(210, 100, 2.0);
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toEqual({
+      side: "SELL",
+      reason: "TAKE_PROFIT",
+    });
+  });
+
+  it("returns SELL when price crosses below SMA50 (trend break)", () => {
+    const base = makeCloses(225, 100, 0.3);
+    const crash = [base.at(-1)! - 10, base.at(-1)! - 12];
+    const closes = [...base, ...crash];
+    const volumes = makeVolumes(closes.length);
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toEqual({
+      side: "SELL",
+      reason: "TREND_BREAK",
+    });
+  });
+
+  it("returns HOLD for open position when no exit condition is met", () => {
+    // Oscillate with mild drift: RSI mid-range, last close above SMA10 and SMA200
+    const closes = Array.from({ length: 210 }, (_, i) =>
+      +(100 + Math.sin(i * 0.35 + 1.8) * 1.2 + i * 0.015).toFixed(4),
+    );
+    const volumes = makeVolumes(210);
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toEqual({ side: "HOLD" });
+  });
+});
+
+describe("regime filter", () => {
+  const thresholds: SignalThresholds = {
+    smaPeriod: 10,
+    buyRsiMax: 60,
+    buyVolumeRatio: 1.2,
+    exitRsiThreshold: 70,
+    stopLossPct: 5,
+    maxHoldDays: 20,
+  };
+
+  it("returns HOLD when QQQ is below SMA200 (bear regime)", () => {
+    const bearQqq = makeCloses(220, 400, -0.4);
+    const base = makeCloses(200, 80, 0.25);
     const dip = [
       base.at(-1)! - 1.5,
       base.at(-1)! - 2.5,
@@ -72,33 +143,16 @@ describe("decideSide() — Exhaustion Entry", () => {
     }
     const closes = [...base, ...dip, ...recovery];
     const volumes = makeVolumes(closes.length);
-    expect(decideSide(closes, volumes, thresholds, false)).toBe("BUY");
+    expect(decideSide(closes, volumes, bearQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
-  // --- EXIT tests (positionOpen = true) ---
-
-  it("returns SELL when RSI >= exitRsiThreshold (take-profit)", () => {
-    // Very steep uptrend at the end: RSI will be >= 70
-    const closes = makeCloses(210, 100, 2.0);
-    const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, thresholds, true)).toBe("SELL");
-  });
-
-  it("returns SELL when price crosses below SMA50 (trend break)", () => {
-    // Uptrend then sharp drop below SMA10
-    const base = makeCloses(205, 100, 0.3);
-    const crash = [base.at(-1)! - 10, base.at(-1)! - 12]; // below SMA10
-    const closes = [...base, ...crash];
-    const volumes = makeVolumes(closes.length);
-    expect(decideSide(closes, volumes, thresholds, true)).toBe("SELL");
-  });
-
-  it("returns HOLD for open position when no exit condition is met", () => {
-    // Oscillate with mild drift: RSI mid-range, last close above SMA10 and SMA200
-    const closes = Array.from({ length: 210 }, (_, i) =>
-      +(100 + Math.sin(i * 0.35 + 1.8) * 1.2 + i * 0.015).toFixed(4),
-    );
-    const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, thresholds, true)).toBe("HOLD");
+  it("returns SELL for open position even when QQQ is in bear regime", () => {
+    const bearQqq = makeCloses(220, 400, -0.4);
+    const closes = makeCloses(220, 100, 2.0);
+    const volumes = makeVolumes(220);
+    expect(decideSide(closes, volumes, bearQqq, thresholds, true)).toEqual({
+      side: "SELL",
+      reason: "TAKE_PROFIT",
+    });
   });
 });
