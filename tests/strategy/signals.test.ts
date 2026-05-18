@@ -56,8 +56,8 @@ describe("decideSide() — Exhaustion Entry", () => {
     expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
-  // BUY case: gentle uptrend, dip to cool RSI, then shallow multi-bar recovery so
-  // price clears SMA10 while RSI stays <= buyRsiMax and rsiToday > rsiYest.
+  // BUY case: gentle uptrend, dip to cool RSI, then recovery with two consecutive
+  // up closes so RSI improves: rsiToday > rsiYest > rsi2DaysAgo.
   it("returns BUY when all 5 entry conditions are met", () => {
     const base = makeCloses(200, 80, 0.25); // gentle uptrend → above SMA200 and SMA10
     const dip = [
@@ -69,10 +69,14 @@ describe("decideSide() — Exhaustion Entry", () => {
     ];
     let last = dip[dip.length - 1]!;
     const recovery: number[] = [];
-    for (let i = 0; i < 6; i++) {
-      last = +(last + 0.08).toFixed(4);
+    for (let i = 0; i < 5; i++) {
+      last = +(last + 0.05).toFixed(4);
       recovery.push(last);
     }
+    last = +(last + 0.35).toFixed(4);
+    recovery.push(last);
+    last = +(last + 0.45).toFixed(4);
+    recovery.push(last);
     const closes = [...base, ...dip, ...recovery];
     const volumes = makeVolumes(closes.length);
     expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "BUY" });

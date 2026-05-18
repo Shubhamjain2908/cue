@@ -20,9 +20,9 @@ export const DEFAULT_SIGNAL_THRESHOLDS: SignalThresholds = {
   smaPeriod: 50,
   buyRsiMax: 60,
   buyVolumeRatio: 1.2,
-  exitRsiThreshold: 75,
+  exitRsiThreshold: 70,
   stopLossPct: 5,
-  maxHoldDays: 40,
+  maxHoldDays: 20,
 };
 
 export interface OpenPositionContext {
