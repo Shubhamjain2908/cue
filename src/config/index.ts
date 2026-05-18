@@ -20,9 +20,9 @@ const envSchema = z.object({
   STOP_LOSS_PCT: z.coerce.number().positive().default(5),
   MAX_HOLD_DAYS: z.coerce.number().int().positive().default(20),
   SMA_PERIOD: z.coerce.number().int().positive().default(50),
-  BUY_RSI_MIN: z.coerce.number().default(45),
-  BUY_RSI_MAX: z.coerce.number().default(55),
-  EXIT_RSI_THRESHOLD: z.coerce.number().default(0),
+  BUY_RSI_MAX: z.coerce.number().default(50),
+  BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.2),
+  EXIT_RSI_THRESHOLD: z.coerce.number().default(70),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
@@ -45,8 +45,8 @@ export function getConfig(): AppConfig {
   cached = {
     ...d,
     smaPeriod: d.SMA_PERIOD,
-    buyRsiMin: d.BUY_RSI_MIN,
     buyRsiMax: d.BUY_RSI_MAX,
+    buyVolumeRatio: d.BUY_VOLUME_RATIO,
     exitRsiThreshold: d.EXIT_RSI_THRESHOLD,
     stopLossPct: d.STOP_LOSS_PCT,
     maxHoldDays: d.MAX_HOLD_DAYS,

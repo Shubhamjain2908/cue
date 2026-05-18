@@ -10,7 +10,7 @@ import { insertBacktestRun } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
 import { sma } from "../strategy/indicators.js";
 import { generateSignal } from "../strategy/signals.js";
-import type { OpenPositionContext, SignalThresholds } from "../strategy/types.js";
+import type { SignalThresholds } from "../strategy/types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
 import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
 import {
@@ -169,8 +169,8 @@ function thresholdsFromConfig(): SignalThresholds {
   const c = getConfig();
   return {
     smaPeriod: c.smaPeriod,
-    buyRsiMin: c.buyRsiMin,
     buyRsiMax: c.buyRsiMax,
+    buyVolumeRatio: c.buyVolumeRatio,
     exitRsiThreshold: c.exitRsiThreshold,
     stopLossPct: c.stopLossPct,
     maxHoldDays: c.maxHoldDays,
@@ -518,16 +518,12 @@ export function runBacktest(
         }
 
         const openPos = positions.get(ticker);
-        const positionCtx: OpenPositionContext | undefined =
-          openPos === undefined
-            ? undefined
-            : { entryPrice: openPos.entryFillPrice };
 
         const { signal } = generateSignal({
           close: sliced.close,
           volume: sliced.volume,
           thresholds,
-          position: positionCtx,
+          positionOpen: openPos !== undefined,
         });
 
         if (openPos === undefined) {
