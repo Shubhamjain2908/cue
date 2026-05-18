@@ -38,7 +38,11 @@ export interface EquityPoint {
 }
 
 /** Exit path at next open (see `runBacktest` priority chain). */
-export type BacktestExitReason = "gapOrStop" | "maxHoldDays" | "standardSell";
+export type BacktestExitReason =
+  | "gapOrStop"
+  | "maxHoldDays"
+  | "standardTakeProfit"
+  | "standardTrendBreak";
 
 /** A completed round-trip from the simulator (win rate uses `realizedPnlUsd`). */
 export interface ClosedBacktestTrade {
