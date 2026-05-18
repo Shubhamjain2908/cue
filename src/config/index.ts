@@ -5,7 +5,7 @@ import type { SignalThresholds } from "../strategy/types.js";
 
 loadDotenv();
 
-const providerKeySchema = z.enum(["anthropic", "openai", "google"]);
+const providerKeySchema = z.enum(["anthropic", "openai", "google", "vertex"]);
 
 const baseEnvSchema = z.object({
   /** Massive.com REST key (https://massive.com/; rebranded from Polygon.io; same key). */
