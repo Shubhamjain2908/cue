@@ -1,6 +1,8 @@
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 
+import type { SignalThresholds } from "../strategy/types.js";
+
 loadDotenv();
 
 const envSchema = z.object({
@@ -17,16 +19,16 @@ const envSchema = z.object({
   POSITION_SIZE_USD: z.coerce.number().positive().default(400),
   STOP_LOSS_PCT: z.coerce.number().positive().default(5),
   MAX_HOLD_DAYS: z.coerce.number().int().positive().default(20),
-  BUY_RSI_THRESHOLD: z.coerce.number().default(60),
-  BUY_MOMENTUM_THRESHOLD: z.coerce.number().default(3),
-  BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.3),
-  EXIT_RSI_THRESHOLD: z.coerce.number().default(45),
+  SMA_PERIOD: z.coerce.number().int().positive().default(50),
+  BUY_RSI_MIN: z.coerce.number().default(45),
+  BUY_RSI_MAX: z.coerce.number().default(55),
+  EXIT_RSI_THRESHOLD: z.coerce.number().default(0),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
 });
 
-export type AppConfig = z.infer<typeof envSchema>;
+export type AppConfig = z.infer<typeof envSchema> & SignalThresholds;
 
 let cached: AppConfig | undefined;
 
@@ -39,8 +41,17 @@ export function getConfig(): AppConfig {
     const msg = parsed.error.flatten().fieldErrors;
     throw new Error(`Invalid environment: ${JSON.stringify(msg)}`);
   }
-  cached = parsed.data;
-  return parsed.data;
+  const d = parsed.data;
+  cached = {
+    ...d,
+    smaPeriod: d.SMA_PERIOD,
+    buyRsiMin: d.BUY_RSI_MIN,
+    buyRsiMax: d.BUY_RSI_MAX,
+    exitRsiThreshold: d.EXIT_RSI_THRESHOLD,
+    stopLossPct: d.STOP_LOSS_PCT,
+    maxHoldDays: d.MAX_HOLD_DAYS,
+  };
+  return cached;
 }
 
 export function resetConfigCache(): void {

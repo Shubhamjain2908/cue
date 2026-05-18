@@ -64,11 +64,12 @@ function main() {
     const config = getConfig();
 
     const thresholds: SignalThresholds = {
-        buyRsiMin:        config.BUY_RSI_THRESHOLD,
-        buyMomentumMinPct: config.BUY_MOMENTUM_THRESHOLD,
-        buyVolumeRatioMin: config.BUY_VOLUME_RATIO,
-        exitRsiMax:       config.EXIT_RSI_THRESHOLD,
+        smaPeriod:        config.SMA_PERIOD,
+        buyRsiMin:        config.BUY_RSI_MIN,
+        buyRsiMax:        config.BUY_RSI_MAX,
+        exitRsiThreshold: config.EXIT_RSI_THRESHOLD,
         stopLossPct:      config.STOP_LOSS_PCT,
+        maxHoldDays:      config.MAX_HOLD_DAYS,
     };
 
     const db = new Database(config.DB_PATH);

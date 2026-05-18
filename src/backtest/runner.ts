@@ -167,11 +167,12 @@ function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
 function thresholdsFromConfig(): SignalThresholds {
   const c = getConfig();
   return {
-    buyRsiMin: c.BUY_RSI_THRESHOLD,
-    buyMomentumMinPct: c.BUY_MOMENTUM_THRESHOLD,
-    buyVolumeRatioMin: c.BUY_VOLUME_RATIO,
-    exitRsiMax: c.EXIT_RSI_THRESHOLD,
-    stopLossPct: c.STOP_LOSS_PCT,
+    smaPeriod: c.smaPeriod,
+    buyRsiMin: c.buyRsiMin,
+    buyRsiMax: c.buyRsiMax,
+    exitRsiThreshold: c.exitRsiThreshold,
+    stopLossPct: c.stopLossPct,
+    maxHoldDays: c.maxHoldDays,
   };
 }
 
@@ -549,7 +550,7 @@ if (isMain) {
 
     if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
       console.warn(
-        "Backtest: 0 round-trip trades — no BUY signals passed the RSI/momentum/volume gates on this window and universe (strategy stayed in cash).",
+        "Backtest: 0 round-trip trades — no BUY signals passed the trend + pullback gates on this window and universe (strategy stayed in cash).",
       );
     }
 
