@@ -1,3 +1,7 @@
+/**
+ * Shared signal types. Macro regime (QQQ SMA200 hard gate on new BUYs) lives in
+ * `signals.ts` (`decideSide` / `generateSignal` and `GenerateSignalInput`).
+ */
 export type TradeSignal = "BUY" | "SELL" | "HOLD";
 
 export interface SignalThresholds {
