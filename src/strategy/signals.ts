@@ -50,10 +50,23 @@ export function computeSignalMetrics(input: {
 export function decideSide(
   closes: number[],
   volumes: number[],
+  qqqCloses: readonly number[],
   thresholds: SignalThresholds,
   positionOpen: boolean,
   buyGateFirstFail?: BuyGateFirstFailCounters,
 ): "BUY" | "SELL" | "HOLD" {
+  // Regime filter — first gate in entry path
+  // EXIT path is unaffected: open positions can still be exited in bear regime
+  if (!positionOpen) {
+    const qqqSma200 = sma(200, [...qqqCloses]);
+    if (
+      qqqSma200 === null ||
+      qqqCloses[qqqCloses.length - 1]! <= qqqSma200
+    ) {
+      return "HOLD";
+    }
+  }
+
   if (closes.length < 200) {
     return "HOLD";
   }
@@ -142,18 +155,21 @@ function signalThresholdsFromConfig(): SignalThresholds {
   };
 }
 
+export interface GenerateSignalInput {
+  close: readonly number[];
+  volume: readonly number[];
+  qqqCloses: readonly number[];
+  thresholds?: SignalThresholds;
+  positionOpen?: boolean;
+  buyGateFirstFail?: BuyGateFirstFailCounters;
+}
+
 /**
  * Pure signal engine: exhaustion entry (trend + RSI turn + volume) and
  * RSI / short-SMA exits when `positionOpen` is true. Runner applies gap/stop
  * and max-hold at execution.
  */
-export function generateSignal(input: {
-  close: readonly number[];
-  volume: readonly number[];
-  thresholds?: SignalThresholds;
-  positionOpen?: boolean;
-  buyGateFirstFail?: BuyGateFirstFailCounters;
-}): SignalDecision {
+export function generateSignal(input: GenerateSignalInput): SignalDecision {
   const thresholds = input.thresholds ?? DEFAULT_SIGNAL_THRESHOLDS;
   const metrics = computeSignalMetrics({
     close: input.close,
@@ -163,6 +179,7 @@ export function generateSignal(input: {
   const signal = decideSide(
     [...input.close],
     [...input.volume],
+    input.qqqCloses,
     thresholds,
     positionOpen,
     input.buyGateFirstFail,
@@ -189,16 +206,27 @@ if (isMain) {
     initSchema(db);
     const rows = db
       .prepare(
-        `SELECT close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
+        `SELECT date, close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
       )
-      .all(ticker) as Array<{ close: number; volume: number }>;
+      .all(ticker) as Array<{ date: string; close: number; volume: number }>;
     if (rows.length === 0) {
       console.log("HOLD");
       process.exit(0);
     }
+    const lastDate = rows[rows.length - 1]!.date;
+    const qqqRows = db
+      .prepare(
+        `SELECT close FROM daily_prices WHERE ticker = 'QQQ' AND date <= ? ORDER BY date ASC`,
+      )
+      .all(lastDate) as Array<{ close: number }>;
+    if (qqqRows.length === 0) {
+      console.error("QQQ not found in daily_prices — required for regime filter");
+      process.exit(1);
+    }
     const { signal } = generateSignal({
       close: rows.map((r) => r.close),
       volume: rows.map((r) => r.volume),
+      qqqCloses: qqqRows.map((r) => r.close),
       thresholds: signalThresholdsFromConfig(),
       positionOpen: false,
     });
