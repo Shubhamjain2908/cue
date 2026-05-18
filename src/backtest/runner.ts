@@ -362,13 +362,11 @@ export function runBacktest(
   const positions = new Map<string, SimPosition>();
   const pendingBuys = new Set<string>();
   const pendingStandardExits = new Set<string>();
-  const pendingSmaCrossUnderExits = new Set<string>();
 
   const equityPoints: EquityPoint[] = [];
   const closedTrades: ClosedBacktestTrade[] = [];
 
   let exitCountGapOrStop = 0;
-  let exitCountSmaCrossUnder = 0;
   let exitCountMaxHoldDays = 0;
   let exitCountStandardSell = 0;
 
@@ -399,21 +397,13 @@ export function runBacktest(
           }
           const openPx = bar.open;
           const gapOrStop = openPx <= pos.stopLevel;
-          const smaCrossUnder = pendingSmaCrossUnderExits.has(ticker);
           const daysHeld = tradingDaysHeld(sortedDates, pos.entryDate, date);
           const maxHoldBreached = daysHeld >= BACKTEST_MAX_HOLD_DAYS;
           const standard = pendingStandardExits.has(ticker);
-          // Exit priority at next open: gap/stop → SMA cross-under (EOD) → max hold → signal SELL
-          let exitReason:
-            | "gapOrStop"
-            | "smaCrossUnder"
-            | "maxHoldDays"
-            | "standardSell"
-            | null = null;
+          // Exit priority at next open: gap/stop → max hold → signal SELL
+          let exitReason: "gapOrStop" | "maxHoldDays" | "standardSell" | null = null;
           if (gapOrStop) {
             exitReason = "gapOrStop";
-          } else if (smaCrossUnder) {
-            exitReason = "smaCrossUnder";
           } else if (maxHoldBreached) {
             exitReason = "maxHoldDays";
           } else if (standard) {
@@ -422,8 +412,6 @@ export function runBacktest(
           if (exitReason !== null) {
             if (exitReason === "gapOrStop") {
               exitCountGapOrStop += 1;
-            } else if (exitReason === "smaCrossUnder") {
-              exitCountSmaCrossUnder += 1;
             } else if (exitReason === "maxHoldDays") {
               exitCountMaxHoldDays += 1;
             } else {
@@ -441,7 +429,6 @@ export function runBacktest(
             });
             positions.delete(ticker);
             pendingStandardExits.delete(ticker);
-            pendingSmaCrossUnderExits.delete(ticker);
           }
         }
 
@@ -504,7 +491,6 @@ export function runBacktest(
     if (inSignalWindow) {
       const nextBuys = new Set<string>();
       const nextStandardExits = new Set<string>();
-      const nextSmaCrossUnderExits = new Set<string>();
 
       const slotsAvailable = BACKTEST_MAX_CONCURRENT_POSITIONS - positions.size;
       let slotsLeft = slotsAvailable;
@@ -543,26 +529,16 @@ export function runBacktest(
           if (signal === "SELL") {
             nextStandardExits.add(ticker);
           }
-          const closesToDate = Array.from(sliced.close);
-          const smaNow = sma(thresholds.smaPeriod, closesToDate);
-          const todayClose = closesToDate[closesToDate.length - 1]!;
-          if (smaNow !== null && todayClose < smaNow) {
-            nextSmaCrossUnderExits.add(ticker);
-          }
         }
       }
 
       pendingBuys.clear();
       pendingStandardExits.clear();
-      pendingSmaCrossUnderExits.clear();
       for (const t of nextBuys) {
         pendingBuys.add(t);
       }
       for (const t of nextStandardExits) {
         pendingStandardExits.add(t);
-      }
-      for (const t of nextSmaCrossUnderExits) {
-        pendingSmaCrossUnderExits.add(t);
       }
     }
 
@@ -590,10 +566,7 @@ export function runBacktest(
   });
 
   const exitTotal =
-    exitCountGapOrStop +
-    exitCountSmaCrossUnder +
-    exitCountMaxHoldDays +
-    exitCountStandardSell;
+    exitCountGapOrStop + exitCountMaxHoldDays + exitCountStandardSell;
   const entryTotal =
     entryAboveSma200 + entryBelowSma200 + entryInsufficientSma200;
   const buyGatePartitionSum =
@@ -608,7 +581,6 @@ export function runBacktest(
       "",
       "Exit reason counts (closed trades):",
       `  gapOrStop (stop-loss):     ${String(exitCountGapOrStop)}`,
-      `  SMA cross-under:          ${String(exitCountSmaCrossUnder)}`,
       `  maxHoldDays:              ${String(exitCountMaxHoldDays)}`,
       `  pendingStandardExits:     ${String(exitCountStandardSell)}`,
       `  sum of above:             ${String(exitTotal)} (closed trades: ${String(closedTrades.length)})`,
