@@ -54,53 +54,59 @@ export function decideSide(
   positionOpen: boolean,
   buyGateFirstFail?: BuyGateFirstFailCounters,
 ): "BUY" | "SELL" | "HOLD" {
-  if (closes.length < 200) {
+  if (closes.length < 220) {
     return "HOLD";
   }
 
   const today = closes[closes.length - 1]!;
+  const closesLag20 = closes.slice(0, closes.length - 20);
   const sma50 = sma(thresholds.smaPeriod, closes);
-  const sma200 = sma(200, closes);
+  const sma200Now = sma(200, closes);
+  const sma200Lag20 = sma(200, closesLag20);
   const rsiToday = rsi14(closes);
   const rsiYest = rsi14(closes.slice(0, -1));
   const volRatio = volumeRatio(volumes);
 
-  if (
-    buyGateFirstFail !== undefined &&
-    !positionOpen
-  ) {
+  if (buyGateFirstFail !== undefined && !positionOpen) {
     if (
       sma50 === null ||
-      sma200 === null ||
+      sma200Now === null ||
+      sma200Lag20 === null ||
       rsiToday === null ||
       rsiYest === null ||
       volRatio === null
     ) {
       buyGateFirstFail.skippedNullIndicators += 1;
-    } else if (today <= sma200) {
-      buyGateFirstFail.failedSma200 += 1;
-    } else if (today <= sma50) {
-      buyGateFirstFail.failedSma50 += 1;
-    } else if (rsiToday > thresholds.buyRsiMax) {
-      buyGateFirstFail.failedRsiCeiling += 1;
-    } else if (rsiToday <= rsiYest) {
-      buyGateFirstFail.failedRsiTurn += 1;
-    } else if (volRatio < thresholds.buyVolumeRatio) {
-      buyGateFirstFail.failedVolume += 1;
     } else {
-      buyGateFirstFail.passedAll += 1;
+      const sma200Rising = sma200Now > sma200Lag20;
+      if (!sma200Rising) {
+        buyGateFirstFail.failedSma200 += 1;
+      } else if (today <= sma50) {
+        buyGateFirstFail.failedSma50 += 1;
+      } else if (rsiToday > thresholds.buyRsiMax) {
+        buyGateFirstFail.failedRsiCeiling += 1;
+      } else if (rsiToday <= rsiYest) {
+        buyGateFirstFail.failedRsiTurn += 1;
+      } else if (volRatio < thresholds.buyVolumeRatio) {
+        buyGateFirstFail.failedVolume += 1;
+      } else {
+        buyGateFirstFail.passedAll += 1;
+      }
     }
   }
 
   if (
     sma50 === null ||
-    sma200 === null ||
+    sma200Now === null ||
+    sma200Lag20 === null ||
     rsiToday === null ||
     rsiYest === null ||
     volRatio === null
   ) {
     return "HOLD";
   }
+
+  const sma200Rising = sma200Now > sma200Lag20;
 
   if (positionOpen) {
     const takeProfit = rsiToday >= thresholds.exitRsiThreshold;
@@ -111,13 +117,12 @@ export function decideSide(
   }
 
   if (!positionOpen) {
-    const aboveSma200 = today > sma200;
     const aboveSma50 = today > sma50;
     const inPullback = rsiToday <= thresholds.buyRsiMax;
     const rsiTurning = rsiToday > rsiYest;
     const volumeOk = volRatio >= thresholds.buyVolumeRatio;
     if (
-      aboveSma200 &&
+      sma200Rising &&
       aboveSma50 &&
       inPullback &&
       rsiTurning &&
@@ -143,7 +148,7 @@ function signalThresholdsFromConfig(): SignalThresholds {
 }
 
 /**
- * Pure signal engine: exhaustion entry (trend + RSI turn + volume) and
+ * Pure signal engine: exhaustion entry (SMA200 slope + short SMA + RSI turn + volume) and
  * RSI / short-SMA exits when `positionOpen` is true. Runner applies gap/stop
  * and max-hold at execution.
  */
