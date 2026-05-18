@@ -350,12 +350,11 @@ export function runBacktest(
   const { byTicker, byDate } = indexByTickerAndDate(rows);
   const sortedDates = [...byDate.keys()].sort(compareIsoDate);
 
-  const qqqBars = byTicker.get(BACKTEST_BENCHMARK_TICKER) ?? [];
-  if (rows.length > 0 && qqqBars.length === 0) {
-    console.warn(
-      `Backtest: no ${BACKTEST_BENCHMARK_TICKER} bars in the hydrated window; benchmark CAGR will be n/a (fetch ${BACKTEST_BENCHMARK_TICKER} for a baseline).`,
-    );
+  const qqqSeries = byTicker.get(BACKTEST_BENCHMARK_TICKER);
+  if (!qqqSeries) {
+    throw new Error("QQQ not found in daily_prices — required for regime filter");
   }
+  const qqqBars = qqqSeries;
   const yearFraction = calendarYearFraction(fromDate, toDate);
   const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate);
 
@@ -511,6 +510,9 @@ export function runBacktest(
       let slotsLeft = slotsAvailable;
       const sortedUniverse = [...universe].sort((a, b) => a.localeCompare(b));
 
+      const qqqSlice = sliceClosesVolumes(qqqSeries, date);
+      const qqqCloses = qqqSlice?.close ?? [];
+
       for (const ticker of sortedUniverse) {
         const series = byTicker.get(ticker);
         if (!series) {
@@ -526,6 +528,7 @@ export function runBacktest(
         const { signal } = generateSignal({
           close: sliced.close,
           volume: sliced.volume,
+          qqqCloses,
           thresholds,
           positionOpen: openPos !== undefined,
           buyGateFirstFail,
