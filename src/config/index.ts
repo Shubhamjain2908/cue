@@ -20,7 +20,7 @@ const envSchema = z.object({
   STOP_LOSS_PCT: z.coerce.number().positive().default(5),
   MAX_HOLD_DAYS: z.coerce.number().int().positive().default(20),
   SMA_PERIOD: z.coerce.number().int().positive().default(50),
-  BUY_RSI_MAX: z.coerce.number().default(50),
+  BUY_RSI_MAX: z.coerce.number().default(60),
   BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.2),
   EXIT_RSI_THRESHOLD: z.coerce.number().default(70),
   LOG_LEVEL: z

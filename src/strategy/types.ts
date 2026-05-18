@@ -2,7 +2,7 @@ export type TradeSignal = "BUY" | "SELL" | "HOLD";
 
 export interface SignalThresholds {
   smaPeriod: number; // Short SMA period (default: 50)
-  buyRsiMax: number; // RSI ceiling for pullback entry (default: 50)
+  buyRsiMax: number; // RSI ceiling for pullback entry (default: 60)
   buyVolumeRatio: number; // Min 20d/60d volume ratio at entry (default: 1.2)
   exitRsiThreshold: number; // RSI take-profit ceiling (default: 70)
   stopLossPct: number; // Hard stop % below entry (default: 5)
@@ -11,7 +11,7 @@ export interface SignalThresholds {
 
 export const DEFAULT_SIGNAL_THRESHOLDS: SignalThresholds = {
   smaPeriod: 50,
-  buyRsiMax: 50,
+  buyRsiMax: 60,
   buyVolumeRatio: 1.2,
   exitRsiThreshold: 70,
   stopLossPct: 5,
