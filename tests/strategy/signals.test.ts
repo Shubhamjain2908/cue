@@ -32,28 +32,28 @@ describe("decideSide() — Exhaustion Entry", () => {
   it("returns HOLD when closes.length < 200", () => {
     const closes = makeCloses(150);
     const volumes = makeVolumes(150);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns HOLD when price is below SMA200 (downtrend)", () => {
     // Sharp decline: today always below SMA200
     const closes = makeCloses(210, 200, -0.5);
     const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns HOLD when price is above SMA200/SMA10 but RSI > buyRsiMax (too hot)", () => {
     // Steep uptrend: RSI will be well above buyRsiMax (60)
     const closes = makeCloses(210, 100, 1.5);
     const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns HOLD when volume ratio below buyVolumeRatio", () => {
     // Flat volumes — ratio will be 1.0
     const closes = makeCloses(210, 100, 0.2);
     const volumes = Array(210).fill(1_000_000);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   // BUY case: gentle uptrend, dip to cool RSI, then shallow multi-bar recovery so
@@ -75,7 +75,7 @@ describe("decideSide() — Exhaustion Entry", () => {
     }
     const closes = [...base, ...dip, ...recovery];
     const volumes = makeVolumes(closes.length);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toBe("BUY");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, false)).toEqual({ side: "BUY" });
   });
 
   // --- EXIT tests (positionOpen = true) ---
@@ -84,7 +84,10 @@ describe("decideSide() — Exhaustion Entry", () => {
     // Very steep uptrend at the end: RSI will be >= 70
     const closes = makeCloses(210, 100, 2.0);
     const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("SELL");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toEqual({
+      side: "SELL",
+      reason: "TAKE_PROFIT",
+    });
   });
 
   it("returns SELL when price crosses below SMA50 (trend break)", () => {
@@ -92,7 +95,10 @@ describe("decideSide() — Exhaustion Entry", () => {
     const crash = [base.at(-1)! - 10, base.at(-1)! - 12];
     const closes = [...base, ...crash];
     const volumes = makeVolumes(closes.length);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("SELL");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toEqual({
+      side: "SELL",
+      reason: "TREND_BREAK",
+    });
   });
 
   it("returns HOLD for open position when no exit condition is met", () => {
@@ -101,7 +107,7 @@ describe("decideSide() — Exhaustion Entry", () => {
       +(100 + Math.sin(i * 0.35 + 1.8) * 1.2 + i * 0.015).toFixed(4),
     );
     const volumes = makeVolumes(210);
-    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bullQqq, thresholds, true)).toEqual({ side: "HOLD" });
   });
 });
 
@@ -133,13 +139,16 @@ describe("regime filter", () => {
     }
     const closes = [...base, ...dip, ...recovery];
     const volumes = makeVolumes(closes.length);
-    expect(decideSide(closes, volumes, bearQqq, thresholds, false)).toBe("HOLD");
+    expect(decideSide(closes, volumes, bearQqq, thresholds, false)).toEqual({ side: "HOLD" });
   });
 
   it("returns SELL for open position even when QQQ is in bear regime", () => {
     const bearQqq = makeCloses(220, 400, -0.4);
     const closes = makeCloses(220, 100, 2.0);
     const volumes = makeVolumes(220);
-    expect(decideSide(closes, volumes, bearQqq, thresholds, true)).toBe("SELL");
+    expect(decideSide(closes, volumes, bearQqq, thresholds, true)).toEqual({
+      side: "SELL",
+      reason: "TAKE_PROFIT",
+    });
   });
 });

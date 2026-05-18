@@ -6,7 +6,12 @@ import Database from "better-sqlite3";
 import { getConfig } from "../config/index.js";
 import { initSchema } from "../db/schema.js";
 import { momentum5d, rsi14, sma, volumeRatio } from "./indicators.js";
-import type { SignalDecision, SignalMetrics, SignalThresholds } from "./types.js";
+import type {
+  SignalDecision,
+  SignalExitReason,
+  SignalMetrics,
+  SignalThresholds,
+} from "./types.js";
 import { DEFAULT_SIGNAL_THRESHOLDS } from "./types.js";
 
 /** Mutable counters: first failing BUY gate per bar (mutually exclusive when all indicators non-null). */
@@ -47,6 +52,11 @@ export function computeSignalMetrics(input: {
   };
 }
 
+export type DecideSideResult =
+  | { side: "HOLD" }
+  | { side: "BUY" }
+  | { side: "SELL"; reason: SignalExitReason };
+
 export function decideSide(
   closes: number[],
   volumes: number[],
@@ -54,7 +64,7 @@ export function decideSide(
   thresholds: SignalThresholds,
   positionOpen: boolean,
   buyGateFirstFail?: BuyGateFirstFailCounters,
-): "BUY" | "SELL" | "HOLD" {
+): DecideSideResult {
   // Regime filter — first gate in entry path
   // EXIT path is unaffected: open positions can still be exited in bear regime
   if (!positionOpen) {
@@ -63,12 +73,12 @@ export function decideSide(
       qqqSma200 === null ||
       qqqCloses[qqqCloses.length - 1]! <= qqqSma200
     ) {
-      return "HOLD";
+      return { side: "HOLD" };
     }
   }
 
   if (closes.length < 200) {
-    return "HOLD";
+    return { side: "HOLD" };
   }
 
   const today = closes[closes.length - 1]!;
@@ -112,14 +122,17 @@ export function decideSide(
     rsiYest === null ||
     volRatio === null
   ) {
-    return "HOLD";
+    return { side: "HOLD" };
   }
 
   if (positionOpen) {
     const takeProfit = rsiToday >= thresholds.exitRsiThreshold;
     const trendBreak = today < sma50;
-    if (takeProfit || trendBreak) {
-      return "SELL";
+    if (takeProfit) {
+      return { side: "SELL", reason: "TAKE_PROFIT" };
+    }
+    if (trendBreak) {
+      return { side: "SELL", reason: "TREND_BREAK" };
     }
   }
 
@@ -136,11 +149,11 @@ export function decideSide(
       rsiTurning &&
       volumeOk
     ) {
-      return "BUY";
+      return { side: "BUY" };
     }
   }
 
-  return "HOLD";
+  return { side: "HOLD" };
 }
 
 function signalThresholdsFromConfig(): SignalThresholds {
@@ -176,7 +189,7 @@ export function generateSignal(input: GenerateSignalInput): SignalDecision {
     volume: input.volume,
   });
   const positionOpen = input.positionOpen ?? false;
-  const signal = decideSide(
+  const result = decideSide(
     [...input.close],
     [...input.volume],
     input.qqqCloses,
@@ -184,7 +197,8 @@ export function generateSignal(input: GenerateSignalInput): SignalDecision {
     positionOpen,
     input.buyGateFirstFail,
   );
-  return { signal, metrics };
+  const reason = result.side === "SELL" ? result.reason : undefined;
+  return { signal: result.side, reason, metrics };
 }
 
 const isMain =
