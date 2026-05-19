@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import util from "node:util";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
@@ -93,14 +94,33 @@ function formatLocalYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Latest Mon–Fri on or before the local calendar day of `fromDate`, stepping back at most 5 days
+ * (covers Fri–Sun weekend gaps; returns null if no weekday found → treat DB as stale).
+ */
+function latestWeekday(fromDate: Date): string | null {
+  const d = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+  for (let i = 0; i < 5; i++) {
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) {
+      return formatLocalYmd(d);
+    }
+    d.setDate(d.getDate() - 1);
+  }
+  return null;
+}
+
 function rangeEndYmd(): string {
   return formatLocalYmd(new Date());
 }
 
-function rangeStartYmdFiveYears(end: string): string {
+/** ~13 months calendar (~278 trading days) — covers 252+21 momentum lookback under Massive's 499-bar cap. */
+const RANGE_START_LOOKBACK_CALENDAR_DAYS = 400;
+
+function rangeStartYmdMinusLookback(end: string): string {
   const [yy, mm, dd] = end.split("-").map(Number);
   const d = new Date(yy!, mm! - 1, dd!);
-  d.setFullYear(d.getFullYear() - 5);
+  d.setDate(d.getDate() - RANGE_START_LOOKBACK_CALENDAR_DAYS);
   return formatLocalYmd(d);
 }
 
@@ -147,6 +167,13 @@ function openDb(dbPath: string): InstanceType<typeof Database> {
   db.pragma("foreign_keys = ON");
   initSchema(db);
   return db;
+}
+
+function maxDailyPriceDate(db: InstanceType<typeof Database>, ticker: string): string | null {
+  const row = db
+    .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = ?`)
+    .get(ticker.toUpperCase()) as { d: string | null };
+  return row.d;
 }
 
 function buildInitialAggsUrl(input: {
@@ -239,25 +266,46 @@ async function run(): Promise<void> {
       : loadUniverseTickers(projectRoot);
 
   const rangeEnd = rangeEndYmd();
-  const rangeStart = rangeStartYmdFiveYears(rangeEnd);
+  const rangeStart = rangeStartYmdMinusLookback(rangeEnd);
+  const [ey, em, ed] = rangeEnd.split("-").map(Number);
+  const expectedLastTradingDate = latestWeekday(new Date(ey!, em! - 1, ed!));
 
   const db = openDb(config.DB_PATH);
   try {
     for (let i = 0; i < tickers.length; i++) {
       const ticker = tickers[i]!;
-      const cached = readCachedOhlcvIfFresh(
-        config.CACHE_DIR,
-        ticker,
-        rangeStart,
-        rangeEnd,
-      );
-      if (cached !== null) {
-        logger.info("OHLCV cache hit; skipping Massive API", {
+      const maxDate = maxDailyPriceDate(db, ticker);
+      const dbCurrent =
+        expectedLastTradingDate !== null &&
+        maxDate !== null &&
+        maxDate.localeCompare(expectedLastTradingDate) >= 0;
+
+      if (dbCurrent) {
+        const cached = readCachedOhlcvIfFresh(
+          config.CACHE_DIR,
           ticker,
           rangeStart,
           rangeEnd,
+          Number.MAX_SAFE_INTEGER,
+        );
+        if (cached !== null) {
+          logger.info("OHLCV cache hit; skipping Massive API", {
+            ticker,
+            rangeStart,
+            rangeEnd,
+            maxDate,
+            expectedLastTradingDate,
+          });
+          insertDailyPrices(db, ticker, cached.bars);
+          continue;
+        }
+        logger.info("OHLCV DB current; skipping Massive API (no disk cache for range)", {
+          ticker,
+          rangeStart,
+          rangeEnd,
+          maxDate,
+          expectedLastTradingDate,
         });
-        insertDailyPrices(db, ticker, cached.bars);
         continue;
       }
 
@@ -306,11 +354,16 @@ const isMain =
   path.resolve(process.argv[1] ?? "");
 
 if (isMain) {
-  run().catch((err) => {
+  run().catch((err: unknown) => {
     const logger = winston.createLogger({
       transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
     });
-    logger.error("Fetcher fatal error", { err });
+    const message =
+      err instanceof Error ? err.message : util.inspect(err, { depth: 8 });
+    logger.error(`Fetcher fatal error: ${message}`);
+    if (err instanceof Error && err.stack !== undefined && err.stack.length > 0) {
+      logger.error(err.stack);
+    }
     process.exitCode = 1;
   });
 }

@@ -23,12 +23,14 @@
     "dashboard": "tsx src/dashboard/index.ts",
     "dashboard:open": "tsx src/dashboard/index.ts --open",
     "pipeline": "tsx src/pipeline.ts",
+    "pipeline:now": "tsx src/pipeline.ts --now",
     "rebuild:native": "pnpm rebuild better-sqlite3"
   },
   "dependencies": {
     "axios": "^1.7.0",
     "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",
+    "google-auth-library": "^9.15.1",
     "node-cron": "^3.0.3",
     "winston": "^3.13.0",
     "yahoo-finance2": "^3.14.1",

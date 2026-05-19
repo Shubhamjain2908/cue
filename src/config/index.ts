@@ -5,7 +5,7 @@ import type { SignalThresholds } from "../strategy/types.js";
 
 loadDotenv();
 
-const providerKeySchema = z.enum(["anthropic", "openai", "google"]);
+const providerKeySchema = z.enum(["anthropic", "openai", "google", "vertex"]);
 
 const baseEnvSchema = z.object({
   /** Massive.com REST key (https://massive.com/; rebranded from Polygon.io; same key). */
@@ -29,6 +29,12 @@ const baseEnvSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   GOOGLE_AI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** GCP project for Vertex AI Gemini (`LLM_PROVIDER=vertex`). */
+  VERTEX_PROJECT_ID: z.string().optional(),
+  /** Vertex region (default `us-central1`). */
+  VERTEX_LOCATION: z.string().default("us-central1"),
+  /** Vertex publisher model id (default `gemini-2.0-flash-001`). */
+  VERTEX_MODEL: z.string().default("gemini-2.0-flash-001"),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
@@ -59,6 +65,9 @@ export function getConfig(): AppConfig {
   }
   if (provider === "google" && (!d.GOOGLE_AI_API_KEY || d.GOOGLE_AI_API_KEY.length === 0)) {
     throw new Error("Invalid environment: GOOGLE_AI_API_KEY is required when LLM_PROVIDER=google");
+  }
+  if (provider === "vertex" && (!d.VERTEX_PROJECT_ID || d.VERTEX_PROJECT_ID.length === 0)) {
+    throw new Error("Invalid environment: VERTEX_PROJECT_ID is required when LLM_PROVIDER=vertex");
   }
   cached = {
     ...d,

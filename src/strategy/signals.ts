@@ -5,6 +5,8 @@ import Database from "better-sqlite3";
 
 import { getConfig } from "../config/index.js";
 import { initSchema } from "../db/schema.js";
+import { detectRunMode } from "../pipeline.js";
+import { runLiveScreen } from "./screenRunner.js";
 import { momentum5d, rsi14, sma, volumeRatio } from "./indicators.js";
 import type {
   SignalDecision,
@@ -212,43 +214,51 @@ if (isMain) {
   const argv = process.argv.slice(2);
   const idx = argv.indexOf("--ticker");
   const raw = idx >= 0 ? argv[idx + 1] : undefined;
-  if (!raw) {
-    console.error("Usage: pnpm run screen -- --ticker SYMBOL");
-    process.exit(1);
-  }
-  const ticker = raw.toUpperCase();
-  const config = getConfig();
-  const db = new Database(config.DB_PATH);
-  try {
-    initSchema(db);
-    const rows = db
-      .prepare(
-        `SELECT date, close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
-      )
-      .all(ticker) as Array<{ date: string; close: number; volume: number }>;
-    if (rows.length === 0) {
-      console.log("HOLD");
-      process.exit(0);
+  if (raw !== undefined && raw.length > 0) {
+    const ticker = raw.toUpperCase();
+    const config = getConfig();
+    const db = new Database(config.DB_PATH);
+    try {
+      initSchema(db);
+      const rows = db
+        .prepare(
+          `SELECT date, close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
+        )
+        .all(ticker) as Array<{ date: string; close: number; volume: number }>;
+      if (rows.length === 0) {
+        console.log("HOLD");
+        process.exit(0);
+      }
+      const lastDate = rows[rows.length - 1]!.date;
+      const qqqRows = db
+        .prepare(
+          `SELECT close FROM daily_prices WHERE ticker = 'QQQ' AND date <= ? ORDER BY date ASC`,
+        )
+        .all(lastDate) as Array<{ close: number }>;
+      if (qqqRows.length === 0) {
+        console.error("QQQ not found in daily_prices — required for regime filter");
+        process.exit(1);
+      }
+      const { signal } = generateSignal({
+        close: rows.map((r) => r.close),
+        volume: rows.map((r) => r.volume),
+        qqqCloses: qqqRows.map((r) => r.close),
+        thresholds: signalThresholdsFromConfig(),
+        positionOpen: false,
+      });
+      console.log(signal === "BUY" ? "BUY" : "HOLD");
+    } finally {
+      db.close();
     }
-    const lastDate = rows[rows.length - 1]!.date;
-    const qqqRows = db
-      .prepare(
-        `SELECT close FROM daily_prices WHERE ticker = 'QQQ' AND date <= ? ORDER BY date ASC`,
-      )
-      .all(lastDate) as Array<{ close: number }>;
-    if (qqqRows.length === 0) {
-      console.error("QQQ not found in daily_prices — required for regime filter");
-      process.exit(1);
+  } else {
+    const config = getConfig();
+    const db = new Database(config.DB_PATH);
+    try {
+      initSchema(db);
+      const mode = detectRunMode();
+      runLiveScreen(db, mode);
+    } finally {
+      db.close();
     }
-    const { signal } = generateSignal({
-      close: rows.map((r) => r.close),
-      volume: rows.map((r) => r.volume),
-      qqqCloses: qqqRows.map((r) => r.close),
-      thresholds: signalThresholdsFromConfig(),
-      positionOpen: false,
-    });
-    console.log(signal === "BUY" ? "BUY" : "HOLD");
-  } finally {
-    db.close();
   }
 }
