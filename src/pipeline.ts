@@ -17,6 +17,8 @@ export interface PipelineStep {
   command: string;
   critical: boolean;
   runOn: "rebalance" | "stop" | "both";
+  /** Appended after `pnpm run <name> --` when non-empty (passed through to the script). */
+  forwardArgs?: string[];
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
@@ -126,6 +128,15 @@ export function stepsForMode(mode: "rebalance" | "stop"): PipelineStep[] {
   return PIPELINE_STEPS.filter((s) => s.runOn === "both" || s.runOn === mode);
 }
 
+export function pnpmRunArgs(step: PipelineStep, mode: "rebalance" | "stop"): string[] {
+  const modeArgs = mode === "rebalance" ? (["--force-rebalance"] as const) : [];
+  const forwarded: readonly string[] =
+    step.name === "screen"
+      ? [...(step.forwardArgs ?? []), ...modeArgs]
+      : [...(step.forwardArgs ?? [])];
+  return forwarded.length > 0 ? ["run", step.name, "--", ...forwarded] : ["run", step.name];
+}
+
 export interface RunPipelineDeps {
   readonly spawn?: typeof spawnSync;
 }
@@ -147,7 +158,7 @@ export function runPipeline(
 
   for (const step of steps) {
     logger.info(`step_start name=${step.name} mode=${mode} ts=${new Date().toISOString()}`);
-    const result = spawnImpl("pnpm", ["run", step.name], {
+    const result = spawnImpl("pnpm", pnpmRunArgs(step, mode), {
       stdio: "inherit",
       env: process.env,
       cwd: process.cwd(),

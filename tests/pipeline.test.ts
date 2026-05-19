@@ -2,10 +2,12 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  PIPELINE_STEPS,
   detectRunMode,
   formatEtYmd,
   getEtMinutesSinceMidnight,
   isWithinExecutionWindow,
+  pnpmRunArgs,
   REBALANCE_DAY_OF_WEEK,
   runPipeline,
   stepsForMode,
@@ -84,7 +86,31 @@ describe("formatEtYmd / getEtMinutesSinceMidnight", () => {
   });
 });
 
+describe("pnpmRunArgs", () => {
+  it("forwards --force-rebalance to screen when pipeline mode is rebalance", () => {
+    const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
+    expect(pnpmRunArgs(screen, "rebalance")).toEqual(["run", "screen", "--", "--force-rebalance"]);
+  });
+
+  it("does not forward args for screen when pipeline mode is stop", () => {
+    const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
+    expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "screen"]);
+  });
+});
+
 describe("runPipeline", () => {
+  it("passes --force-rebalance to screen subprocess in rebalance mode", () => {
+    const calls: string[][] = [];
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
+      calls.push(args !== undefined ? [...args] : []);
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
+    }) as unknown as typeof spawnSync;
+
+    runPipeline("rebalance", { spawn });
+    const screenCall = calls.find((a) => a[1] === "screen");
+    expect(screenCall).toEqual(["run", "screen", "--", "--force-rebalance"]);
+  });
+
   it("returns 1 and does not run downstream when fetch fails (critical)", () => {
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       if (args?.[1] === "fetch") {
