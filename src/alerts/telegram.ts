@@ -12,6 +12,23 @@ const isMain =
   path.resolve(fileURLToPath(import.meta.url)) ===
   path.resolve(process.argv[1] ?? "");
 
+export type AlertRunMode = "rebalance" | "stop";
+
+/**
+ * Reads `--mode rebalance|stop` from argv (same style as pipeline `detectRunMode` / screen).
+ * Defaults to `rebalance` when absent or invalid (direct `pnpm run alert` stays unchanged).
+ */
+export function parseAlertModeFromArgv(argv: readonly string[]): AlertRunMode {
+  const idx = argv.indexOf("--mode");
+  if (idx !== -1 && argv[idx + 1] !== undefined) {
+    const v = argv[idx + 1]!.toLowerCase();
+    if (v === "rebalance" || v === "stop") {
+      return v;
+    }
+  }
+  return "rebalance";
+}
+
 const TG_MAX = 4096;
 
 export function formatTelegramAlert(row: BuyAlertPendingRow): string {
@@ -56,6 +73,12 @@ async function sendTelegramMessage(text: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const mode = parseAlertModeFromArgv(process.argv);
+  if (mode === "stop") {
+    console.log("[alert] mode=stop, skipping BUY alerts");
+    return;
+  }
+
   const config = getConfig();
   const db = new Database(config.DB_PATH);
   db.pragma("foreign_keys = ON");

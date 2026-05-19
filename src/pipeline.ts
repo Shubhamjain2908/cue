@@ -25,6 +25,7 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   { name: "fetch", command: "pnpm run fetch", critical: true, runOn: "both" },
   { name: "screen", command: "pnpm run screen", critical: true, runOn: "both" },
   { name: "enrich", command: "pnpm run enrich", critical: false, runOn: "rebalance" },
+  // alert: `stepsForMode` injects forwardArgs `--mode <rebalance|stop>` for the spawned script.
   { name: "alert", command: "pnpm run alert", critical: false, runOn: "both" },
   { name: "dashboard", command: "pnpm run dashboard", critical: true, runOn: "both" },
 ];
@@ -125,15 +126,18 @@ export function detectRunMode(input?: DetectRunModeInput): "rebalance" | "stop" 
 }
 
 export function stepsForMode(mode: "rebalance" | "stop"): PipelineStep[] {
-  return PIPELINE_STEPS.filter((s) => s.runOn === "both" || s.runOn === mode);
+  return PIPELINE_STEPS.filter((s) => s.runOn === "both" || s.runOn === mode).map((s) => {
+    if (s.name === "alert") {
+      return { ...s, forwardArgs: ["--mode", mode] };
+    }
+    return { ...s };
+  });
 }
 
 export function pnpmRunArgs(step: PipelineStep, mode: "rebalance" | "stop"): string[] {
-  const modeArgs = mode === "rebalance" ? (["--force-rebalance"] as const) : [];
-  const forwarded: readonly string[] =
-    step.name === "screen"
-      ? [...(step.forwardArgs ?? []), ...modeArgs]
-      : [...(step.forwardArgs ?? [])];
+  const screenRebalance =
+    step.name === "screen" && mode === "rebalance" ? (["--force-rebalance"] as const) : [];
+  const forwarded = [...(step.forwardArgs ?? []), ...screenRebalance];
   return forwarded.length > 0 ? ["run", step.name, "--", ...forwarded] : ["run", step.name];
 }
 

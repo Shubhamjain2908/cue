@@ -96,6 +96,16 @@ describe("pnpmRunArgs", () => {
     const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
     expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "screen"]);
   });
+
+  it("forwards --mode stop to alert when step includes forwardArgs from stepsForMode", () => {
+    const alert = stepsForMode("stop").find((s) => s.name === "alert")!;
+    expect(pnpmRunArgs(alert, "stop")).toEqual(["run", "alert", "--", "--mode", "stop"]);
+  });
+
+  it("forwards --mode rebalance to alert in rebalance pipeline mode", () => {
+    const alert = stepsForMode("rebalance").find((s) => s.name === "alert")!;
+    expect(pnpmRunArgs(alert, "rebalance")).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
+  });
 });
 
 describe("runPipeline", () => {
@@ -109,6 +119,20 @@ describe("runPipeline", () => {
     runPipeline("rebalance", { spawn });
     const screenCall = calls.find((a) => a[1] === "screen");
     expect(screenCall).toEqual(["run", "screen", "--", "--force-rebalance"]);
+    const alertCall = calls.find((a) => a[1] === "alert");
+    expect(alertCall).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
+  });
+
+  it("passes --mode stop to alert subprocess in stop mode", () => {
+    const calls: string[][] = [];
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
+      calls.push(args !== undefined ? [...args] : []);
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
+    }) as unknown as typeof spawnSync;
+
+    runPipeline("stop", { spawn });
+    const alertCall = calls.find((a) => a[1] === "alert");
+    expect(alertCall).toEqual(["run", "alert", "--", "--mode", "stop"]);
   });
 
   it("returns 1 and does not run downstream when fetch fails (critical)", () => {
