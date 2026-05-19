@@ -25,8 +25,14 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   { name: "fetch", command: "pnpm run fetch", critical: true, runOn: "both" },
   { name: "screen", command: "pnpm run screen", critical: true, runOn: "both" },
   { name: "enrich", command: "pnpm run enrich", critical: false, runOn: "rebalance" },
-  // alert: `stepsForMode` injects forwardArgs `--mode <rebalance|stop>` for the spawned script.
-  { name: "alert", command: "pnpm run alert", critical: false, runOn: "both" },
+  {
+    name: "alert",
+    command: "pnpm run alert",
+    critical: false,
+    runOn: "both",
+    /** Resolved in `pnpmRunArgs` as `--mode <rebalance|stop>`. */
+    forwardArgs: ["--mode"],
+  },
   { name: "dashboard", command: "pnpm run dashboard", critical: true, runOn: "both" },
 ];
 
@@ -126,18 +132,22 @@ export function detectRunMode(input?: DetectRunModeInput): "rebalance" | "stop" 
 }
 
 export function stepsForMode(mode: "rebalance" | "stop"): PipelineStep[] {
-  return PIPELINE_STEPS.filter((s) => s.runOn === "both" || s.runOn === mode).map((s) => {
-    if (s.name === "alert") {
-      return { ...s, forwardArgs: ["--mode", mode] };
-    }
-    return { ...s };
-  });
+  return PIPELINE_STEPS.filter((s) => s.runOn === "both" || s.runOn === mode);
+}
+
+/** Expands registry `forwardArgs` (e.g. `--mode` placeholder → `--mode stop`). */
+export function resolvedForwardArgs(
+  step: PipelineStep,
+  mode: "rebalance" | "stop",
+): string[] {
+  const tokens = step.forwardArgs ?? [];
+  return tokens.flatMap((t) => (t === "--mode" ? (["--mode", mode] as const) : [t]));
 }
 
 export function pnpmRunArgs(step: PipelineStep, mode: "rebalance" | "stop"): string[] {
   const screenRebalance =
     step.name === "screen" && mode === "rebalance" ? (["--force-rebalance"] as const) : [];
-  const forwarded = [...(step.forwardArgs ?? []), ...screenRebalance];
+  const forwarded = [...resolvedForwardArgs(step, mode), ...screenRebalance];
   return forwarded.length > 0 ? ["run", step.name, "--", ...forwarded] : ["run", step.name];
 }
 
