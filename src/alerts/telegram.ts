@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 
 import axios from "axios";
 import Database from "better-sqlite3";
+import winston from "winston";
+import { z } from "zod";
 
 import { getConfig } from "../config/index.js";
 import { initSchema } from "../db/schema.js";
@@ -14,19 +16,37 @@ const isMain =
 
 export type AlertRunMode = "rebalance" | "stop";
 
+const alertRunModeSchema = z.enum(["rebalance", "stop"]);
+
+const logger = winston.createLogger({
+  defaultMeta: { service: "alert" },
+  level: process.env.LOG_LEVEL ?? "info",
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf((info) => {
+      const { timestamp, level, message, service, ...rest } = info;
+      const extra = Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : "";
+      return `${String(timestamp)} ${String(service ?? "alert")} ${level}: ${String(message)}${extra}`;
+    }),
+  ),
+  transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
+});
+
 /**
- * Reads `--mode rebalance|stop` from argv (same style as pipeline `detectRunMode` / screen).
- * Defaults to `rebalance` when absent or invalid (direct `pnpm run alert` stays unchanged).
+ * Reads `--mode rebalance|stop` from argv (same values as pipeline `detectRunMode`).
+ * Throws if `--mode` is missing, has no value, or the value is not in the schema.
  */
 export function parseAlertModeFromArgv(argv: readonly string[]): AlertRunMode {
   const idx = argv.indexOf("--mode");
-  if (idx !== -1 && argv[idx + 1] !== undefined) {
-    const v = argv[idx + 1]!.toLowerCase();
-    if (v === "rebalance" || v === "stop") {
-      return v;
-    }
+  const next = idx !== -1 ? argv[idx + 1] : undefined;
+  if (idx === -1 || next === undefined || next.trim() === "") {
+    throw new Error("missing or empty --mode <rebalance|stop>");
   }
-  return "rebalance";
+  const parsed = alertRunModeSchema.safeParse(next.trim().toLowerCase());
+  if (!parsed.success) {
+    throw new Error(`invalid --mode: ${JSON.stringify(next)} (expected rebalance or stop)`);
+  }
+  return parsed.data;
 }
 
 const TG_MAX = 4096;
@@ -73,9 +93,17 @@ async function sendTelegramMessage(text: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const mode = parseAlertModeFromArgv(process.argv);
+  let mode: AlertRunMode;
+  try {
+    mode = parseAlertModeFromArgv(process.argv);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error(msg);
+    process.exit(1);
+  }
+
   if (mode === "stop") {
-    console.log("[alert] mode=stop, skipping BUY alerts");
+    logger.info("mode=stop — BUY alerts suppressed");
     return;
   }
 
@@ -86,7 +114,7 @@ async function main(): Promise<void> {
     initSchema(db);
     const pending = listBuySignalsReadyToAlert(db);
     if (pending.length === 0) {
-      console.log("No BUY signals pending alert (enriched + not alerted).");
+      logger.info("No BUY signals pending alert (enriched + not alerted).");
       return;
     }
     for (const row of pending) {
@@ -94,9 +122,9 @@ async function main(): Promise<void> {
       try {
         await sendTelegramMessage(text);
         markSignalAlerted(db, row.id);
-        console.log(`Alert sent for ${row.ticker} (${row.id})`);
+        logger.info(`Alert sent for ${row.ticker} (${row.id})`);
       } catch (e) {
-        console.error(`Alert failed for ${row.ticker} (${row.id}):`, e);
+        logger.error(`Alert failed for ${row.ticker} (${row.id}): ${String(e)}`);
       }
     }
   } finally {
@@ -106,7 +134,7 @@ async function main(): Promise<void> {
 
 if (isMain) {
   main().catch((e) => {
-    console.error(e);
+    logger.error(String(e));
     process.exit(1);
   });
 }
