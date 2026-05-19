@@ -97,13 +97,13 @@ describe("pnpmRunArgs", () => {
     expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "screen"]);
   });
 
-  it("forwards --mode stop to alert when step includes forwardArgs from stepsForMode", () => {
-    const alert = stepsForMode("stop").find((s) => s.name === "alert")!;
+  it("forwards --mode stop to alert via registry forwardArgs expansion", () => {
+    const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
     expect(pnpmRunArgs(alert, "stop")).toEqual(["run", "alert", "--", "--mode", "stop"]);
   });
 
   it("forwards --mode rebalance to alert in rebalance pipeline mode", () => {
-    const alert = stepsForMode("rebalance").find((s) => s.name === "alert")!;
+    const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
     expect(pnpmRunArgs(alert, "rebalance")).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
   });
 });
