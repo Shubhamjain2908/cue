@@ -1,5 +1,5 @@
 import type { BuySignalForEnrichmentRow } from "../db/queries.js";
-import type { LLMMessage } from "./types.js";
+import { ENRICHMENT_RATIONALE_MAX_CHARS, type LLMMessage } from "./types.js";
 import type { YahooEnrichmentDto } from "./yahooContext.js";
 
 function stripFence(raw: string): string {
@@ -59,7 +59,7 @@ export function buildPrompt(
   const system = `You are a financial signal analyst. You must respond ONLY with valid JSON matching the schema below. Do not include markdown, explanation, or any text outside the JSON object.
 Base your analysis SOLELY on the provided context. If context is insufficient, set sentiment to NEUTRAL and confidence to LOW.
 
-Schema: { "sentiment": "BULLISH"|"NEUTRAL"|"BEARISH", "rationale": string (20-500 chars), "earningsDate": string|null (ISO date or null), "sector": string, "confidence": "HIGH"|"MEDIUM"|"LOW" }
+Schema: { "sentiment": "BULLISH"|"NEUTRAL"|"BEARISH", "rationale": string (20-${ENRICHMENT_RATIONALE_MAX_CHARS} chars), "earningsDate": string|null (ISO date or null), "sector": string, "confidence": "HIGH"|"MEDIUM"|"LOW" }
 
 Confidence (from provided context only):
 - HIGH: clear directional headline evidence consistent with the BUY thesis AND earnings are NOT within 5 calendar days of the signal date (${signalDate}).
