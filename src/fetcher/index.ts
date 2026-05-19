@@ -114,10 +114,13 @@ function rangeEndYmd(): string {
   return formatLocalYmd(new Date());
 }
 
-function rangeStartYmdFiveYears(end: string): string {
+/** ~13 months calendar (~278 trading days) — covers 252+21 momentum lookback under Massive's 499-bar cap. */
+const RANGE_START_LOOKBACK_CALENDAR_DAYS = 400;
+
+function rangeStartYmdMinusLookback(end: string): string {
   const [yy, mm, dd] = end.split("-").map(Number);
   const d = new Date(yy!, mm! - 1, dd!);
-  d.setFullYear(d.getFullYear() - 5);
+  d.setDate(d.getDate() - RANGE_START_LOOKBACK_CALENDAR_DAYS);
   return formatLocalYmd(d);
 }
 
@@ -263,7 +266,7 @@ async function run(): Promise<void> {
       : loadUniverseTickers(projectRoot);
 
   const rangeEnd = rangeEndYmd();
-  const rangeStart = rangeStartYmdFiveYears(rangeEnd);
+  const rangeStart = rangeStartYmdMinusLookback(rangeEnd);
   const [ey, em, ed] = rangeEnd.split("-").map(Number);
   const expectedLastTradingDate = latestWeekday(new Date(ey!, em! - 1, ed!));
 
