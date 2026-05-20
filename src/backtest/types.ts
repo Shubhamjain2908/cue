@@ -65,3 +65,12 @@ export interface BacktestComputedMetrics {
   sharpeRatio: number | null;
   totalTrades: number;
 }
+
+/** Bundle returned by momentum and research strategy simulators. */
+export interface RunBacktestResult {
+  equityPoints: EquityPoint[];
+  closedTrades: ClosedBacktestTrade[];
+  metrics: BacktestComputedMetrics;
+  benchmarkCagrPct: number | null;
+  yearFraction: number;
+}

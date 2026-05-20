@@ -397,3 +397,34 @@ export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert):
   });
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
+
+export type BacktestTradeExitReasonDb = "TRAILING_STOP" | "INITIAL_STOP" | "TIME_EXIT" | "MANUAL";
+
+export interface BacktestTradeInsert {
+  /** `backtest_runs.id` from the inserted run row. */
+  runRowid: bigint;
+  ticker: string;
+  entryDate: string;
+  entryPrice: number;
+  exitDate: string | null;
+  exitPrice: number | null;
+  pnlPct: number | null;
+  exitReason: BacktestTradeExitReasonDb;
+}
+
+export function insertBacktestTrade(db: SqliteConnection, row: BacktestTradeInsert): void {
+  const stmt = db.prepare(`
+    INSERT INTO backtest_trades (run_id, ticker, entry_date, entry_price, exit_date, exit_price, pnl_pct, exit_reason)
+    VALUES (@runId, @ticker, @entryDate, @entryPrice, @exitDate, @exitPrice, @pnlPct, @exitReason)
+  `);
+  stmt.run({
+    runId: Number(row.runRowid),
+    ticker: row.ticker.toUpperCase(),
+    entryDate: row.entryDate,
+    entryPrice: row.entryPrice,
+    exitDate: row.exitDate,
+    exitPrice: row.exitPrice,
+    pnlPct: row.pnlPct,
+    exitReason: row.exitReason,
+  });
+}
