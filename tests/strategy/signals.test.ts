@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { decideSide } from "../../src/strategy/signals.js";
-import type { SignalThresholds } from "../../src/strategy/types.js";
+import { decideSide } from "../../src/enrichers/momentum-technical.js";
+import type { SignalThresholds } from "../../src/enrichers/momentum-types.js";
 
 function makeCloses(length: number, start = 100, step = 0.3): number[] {
   return Array.from({ length }, (_, i) => +(start + i * step).toFixed(4));

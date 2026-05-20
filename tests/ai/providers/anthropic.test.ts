@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createAnthropicProvider } from "../../../src/ai/providers/anthropic.js";
+import { createAnthropicProvider } from "../../../src/llm/providers/anthropic.js";
 
 describe("createAnthropicProvider", () => {
   afterEach(() => {

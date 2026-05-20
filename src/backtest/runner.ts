@@ -8,9 +8,9 @@ import { z } from "zod";
 import { getConfig } from "../config/index.js";
 import { insertBacktestRun } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
-import { atr, sma } from "../strategy/indicators.js";
-import { computeTrailingStop, rankUniverse } from "../strategy/ranker.js";
-import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../strategy/types.js";
+import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
+import { atr, sma } from "../enrichers/indicators.js";
+import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
 import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
 import {

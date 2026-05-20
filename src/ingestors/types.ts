@@ -39,7 +39,7 @@ export type MassiveStocksAggResult = z.infer<typeof massiveStocksAggResultSchema
 
 /**
  * Envelope for Massive `GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}` JSON.
- * When `next_url` is set, the fetcher loads further pages with axios (see `src/fetcher/index.ts`).
+ * When `next_url` is set, the ingestor loads further pages with axios (see `src/ingestors/massive-price-ingestor.ts`).
  */
 export const massiveStocksAggregatesResponseSchema = z
   .object({

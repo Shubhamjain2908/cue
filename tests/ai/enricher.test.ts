@@ -1,9 +1,9 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runEnrichment } from "../../src/ai/enricher.js";
-import { JSON_RETRY_USER_MESSAGE } from "../../src/ai/types.js";
-import type { LLMProvider } from "../../src/ai/types.js";
+import { runEnrichment } from "../../src/llm/enricher.js";
+import { JSON_RETRY_USER_MESSAGE } from "../../src/llm/types.js";
+import type { LLMProvider } from "../../src/llm/types.js";
 import { resetConfigCache } from "../../src/config/index.js";
 import { insertSignal } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
@@ -73,7 +73,7 @@ describe("runEnrichment", () => {
     const result = await runEnrichment(db, id, { provider, fetchYahoo });
     expect(result.sentiment).toBe("NEUTRAL");
     expect(complete).toHaveBeenCalledTimes(2);
-    const secondMsgs = complete.mock.calls[1]![0] as import("../../src/ai/types.js").LLMMessage[];
+    const secondMsgs = complete.mock.calls[1]![0] as import("../../src/llm/types.js").LLMMessage[];
     expect(secondMsgs[secondMsgs.length - 1]!.content).toBe(JSON_RETRY_USER_MESSAGE);
     expect(secondMsgs[secondMsgs.length - 2]!.role).toBe("assistant");
     expect(secondMsgs[secondMsgs.length - 2]!.content).toBe("not-json");

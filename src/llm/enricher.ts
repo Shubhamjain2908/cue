@@ -7,7 +7,7 @@ import {
   insertEnrichment,
   type EnrichmentRow,
 } from "../db/queries.js";
-import { createLlmProviderFromEnv } from "./factory.js";
+import { createLlmProviderFromEnv } from "./provider.js";
 import { buildPrompt, calendarDaysBetweenIso, tryParseModelJson } from "./prompt.js";
 import {
   EnrichmentResultSchema,

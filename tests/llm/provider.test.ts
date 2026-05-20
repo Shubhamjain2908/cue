@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createLlmProviderFromEnv } from "../../src/ai/factory.js";
+import { createLlmProviderFromEnv } from "../../src/llm/provider.js";
 import { resetConfigCache } from "../../src/config/index.js";
 
 const savedEnv = { ...process.env };

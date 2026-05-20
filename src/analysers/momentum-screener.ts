@@ -5,10 +5,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
 
+import { detectRunMode } from "../agents/daily-workflow.js";
 import { getConfig } from "../config/index.js";
 import {
   closePosition,
@@ -16,9 +18,18 @@ import {
   insertSignal,
   type SignalInsert,
 } from "../db/queries.js";
-import { atr, sma } from "./indicators.js";
+import { initSchema } from "../db/schema.js";
+import {
+  buildSignalThresholdsFromConfig,
+  generateSignal,
+} from "../enrichers/momentum-technical.js";
+import { atr, sma } from "../enrichers/indicators.js";
 import { computeTrailingStop, rankUniverse } from "./ranker.js";
-import { DEFAULT_RANKING_CONFIG, type RankingConfig, type RankedTicker } from "./types.js";
+import {
+  DEFAULT_RANKING_CONFIG,
+  type RankingConfig,
+  type RankedTicker,
+} from "../enrichers/momentum-types.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
 
@@ -428,4 +439,80 @@ export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"):
   console.log(
     `screen: asOf=${asOf} mode=${mode} regimeOk=${regimeOk ? "1" : "0"} sells=${sells} rankedUniverse=${fullRanked.length}`,
   );
+}
+
+/**
+ * CLI entry: `--ticker X` prints BUY/HOLD signal; otherwise runs live momentum screen.
+ * @param argv Flags only (e.g. `["--ticker","AAPL"]` or `["--force-rebalance"]`); defaults to `process.argv.slice(2)`.
+ */
+export function runScreenCli(argv: readonly string[] = process.argv.slice(2)): void {
+  const tIdx = argv.indexOf("--ticker");
+  const raw = tIdx >= 0 ? argv[tIdx + 1] : undefined;
+  if (raw !== undefined && raw.length > 0) {
+    const ticker = raw.toUpperCase();
+    const config = getConfig();
+    const db = new Database(config.DB_PATH);
+    try {
+      initSchema(db);
+      const rows = db
+        .prepare(
+          `SELECT date, close, volume FROM daily_prices WHERE ticker = ? ORDER BY date ASC`,
+        )
+        .all(ticker) as Array<{ date: string; close: number; volume: number }>;
+      if (rows.length === 0) {
+        console.log("HOLD");
+        return;
+      }
+      const lastDate = rows[rows.length - 1]!.date;
+      const qqqRows = db
+        .prepare(
+          `SELECT close FROM daily_prices WHERE ticker = 'QQQ' AND date <= ? ORDER BY date ASC`,
+        )
+        .all(lastDate) as Array<{ close: number }>;
+      if (qqqRows.length === 0) {
+        console.error("QQQ not found in daily_prices — required for regime filter");
+        process.exitCode = 1;
+        return;
+      }
+      const { signal } = generateSignal({
+        close: rows.map((r) => r.close),
+        volume: rows.map((r) => r.volume),
+        qqqCloses: qqqRows.map((r) => r.close),
+        thresholds: buildSignalThresholdsFromConfig(),
+        positionOpen: false,
+      });
+      console.log(signal === "BUY" ? "BUY" : "HOLD");
+    } finally {
+      db.close();
+    }
+  } else {
+    const config = getConfig();
+    const db = new Database(config.DB_PATH);
+    try {
+      initSchema(db);
+      const mode = detectRunMode({ argv });
+      runLiveScreen(db, mode);
+    } finally {
+      db.close();
+    }
+  }
+}
+
+/** Stop-day path only: trailing stops, high-water replay, max-hold / stop-out → SELL + close (no rebalance BUYs). */
+export function runExecuteStopsCli(): void {
+  const config = getConfig();
+  const db = new Database(config.DB_PATH);
+  try {
+    initSchema(db);
+    runLiveScreen(db, "stop");
+  } finally {
+    db.close();
+  }
+}
+
+const isMain =
+  path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
+
+if (isMain) {
+  runScreenCli();
 }

@@ -12,6 +12,8 @@ export interface SignalInsert {
   ticker: string;
   date: string;
   signal: SignalSide;
+  /** Strategy lane; default MOMENTUM. */
+  signalType?: string | null;
   price: number;
   /** Rank within momentum universe (1 = strongest). Required for BUY. */
   momentumRank?: number | null;
@@ -147,10 +149,10 @@ export function insertSignal(
   requireBuyMomentum(row);
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO signals (
-      ticker, date, signal, price, alerted,
+      ticker, date, signal, signal_type, price, alerted,
       momentum_rank, universe_ranked_count, momentum_12_1_return, atr14, initial_atr_stop
     ) VALUES (
-      @ticker, @date, @signal, @price, 0,
+      @ticker, @date, @signal, @signalType, @price, 0,
       @momentumRank, @universeRankedCount, @momentum12_1Return, @atr14, @initialAtrStop
     )
   `);
@@ -158,6 +160,7 @@ export function insertSignal(
     ticker: row.ticker,
     date: row.date,
     signal: row.signal,
+    signalType: row.signalType ?? "MOMENTUM",
     price: row.price,
     momentumRank: row.momentumRank ?? null,
     universeRankedCount: row.universeRankedCount ?? null,

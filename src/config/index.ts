@@ -1,7 +1,7 @@
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 
-import type { SignalThresholds } from "../strategy/types.js";
+import type { SignalThresholds } from "../enrichers/momentum-types.js";
 
 loadDotenv();
 

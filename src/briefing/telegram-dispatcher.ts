@@ -2,13 +2,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
-import Database from "better-sqlite3";
 import winston from "winston";
 import { z } from "zod";
 
 import { getConfig } from "../config/index.js";
-import { initSchema } from "../db/schema.js";
 import { listBuySignalsReadyToAlert, markSignalAlerted, type BuyAlertPendingRow } from "../db/queries.js";
+import { openCueDb } from "../db/provider.js";
 
 const isMain =
   path.resolve(fileURLToPath(import.meta.url)) ===
@@ -92,14 +91,15 @@ async function sendTelegramMessage(text: string): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+export async function runBriefAlertCli(argv: readonly string[] = process.argv): Promise<void> {
   let mode: AlertRunMode;
   try {
-    mode = parseAlertModeFromArgv(process.argv);
+    mode = parseAlertModeFromArgv(argv);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logger.error(msg);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (mode === "stop") {
@@ -108,10 +108,8 @@ async function main(): Promise<void> {
   }
 
   const config = getConfig();
-  const db = new Database(config.DB_PATH);
-  db.pragma("foreign_keys = ON");
+  const db = openCueDb(config.DB_PATH);
   try {
-    initSchema(db);
     const pending = listBuySignalsReadyToAlert(db);
     if (pending.length === 0) {
       logger.info("No BUY signals pending alert (enriched + not alerted).");
@@ -130,6 +128,10 @@ async function main(): Promise<void> {
   } finally {
     db.close();
   }
+}
+
+async function main(): Promise<void> {
+  await runBriefAlertCli(process.argv);
 }
 
 if (isMain) {

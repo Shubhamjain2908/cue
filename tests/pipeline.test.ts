@@ -6,13 +6,16 @@ import {
   detectRunMode,
   formatEtYmd,
   getEtMinutesSinceMidnight,
+  getNyCalendarWeekday,
   isWithinExecutionWindow,
   pnpmRunArgs,
   REBALANCE_DAY_OF_WEEK,
   runPipeline,
+  runPipelineWithSteps,
   stepsForMode,
+  type PipelineStep,
   weekdayUtcForNyCalendarDate,
-} from "../src/pipeline.js";
+} from "../src/agents/daily-workflow.js";
 
 describe("weekdayUtcForNyCalendarDate", () => {
   it("maps 2026-01-09 (Fri) to Friday (5)", () => {
@@ -43,21 +46,15 @@ describe("detectRunMode", () => {
 
 describe("stepsForMode", () => {
   it("excludes enrich for stop mode", () => {
-    expect(stepsForMode("stop").map((s) => s.name)).toEqual([
-      "fetch",
-      "screen",
-      "alert",
-      "dashboard",
-    ]);
+    expect(stepsForMode("stop").map((s) => s.name)).toEqual(["ingest", "screen", "brief"]);
   });
 
   it("includes enrich for rebalance mode", () => {
     expect(stepsForMode("rebalance").map((s) => s.name)).toEqual([
-      "fetch",
+      "ingest",
       "screen",
       "enrich",
-      "alert",
-      "dashboard",
+      "brief",
     ]);
   });
 });
@@ -89,22 +86,91 @@ describe("formatEtYmd / getEtMinutesSinceMidnight", () => {
 describe("pnpmRunArgs", () => {
   it("forwards --force-rebalance to screen when pipeline mode is rebalance", () => {
     const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
-    expect(pnpmRunArgs(screen, "rebalance")).toEqual(["run", "screen", "--", "--force-rebalance"]);
+    expect(pnpmRunArgs(screen, "rebalance")).toEqual([
+      "run",
+      "cue",
+      "--",
+      "screen",
+      "--force-rebalance",
+    ]);
   });
 
   it("does not forward args for screen when pipeline mode is stop", () => {
     const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
-    expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "screen"]);
+    expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "cue", "--", "screen"]);
   });
 
-  it("forwards --mode stop to alert via registry forwardArgs expansion", () => {
-    const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
-    expect(pnpmRunArgs(alert, "stop")).toEqual(["run", "alert", "--", "--mode", "stop"]);
+  it("forwards --mode stop to brief via registry forwardArgs expansion", () => {
+    const brief = PIPELINE_STEPS.find((s) => s.name === "brief")!;
+    expect(pnpmRunArgs(brief, "stop")).toEqual([
+      "run",
+      "cue",
+      "--",
+      "brief",
+      "--mode",
+      "stop",
+    ]);
   });
 
-  it("forwards --mode rebalance to alert in rebalance pipeline mode", () => {
-    const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
-    expect(pnpmRunArgs(alert, "rebalance")).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
+  it("forwards --mode rebalance to brief in rebalance pipeline mode", () => {
+    const brief = PIPELINE_STEPS.find((s) => s.name === "brief")!;
+    expect(pnpmRunArgs(brief, "rebalance")).toEqual([
+      "run",
+      "cue",
+      "--",
+      "brief",
+      "--mode",
+      "rebalance",
+    ]);
+  });
+});
+
+describe("getNyCalendarWeekday", () => {
+  it("agrees with weekdayUtcForNyCalendarDate for ET civil dates", () => {
+    const now = new Date("2026-01-09T16:10:00-05:00");
+    expect(getNyCalendarWeekday(now)).toBe(
+      weekdayUtcForNyCalendarDate(2026, 1, 9),
+    );
+  });
+
+  it("maps Sunday in ET", () => {
+    expect(getNyCalendarWeekday(new Date("2026-01-04T16:10:00-05:00"))).toBe(0);
+  });
+});
+
+describe("runPipelineWithSteps", () => {
+  const schedulerFridayLike: PipelineStep[] = [
+    { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+    { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
+    { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
+    { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "both" },
+    {
+      name: "brief",
+      cueArgs: ["brief"],
+      critical: false,
+      runOn: "both",
+      forwardArgs: ["--mode"],
+    },
+  ];
+
+  it("runs scheduler Friday order with rebalance screen flags", () => {
+    const calls: string[][] = [];
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
+      calls.push(args !== undefined ? [...args] : []);
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
+    }) as unknown as typeof spawnSync;
+
+    runPipelineWithSteps(schedulerFridayLike, "rebalance", { spawn });
+    const scripts = calls.map((a) => a[3]).filter((s): s is string => s !== undefined);
+    expect(scripts).toEqual([
+      "ingest",
+      "enrich-fundamentals",
+      "screen",
+      "enrich",
+      "brief",
+    ]);
+    const screenCall = calls.find((a) => a[3] === "screen");
+    expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
   });
 });
 
@@ -117,10 +183,10 @@ describe("runPipeline", () => {
     }) as unknown as typeof spawnSync;
 
     runPipeline("rebalance", { spawn });
-    const screenCall = calls.find((a) => a[1] === "screen");
-    expect(screenCall).toEqual(["run", "screen", "--", "--force-rebalance"]);
-    const alertCall = calls.find((a) => a[1] === "alert");
-    expect(alertCall).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
+    const screenCall = calls.find((a) => a[3] === "screen");
+    expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
+    const briefCall = calls.find((a) => a[3] === "brief");
+    expect(briefCall).toEqual(["run", "cue", "--", "brief", "--mode", "rebalance"]);
   });
 
   it("passes --mode stop to alert subprocess in stop mode", () => {
@@ -131,13 +197,13 @@ describe("runPipeline", () => {
     }) as unknown as typeof spawnSync;
 
     runPipeline("stop", { spawn });
-    const alertCall = calls.find((a) => a[1] === "alert");
-    expect(alertCall).toEqual(["run", "alert", "--", "--mode", "stop"]);
+    const briefCall = calls.find((a) => a[3] === "brief");
+    expect(briefCall).toEqual(["run", "cue", "--", "brief", "--mode", "stop"]);
   });
 
-  it("returns 1 and does not run downstream when fetch fails (critical)", () => {
+  it("returns 1 and does not run downstream when ingest fails (critical)", () => {
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
-      if (args?.[1] === "fetch") {
+      if (args?.[3] === "ingest") {
         return { status: 1 } as SpawnSyncReturns<Buffer>;
       }
       return { status: 0 } as SpawnSyncReturns<Buffer>;
@@ -148,10 +214,10 @@ describe("runPipeline", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  it("continues after enrich fails and still runs alert and dashboard", () => {
+  it("continues after enrich fails and still runs brief", () => {
     const scripts: string[] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
-      const script = args?.[1];
+      const script = args !== undefined && args.length > 3 ? args[3] : undefined;
       if (script !== undefined) {
         scripts.push(script);
       }
@@ -163,6 +229,6 @@ describe("runPipeline", () => {
 
     const code = runPipeline("rebalance", { spawn });
     expect(code).toBe(0);
-    expect(scripts).toEqual(["fetch", "screen", "enrich", "alert", "dashboard"]);
+    expect(scripts).toEqual(["ingest", "screen", "enrich", "brief"]);
   });
 });

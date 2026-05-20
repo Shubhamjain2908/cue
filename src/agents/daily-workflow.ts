@@ -1,39 +1,36 @@
 import { spawnSync } from "node:child_process";
-import path from "node:path";
-import { clearInterval, setInterval } from "node:timers";
-import { fileURLToPath } from "node:url";
 
 import winston from "winston";
+
+import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 
 /** Friday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 5 Fri). */
 export const REBALANCE_DAY_OF_WEEK = 5;
 
-const POLL_MS = 60_000;
 const WINDOW_START_MIN = 16 * 60 + 5;
 const WINDOW_END_MIN = 16 * 60 + 15;
 
 export interface PipelineStep {
   name: string;
-  command: string;
+  /** Arguments after `pnpm run cue --`. */
+  cueArgs: string[];
   critical: boolean;
   runOn: "rebalance" | "stop" | "both";
-  /** Appended after `pnpm run <name> --` when non-empty (passed through to the script). */
+  /** Appended after `pnpm run cue -- …` when non-empty (passed through to the CLI). */
   forwardArgs?: string[];
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
-  { name: "fetch", command: "pnpm run fetch", critical: true, runOn: "both" },
-  { name: "screen", command: "pnpm run screen", critical: true, runOn: "both" },
-  { name: "enrich", command: "pnpm run enrich", critical: false, runOn: "rebalance" },
+  { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+  { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
+  { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "rebalance" },
   {
-    name: "alert",
-    command: "pnpm run alert",
+    name: "brief",
+    cueArgs: ["brief"],
     critical: false,
     runOn: "both",
-    /** Resolved in `pnpmRunArgs` as `--mode <rebalance|stop>`. */
     forwardArgs: ["--mode"],
   },
-  { name: "dashboard", command: "pnpm run dashboard", critical: true, runOn: "both" },
 ];
 
 const logger = winston.createLogger({
@@ -52,8 +49,8 @@ const logger = winston.createLogger({
 });
 
 function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
+    timeZone: CUE_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -76,6 +73,12 @@ function getEtCalendarParts(now: Date): { year: number; month: number; day: numb
   return { year, month, day };
 }
 
+/** NY civil calendar weekday for an instant (0 Sunday … 6 Saturday). */
+export function getNyCalendarWeekday(now: Date): number {
+  const { year, month, day } = getEtCalendarParts(now);
+  return weekdayUtcForNyCalendarDate(year, month, day);
+}
+
 /** Gregorian weekday for an America/New_York calendar date (0 Sunday … 6 Saturday). */
 export function weekdayUtcForNyCalendarDate(year: number, month: number, day: number): number {
   return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
@@ -90,8 +93,8 @@ export function formatEtYmd(now: Date): string {
 }
 
 export function getEtMinutesSinceMidnight(now: Date): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
+    timeZone: CUE_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -126,8 +129,7 @@ export function detectRunMode(input?: DetectRunModeInput): "rebalance" | "stop" 
   if (argv.includes("--force-rebalance")) {
     return "rebalance";
   }
-  const { year, month, day } = getEtCalendarParts(now);
-  const dow = weekdayUtcForNyCalendarDate(year, month, day);
+  const dow = getNyCalendarWeekday(now);
   return dow === REBALANCE_DAY_OF_WEEK ? "rebalance" : "stop";
 }
 
@@ -148,7 +150,8 @@ export function pnpmRunArgs(step: PipelineStep, mode: "rebalance" | "stop"): str
   const screenRebalance =
     step.name === "screen" && mode === "rebalance" ? (["--force-rebalance"] as const) : [];
   const forwarded = [...resolvedForwardArgs(step, mode), ...screenRebalance];
-  return forwarded.length > 0 ? ["run", step.name, "--", ...forwarded] : ["run", step.name];
+  const base = ["run", "cue", "--", ...step.cueArgs];
+  return forwarded.length > 0 ? [...base, ...forwarded] : base;
 }
 
 export interface RunPipelineDeps {
@@ -156,15 +159,15 @@ export interface RunPipelineDeps {
 }
 
 /**
- * Runs filtered steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
+ * Runs the given steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
  */
-export function runPipeline(
+export function runPipelineWithSteps(
+  steps: PipelineStep[],
   mode: "rebalance" | "stop",
   deps: RunPipelineDeps = {},
 ): number {
   const spawnImpl = deps.spawn ?? spawnSync;
   const skippedSteps: string[] = [];
-  const steps = stepsForMode(mode);
   const t0 = Date.now();
   logger.info(
     `pipeline_start mode=${mode} steps=${steps.map((s) => s.name).join(",")} ts=${new Date().toISOString()}`,
@@ -194,55 +197,24 @@ export function runPipeline(
   return 0;
 }
 
-let lastRunEtYmd = "";
-let pollTimer: ReturnType<typeof setInterval> | undefined;
+/**
+ * Runs filtered registry steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
+ */
+export function runPipeline(mode: "rebalance" | "stop", deps: RunPipelineDeps = {}): number {
+  return runPipelineWithSteps(stepsForMode(mode), mode, deps);
+}
 
-function schedulerTick(): void {
-  const now = new Date();
-  if (!isWithinExecutionWindow(now)) {
-    return;
-  }
-  const todayEt = formatEtYmd(now);
-  if (lastRunEtYmd === todayEt) {
-    return;
+/** One-shot: full pipeline in subprocess order (ingest → screen → …). Returns exit code (0 ok, 1 critical failure). */
+export function runAllPipelineCli(argv?: readonly string[]): number {
+  const mode = detectRunMode({ argv: argv ?? process.argv });
+  return runPipeline(mode);
+}
+
+export function runDailyWorkflowCli(): void {
+  if (!process.argv.includes("--now")) {
+    throw new Error("runDailyWorkflowCli is only for --now; use `cue schedule` for the daemon.");
   }
   const mode = detectRunMode();
-  logger.info(`scheduler_fire mode=${mode} etDate=${todayEt}`);
   const code = runPipeline(mode);
-  if (code === 0) {
-    lastRunEtYmd = todayEt;
-  }
-}
-
-function shutdown(): void {
-  logger.info("[pipeline] Shutdown signal received. Exiting.");
-  if (pollTimer !== undefined) {
-    clearInterval(pollTimer);
-  }
-  process.exit(0);
-}
-
-function main(): void {
-  const argv = process.argv;
-  const runNow = argv.includes("--now");
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-
-  if (runNow) {
-    const mode = detectRunMode();
-    const code = runPipeline(mode);
-    process.exit(code);
-  }
-
-  logger.info("[pipeline] Scheduler started pollMs=60000 window=16:05-16:15 America/New_York");
-  pollTimer = setInterval(schedulerTick, POLL_MS);
-  schedulerTick();
-}
-
-const isMain =
-  path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
-
-if (isMain) {
-  main();
+  process.exit(code);
 }

@@ -1,9 +1,5 @@
-import Database from "better-sqlite3";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.resolve(__dirname, "..", "..", "db", "cue.db");
+import { getConfig } from "../config/index.js";
+import { openCueDbReadonly } from "../db/provider.js";
 
 export interface OpenPosition {
   ticker: string;
@@ -65,7 +61,8 @@ interface RegimeRow {
  * Column names follow UI contracts; `cagr` / `max_drawdown` / `expectancy` are **decimals** (e.g. 0.2139 = 21.39%).
  */
 export function extractDashboardPayload(): DashboardPayload {
-  const db = new Database(DB_PATH, { readonly: true });
+  const { DB_PATH } = getConfig();
+  const db = openCueDbReadonly(DB_PATH);
 
   try {
     const open_positions = db
@@ -186,5 +183,3 @@ export function extractDashboardPayload(): DashboardPayload {
     db.close();
   }
 }
-
-export { DB_PATH };
