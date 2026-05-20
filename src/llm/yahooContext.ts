@@ -123,7 +123,7 @@ function filterHeadlinesLast7Days(
 
 export async function fetchYahooEnrichmentDto(
   ticker: string,
-  yf: YahooFinanceHandle = new YahooFinance(),
+  yf: YahooFinanceHandle = new YahooFinance({ suppressNotices: ["yahooSurvey"] }),
   nowMs: number = Date.now(),
 ): Promise<YahooEnrichmentDto> {
   const config = getConfig();
