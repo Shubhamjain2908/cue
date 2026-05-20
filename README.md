@@ -202,6 +202,8 @@ Defined in **`src/config/cue-timezone.ts`** and used from ingest date helpers, `
 
 ```
 cue/
+  data/
+    universe/       `nasdaq100.json` (constituents) + `_meta.json` (as-of, counts, QQQ note)
   src/
     agents/           thesis-generator, daily-workflow (registry), scheduler.ts (daemon)
     analysers/        momentum-screener (screen, execute-stops CLI)
@@ -211,6 +213,7 @@ cue/
     db/               migrations/, queries.ts, provider.ts, schema.ts
     enrichers/        momentum types / math used by screener
     ingestors/        Massive price ingest, enrich-fundamentals CLI
+    universe/         shared `load-universe.ts` (tickers + `_meta.json`)
     llm/              provider adapters, enricher, prompt, yahooContext
     backtest/         historical runner (separate tsx entry)
   deploy/             PM2 ecosystem example

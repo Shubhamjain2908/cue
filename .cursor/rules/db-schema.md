@@ -33,7 +33,7 @@ End-of-day OHLCV bars (Massive.com ingest).
 | `volume` | INTEGER |
 | `created_at` | Audit |
 
-**Written by:** `cue ingest` (`massive-price-ingestor.ts`).
+**Written by:** `cue ingest` (`massive-price-ingestor.ts`); universe list from `data/universe/${UNIVERSE}.json` (see `src/universe/load-universe.ts`, `_meta.json`).
 
 ---
 

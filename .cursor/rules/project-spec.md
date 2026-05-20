@@ -45,7 +45,7 @@ Cue is a **personal US equity swing-trading signal engine** for the **Nasdaq 100
 momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 ```
 
-- **Universe:** tickers from `data/universe/nasdaq100.json` (plus **QQQ** for regime / data).
+- **Universe:** tickers from `data/universe/nasdaq100.json` (resolved via env **`UNIVERSE`**, default `nasdaq100`) plus **`data/universe/_meta.json`** for human-readable as-of / count checks; **QQQ** added at runtime for regime / ingest (see `_meta.json` → `system_additions`).
 - **Entry:** top **3** names by momentum rank on rebalance.
 - **Rebalance cadence:** **Friday** EOD in ET civil calendar (`REBALANCE_DAY_OF_WEEK = 5` in `daily-workflow.ts`).
 - **Regime filter:** **QQQ close > SMA(200)**. If false → **suppress new BUYs**; SELL / stop paths still run.
@@ -131,6 +131,7 @@ interface PipelineStep {
 | CLI | `src/cli.ts`, `src/cli/cue-logger.ts`, `src/cli/doctor.ts`, `src/cli/llm-smoke.ts` | `pnpm run cue -- …` |
 | ET constants | `src/config/cue-timezone.ts` | `CUE_LOCALE`, `CUE_TIME_ZONE` |
 | Env | `src/config/index.ts` | `getConfig()` |
+| Universe files | `data/universe/*.json`, `data/universe/_meta.json` | `UNIVERSE` env key; loader `src/universe/load-universe.ts` |
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` |
@@ -149,7 +150,7 @@ interface PipelineStep {
 ### 6.1 Prices — Massive.com
 
 - **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
-- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default latest weekday on/before “now” in **`America/New_York`**, or **`--date YYYY-MM-DD`**; universe from `data/universe/nasdaq100.json` + **QQQ**; **`--force`** refetches that session.
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default latest weekday on/before “now” in **`America/New_York`**, or **`--date YYYY-MM-DD`**; universe from `data/universe/${UNIVERSE}.json` (default **nasdaq100**) + **QQQ**; **`--force`** refetches that session.
 - **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
@@ -236,6 +237,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | Task | Notes |
 |---|---|
 | **Grouped Massive fetch** | ✅ Shipped: `massive-price-ingestor.ts` grouped daily + universe mask + quorum |
+| **Full NDX universe + `_meta.json`** | ✅ Shipped: `data/universe/_meta.json`, `src/universe/load-universe.ts` (no cache) |
 | **Wire `fundamentals_cache`** | From `enrich-fundamentals` into SQLite |
 | **Cosmetic logs** | `rankedUniverse=0` on intentional skip |
 | **`backtest_trades`** | Per-trade audit (Phase 5 spec) |
