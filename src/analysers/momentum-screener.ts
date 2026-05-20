@@ -3,10 +3,8 @@
  * Mirrors `runBacktest` §6.2–6.3 semantics at a single as-of date (last QQQ trading day in DB).
  */
 
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
 
 import Database from "better-sqlite3";
 
@@ -31,11 +29,13 @@ import {
   type RankedTicker,
 } from "../enrichers/momentum-types.js";
 
-type SqliteConnection = InstanceType<typeof Database>;
+import {
+  loadUniverseTickers,
+  tryLoadUniverseMeta,
+  universeMetaMatchesTickerCount,
+} from "../universe/load-universe.js";
 
-const universeSchema = z.object({
-  tickers: z.array(z.string().min(1)),
-});
+type SqliteConnection = InstanceType<typeof Database>;
 
 interface DailyBar {
   ticker: string;
@@ -104,17 +104,6 @@ function tradingDaysHeld(
     count++;
   }
   return count;
-}
-
-function loadUniverseTickers(): string[] {
-  const { UNIVERSE } = getConfig();
-  const filePath = path.join(process.cwd(), "data", "universe", `${UNIVERSE}.json`);
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = universeSchema.safeParse(JSON.parse(raw) as unknown);
-  if (!parsed.success) {
-    throw new Error(`Invalid universe file ${filePath}: ${parsed.error.message}`);
-  }
-  return parsed.data.tickers.map((t) => t.toUpperCase());
 }
 
 function loadQqqTradingDates(db: SqliteConnection, dateFrom: string, dateTo: string): string[] {
@@ -269,6 +258,12 @@ export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"):
   }
 
   const universe = loadUniverseTickers();
+  const meta = tryLoadUniverseMeta();
+  if (meta !== null && !universeMetaMatchesTickerCount(meta, universe.length)) {
+    console.warn(
+      `screen: universe _meta.json total_ticker_count (${String(meta.total_ticker_count)}) !== universe file length (${String(universe.length)})`,
+    );
+  }
   const allTickers = [...new Set([...universe, "QQQ"])].sort((a, b) => a.localeCompare(b));
   const dataFrom = addCalendarDays(asOf, -600);
   const rows = hydrateDailyPrices(db, allTickers, dataFrom, asOf);
@@ -332,6 +327,12 @@ export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"):
       skipDays: cfg.skipDays,
       topN: cfg.topN,
     });
+    const quorum = universe.length * 0.8;
+    if (fullRanked.length < quorum) {
+      console.warn(
+        `screen: partial cross-section — ranked ${String(fullRanked.length)} of ${String(universe.length)} universe tickers (12-1 needs full history; quorum ~${String(Math.ceil(quorum))})`,
+      );
+    }
     const topSet = new Set(fullRanked.slice(0, cfg.topN).map((r) => r.ticker));
 
     for (const pos of openRows) {
