@@ -16,9 +16,13 @@ import {
   insertSignal,
   type SignalInsert,
 } from "../db/queries.js";
-import { atr, sma } from "./indicators.js";
+import { atr, sma } from "../enrichers/indicators.js";
 import { computeTrailingStop, rankUniverse } from "./ranker.js";
-import { DEFAULT_RANKING_CONFIG, type RankingConfig, type RankedTicker } from "./types.js";
+import {
+  DEFAULT_RANKING_CONFIG,
+  type RankingConfig,
+  type RankedTicker,
+} from "../enrichers/momentum-types.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
 

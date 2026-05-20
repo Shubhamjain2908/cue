@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAlertModeFromArgv } from "../../src/alerts/telegram.js";
+import { parseAlertModeFromArgv } from "../../src/briefing/telegram-dispatcher.js";
 
 describe("parseAlertModeFromArgv", () => {
   it("throws when --mode is absent", () => {

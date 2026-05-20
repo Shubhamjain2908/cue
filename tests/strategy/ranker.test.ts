@@ -4,7 +4,7 @@ import {
   computeMomentumReturn,
   computeTrailingStop,
   rankUniverse,
-} from "../../src/strategy/ranker.js";
+} from "../../src/analysers/ranker.js";
 
 describe("computeMomentumReturn", () => {
   it("returns null when series is shorter than lookbackDays", () => {

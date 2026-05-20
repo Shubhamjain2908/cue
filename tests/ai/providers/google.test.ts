@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createGoogleProvider } from "../../../src/ai/providers/google.js";
+import { createGoogleProvider } from "../../../src/llm/providers/google.js";
 
 describe("createGoogleProvider", () => {
   afterEach(() => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPrompt } from "../../src/ai/prompt.js";
+import { buildPrompt } from "../../src/llm/prompt.js";
 import type { BuySignalForEnrichmentRow } from "../../src/db/queries.js";
-import type { YahooEnrichmentDto } from "../../src/ai/yahooContext.js";
+import type { YahooEnrichmentDto } from "../../src/llm/yahooContext.js";
 
 function baseSignal(over: Partial<BuySignalForEnrichmentRow> = {}): BuySignalForEnrichmentRow {
   return {

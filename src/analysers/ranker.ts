@@ -4,7 +4,7 @@
  * Per §6.2 of Cue_Spec_v1.3.md
  */
 
-import type { RankedTicker, RankingConfig } from "./types.js";
+import type { RankedTicker, RankingConfig } from "../enrichers/momentum-types.js";
 
 /**
  * Computes the 12-1 momentum return for a single ticker's close series.

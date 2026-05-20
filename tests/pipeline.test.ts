@@ -12,7 +12,7 @@ import {
   runPipeline,
   stepsForMode,
   weekdayUtcForNyCalendarDate,
-} from "../src/pipeline.js";
+} from "../src/agents/daily-workflow.js";
 
 describe("weekdayUtcForNyCalendarDate", () => {
   it("maps 2026-01-09 (Fri) to Friday (5)", () => {

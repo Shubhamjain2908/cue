@@ -18,8 +18,8 @@ import { z } from "zod";
 
 import { getConfig } from "../src/config/index.js";
 import { initSchema } from "../src/db/schema.js";
-import { generateSignal } from "../src/strategy/signals.js";
-import type { SignalThresholds } from "../src/strategy/types.js";
+import { generateSignal } from "../src/enrichers/momentum-technical.js";
+import type { SignalThresholds } from "../src/enrichers/momentum-types.js";
 
 const universeSchema = z.object({ tickers: z.array(z.string().min(1)) });
 

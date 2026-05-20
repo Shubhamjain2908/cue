@@ -3,18 +3,18 @@ import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
 
+import { detectRunMode } from "../agents/daily-workflow.js";
+import { runLiveScreen } from "../analysers/momentum-screener.js";
 import { getConfig } from "../config/index.js";
 import { initSchema } from "../db/schema.js";
-import { detectRunMode } from "../pipeline.js";
-import { runLiveScreen } from "./screenRunner.js";
 import { momentum5d, rsi14, sma, volumeRatio } from "./indicators.js";
 import type {
   SignalDecision,
   SignalExitReason,
   SignalMetrics,
   SignalThresholds,
-} from "./types.js";
-import { DEFAULT_SIGNAL_THRESHOLDS } from "./types.js";
+} from "./momentum-types.js";
+import { DEFAULT_SIGNAL_THRESHOLDS } from "./momentum-types.js";
 
 /** Mutable counters: first failing BUY gate per bar (mutually exclusive when all indicators non-null). */
 export interface BuyGateFirstFailCounters {

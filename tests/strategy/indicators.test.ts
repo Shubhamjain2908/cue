@@ -6,7 +6,7 @@ import {
   rsi14,
   sma,
   volumeRatio,
-} from "../../src/strategy/indicators.js";
+} from "../../src/enrichers/indicators.js";
 
 describe("rsi14", () => {
   it("returns null when fewer than 28 closes", () => {

@@ -4,13 +4,12 @@ import util from "node:util";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
-import Database from "better-sqlite3";
 import { z } from "zod";
 import winston from "winston";
 
 import { getConfig } from "../config/index.js";
 import { insertDailyPrices } from "../db/queries.js";
-import { initSchema } from "../db/schema.js";
+import { openCueDb, type CueDatabase } from "../db/provider.js";
 import {
   readCachedOhlcvIfFresh,
   writeCachedOhlcv,
@@ -87,31 +86,73 @@ function createLogger(): winston.Logger {
   });
 }
 
-function formatLocalYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/** ET civil calendar parts for `now` (aligns ingest with US equity dates / pipeline). */
+function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = dtf.formatToParts(now);
+  let year = 0;
+  let month = 0;
+  let day = 0;
+  for (const p of parts) {
+    if (p.type === "year") {
+      year = Number(p.value);
+    }
+    if (p.type === "month") {
+      month = Number(p.value);
+    }
+    if (p.type === "day") {
+      day = Number(p.value);
+    }
+  }
+  return { year, month, day };
+}
+
+function formatEtYmd(now: Date): string {
+  const { year, month, day } = getEtCalendarParts(now);
+  const y = String(year).padStart(4, "0");
+  const m = String(month).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Gregorian weekday for an America/New_York civil date (0 Sun … 6 Sat), UTC-noon anchor. */
+function weekdayUtcForNyCivilDate(year: number, month: number, day: number): number {
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
 }
 
 /**
- * Latest Mon–Fri on or before the local calendar day of `fromDate`, stepping back at most 5 days
- * (covers Fri–Sun weekend gaps; returns null if no weekday found → treat DB as stale).
+ * Latest Mon–Fri on or before ET civil (year, month, day); walks back at most 5 days.
+ * Used so `dbCurrent` matches US-listed daily bars, not the laptop's local timezone.
  */
-function latestWeekday(fromDate: Date): string | null {
-  const d = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+function latestWeekdayOnOrBeforeEtCivil(
+  year: number,
+  month: number,
+  day: number,
+): string | null {
+  let y = year;
+  let mo = month;
+  let d = day;
   for (let i = 0; i < 5; i++) {
-    const dow = d.getDay();
+    const dow = weekdayUtcForNyCivilDate(y, mo, d);
     if (dow !== 0 && dow !== 6) {
-      return formatLocalYmd(d);
+      return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     }
-    d.setDate(d.getDate() - 1);
+    const civil = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
+    civil.setUTCDate(civil.getUTCDate() - 1);
+    y = civil.getUTCFullYear();
+    mo = civil.getUTCMonth() + 1;
+    d = civil.getUTCDate();
   }
   return null;
 }
 
 function rangeEndYmd(): string {
-  return formatLocalYmd(new Date());
+  return formatEtYmd(new Date());
 }
 
 /** ~13 months calendar (~278 trading days) — covers 252+21 momentum lookback under Massive's 499-bar cap. */
@@ -119,9 +160,12 @@ const RANGE_START_LOOKBACK_CALENDAR_DAYS = 400;
 
 function rangeStartYmdMinusLookback(end: string): string {
   const [yy, mm, dd] = end.split("-").map(Number);
-  const d = new Date(yy!, mm! - 1, dd!);
-  d.setDate(d.getDate() - RANGE_START_LOOKBACK_CALENDAR_DAYS);
-  return formatLocalYmd(d);
+  const civil = new Date(Date.UTC(yy!, mm! - 1, dd!, 12, 0, 0));
+  civil.setUTCDate(civil.getUTCDate() - RANGE_START_LOOKBACK_CALENDAR_DAYS);
+  const y = civil.getUTCFullYear();
+  const m = String(civil.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(civil.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function barDateFromUnixMs(t: number): string {
@@ -157,19 +201,7 @@ function loadUniverseTickers(projectRoot: string): string[] {
   return data.tickers.map((t) => t.toUpperCase());
 }
 
-function openDb(dbPath: string): InstanceType<typeof Database> {
-  const resolved = path.isAbsolute(dbPath)
-    ? dbPath
-    : path.resolve(process.cwd(), dbPath);
-  const dir = path.dirname(resolved);
-  fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(resolved);
-  db.pragma("foreign_keys = ON");
-  initSchema(db);
-  return db;
-}
-
-function maxDailyPriceDate(db: InstanceType<typeof Database>, ticker: string): string | null {
+function maxDailyPriceDate(db: CueDatabase, ticker: string): string | null {
   const row = db
     .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = ?`)
     .get(ticker.toUpperCase()) as { d: string | null };
@@ -268,9 +300,9 @@ async function run(): Promise<void> {
   const rangeEnd = rangeEndYmd();
   const rangeStart = rangeStartYmdMinusLookback(rangeEnd);
   const [ey, em, ed] = rangeEnd.split("-").map(Number);
-  const expectedLastTradingDate = latestWeekday(new Date(ey!, em! - 1, ed!));
+  const expectedLastTradingDate = latestWeekdayOnOrBeforeEtCivil(ey!, em!, ed!);
 
-  const db = openDb(config.DB_PATH);
+  const db = openCueDb(config.DB_PATH);
   try {
     for (let i = 0; i < tickers.length; i++) {
       const ticker = tickers[i]!;
@@ -280,25 +312,27 @@ async function run(): Promise<void> {
         maxDate !== null &&
         maxDate.localeCompare(expectedLastTradingDate) >= 0;
 
-      if (dbCurrent) {
-        const cached = readCachedOhlcvIfFresh(
-          config.CACHE_DIR,
+      const cached = readCachedOhlcvIfFresh(
+        config.CACHE_DIR,
+        ticker,
+        rangeStart,
+        rangeEnd,
+        Number.MAX_SAFE_INTEGER,
+      );
+      if (cached !== null) {
+        logger.info("OHLCV cache hit; skipping Massive API", {
           ticker,
           rangeStart,
           rangeEnd,
-          Number.MAX_SAFE_INTEGER,
-        );
-        if (cached !== null) {
-          logger.info("OHLCV cache hit; skipping Massive API", {
-            ticker,
-            rangeStart,
-            rangeEnd,
-            maxDate,
-            expectedLastTradingDate,
-          });
-          insertDailyPrices(db, ticker, cached.bars);
-          continue;
-        }
+          maxDate,
+          dbCurrent,
+          expectedLastTradingDate,
+        });
+        insertDailyPrices(db, ticker, cached.bars);
+        continue;
+      }
+
+      if (dbCurrent) {
         logger.info("OHLCV DB current; skipping Massive API (no disk cache for range)", {
           ticker,
           rangeStart,

@@ -3,10 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import Database from "better-sqlite3";
-
-import { initSchema } from "../db/schema.js";
-import { DB_PATH, extractDashboardPayload } from "./queries.js";
+import { getConfig } from "../config/index.js";
+import { openCueDb } from "../db/provider.js";
+import { extractDashboardPayload } from "./queries.js";
 import { renderHtml } from "./template.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,9 +14,10 @@ const OUT_FILE = path.join(OUT_DIR, "dashboard.html");
 
 const OPEN_BROWSER = process.argv.includes("--open");
 
-const mig = new Database(DB_PATH);
+const { DB_PATH } = getConfig();
+const mig = openCueDb(DB_PATH);
 try {
-  initSchema(mig);
+  /* schema ensured for fresh DBs before payload extraction */
 } finally {
   mig.close();
 }

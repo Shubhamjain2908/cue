@@ -1,12 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import Database from "better-sqlite3";
-
 import { getConfig } from "../config/index.js";
-import { initSchema } from "../db/schema.js";
 import { listUnenrichedBuySignals } from "../db/queries.js";
-import { runEnrichment } from "./enricher.js";
+import { openCueDb } from "../db/provider.js";
+import { runEnrichment } from "../llm/enricher.js";
 
 const isMain =
   path.resolve(fileURLToPath(import.meta.url)) ===
@@ -14,10 +12,8 @@ const isMain =
 
 async function main(): Promise<void> {
   const config = getConfig();
-  const db = new Database(config.DB_PATH);
-  db.pragma("foreign_keys = ON");
+  const db = openCueDb(config.DB_PATH);
   try {
-    initSchema(db);
     const pending = listUnenrichedBuySignals(db);
     if (pending.length === 0) {
       console.log("No unenriched BUY signals.");

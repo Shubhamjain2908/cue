@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { massiveStocksAggregatesResponseSchema } from "../../src/fetcher/types.js";
+import { massiveStocksAggregatesResponseSchema } from "../../src/ingestors/types.js";
 
 /** Representative Massive v2 aggs JSON (includes `next_url` + optional `count`). */
 const sampleAggregatesResponse = {
