@@ -134,7 +134,7 @@ interface PipelineStep {
 | Universe files | `data/universe/*.json`, `data/universe/_meta.json` | `UNIVERSE` env key; loader `src/universe/load-universe.ts` |
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
-| Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` |
+| Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
 | LLM | `src/llm/provider.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
 | Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` |
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
