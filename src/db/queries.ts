@@ -1,6 +1,46 @@
 import Database from "better-sqlite3";
 
+import { getConfig } from "../config/index.js";
+import { openCueDb } from "./provider.js";
+
 type SqliteConnection = InstanceType<typeof Database>;
+
+/** `prepare` typings default to a single-arg `run` when SQL does not carry inferred bind shapes. */
+type FundamentalsUpsertStatement = {
+  run(ticker: string, asOfDate: string, payloadJson: string): {
+    changes: number;
+    lastInsertRowid: number | bigint;
+  };
+};
+
+let fundamentalsDb: SqliteConnection | null = null;
+
+function getDbHandleForFundamentals(): SqliteConnection {
+  if (!fundamentalsDb) {
+    fundamentalsDb = openCueDb(getConfig().DB_PATH);
+  }
+  return fundamentalsDb;
+}
+
+let upsertFundamentalsStmt: FundamentalsUpsertStatement | null = null;
+
+/**
+ * Idempotent upsert into `fundamentals_cache` (unique on `ticker`, `as_of_date`).
+ * Uses a module-scoped prepared statement and shared DB handle from config `DB_PATH`.
+ */
+export function upsertFundamentalsCache(ticker: string, asOfDate: string, payloadJson: string): void {
+  if (!upsertFundamentalsStmt) {
+    const db = getDbHandleForFundamentals();
+    upsertFundamentalsStmt = db.prepare(`
+      INSERT INTO fundamentals_cache (ticker, as_of_date, payload_json, fetched_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(ticker, as_of_date) DO UPDATE SET
+        payload_json = excluded.payload_json,
+        fetched_at = CURRENT_TIMESTAMP
+    `) as FundamentalsUpsertStatement;
+  }
+  upsertFundamentalsStmt.run(ticker.toUpperCase(), asOfDate, payloadJson);
+}
 
 export type SignalSide = "BUY" | "SELL" | "HOLD";
 
