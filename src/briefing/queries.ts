@@ -5,9 +5,12 @@ export interface OpenPosition {
   ticker: string;
   entry_date: string;
   entry_price: number;
-  /** Persisted entry-time ATR stop from the BUY signal (`signals.initial_atr_stop`). */
+  /** Trailing floor from ledger (`positions.current_stop_loss`), backfilled from signal when absent. */
   current_stop_loss: number;
+  /** High-water close from ledger (`positions.highest_close_since_entry`), else replayed from prices. */
   highest_close_since_entry: number;
+  /** Latest daily close (`daily_prices`) for stop-distance / regime display. */
+  current_close: number;
   momentum_rank: number | null;
   momentum_12_1_return: number | null;
   atr14: number | null;
@@ -72,21 +75,39 @@ export function extractDashboardPayload(): DashboardPayload {
         sig.ticker AS ticker,
         p.entry_date AS entry_date,
         p.entry_price AS entry_price,
-        sig.initial_atr_stop AS current_stop_loss,
+        COALESCE(p.current_stop_loss, sig.initial_atr_stop) AS current_stop_loss,
         COALESCE(
+          p.highest_close_since_entry,
           (
-            SELECT MAX(dp.close)
-            FROM daily_prices dp
-            WHERE dp.ticker = sig.ticker AND dp.date >= p.entry_date
+            SELECT MAX(dp2.close)
+            FROM daily_prices dp2
+            WHERE dp2.ticker = sig.ticker AND dp2.date >= p.entry_date
           ),
           p.entry_price
         ) AS highest_close_since_entry,
+        COALESCE(
+          dp.close,
+          (
+            SELECT dp3.close
+            FROM daily_prices dp3
+            WHERE dp3.ticker = sig.ticker
+            ORDER BY dp3.date DESC
+            LIMIT 1
+          ),
+          p.entry_price
+        ) AS current_close,
         sig.momentum_rank AS momentum_rank,
         sig.momentum_12_1_return AS momentum_12_1_return,
         sig.atr14 AS atr14,
         CAST(julianday('now') - julianday(p.entry_date) AS INTEGER) AS days_held
       FROM positions p
       INNER JOIN signals sig ON sig.id = p.signal_id
+      LEFT JOIN daily_prices dp ON dp.ticker = sig.ticker
+        AND dp.date = (
+          SELECT MAX(dpx.date)
+          FROM daily_prices dpx
+          WHERE dpx.ticker = sig.ticker
+        )
       WHERE p.status = 'OPEN'
       ORDER BY p.entry_date ASC
     `,
