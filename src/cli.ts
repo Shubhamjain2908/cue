@@ -10,7 +10,6 @@ import { Command } from "commander";
 import Database from "better-sqlite3";
 
 import { getConfig } from "./config/index.js";
-import { migrateTracked } from "./db/migrator.js";
 import { initSchema } from "./db/schema.js";
 import { resolveDbPath } from "./db/provider.js";
 
@@ -30,8 +29,7 @@ program
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     const db = new Database(resolved);
     db.pragma("foreign_keys = ON");
-    initSchema(db);
-    const result = migrateTracked(db);
+    const result = initSchema(db);
     db.close();
     console.log(JSON.stringify(result, null, 2));
   });
