@@ -10,7 +10,7 @@
 **HTTP:** `axios` exclusively — no `fetch`, no `got`. Stack consistency with fetcher.
 **Validation:** `zod` for all external data boundaries (LLM output, API responses).
 **Testing:** `vitest`.
-**Logging:** `winston` — structured JSON to stdout. Pipeline logs scoped to `pipeline` logger.
+**Logging:** `winston` — structured JSON to stdout. **`pipeline`** logger for scheduled / subprocess pipeline; **`cue-cli`** logger for `src/cli.ts` subcommands.
 **Package Manager:** `pnpm`.
 
 **Philosophy:** Minimal dependency surface. No Express, no React, no ORMs, no cron libraries. Every capability implemented with Node.js builtins or the locked stack above. Single-file HTML dashboard output. Manual execution via IndMoney app — Cue signals, human executes.
@@ -52,49 +52,41 @@
 
 ## 3. Pipeline Architecture
 
-### Run Modes
+### Unified CLI (`src/cli.ts`)
 
-| Mode | Trigger | Steps |
+All operational entry points go through **`pnpm run cue <subcommand>`** (Commander). Examples: `cue ingest`, `cue screen`, `cue enrich`, `cue brief`, `cue execute-stops`, `cue run-all`, `cue schedule`, `cue doctor`, `cue db:migrate`. Use `pnpm run cue --help` and `pnpm run cue <cmd> --help` for flags.
+
+### Run Modes (`src/agents/daily-workflow.ts`)
+
+| Mode | Trigger | Steps (subprocesses = `pnpm run cue -- …`) |
 |---|---|---|
-| `rebalance` | Friday EOD or `--force-rebalance` flag | fetch → screen → enrich → alert → dashboard |
-| `stop` | Mon–Thu daily | fetch → screen → alert → dashboard |
+| `rebalance` | Friday EOD (America/New_York) or `--force-rebalance` | ingest → screen → enrich → brief |
+| `stop` | Mon–Thu | ingest → screen → brief |
 
-### Step Registry (`src/pipeline.ts`)
+`brief` builds `dist/dashboard.html` and runs Telegram dispatch (`--mode rebalance|stop` forwarded).
 
-Each step is a typed `PipelineStep` object:
-```typescript
-interface PipelineStep {
-  name: string;
-  command: string;
-  args: string[];
-  critical: boolean;       // false = log warning + continue; true = ABORT on failure
-  runOn: 'rebalance' | 'stop' | 'both';
-  forwardArgs?: string[];  // injected by pipeline based on resolved mode
-}
-```
+### Step registry (`PIPELINE_STEPS` in `daily-workflow.ts`)
 
-**Criticality matrix:**
-- `fetch` → `critical: true`
-- `screen` → `critical: true`
-- `enrich` → `critical: false` (AI failure must not block dashboard)
-- `alert` → `critical: false`
-- `dashboard` → `critical: false`
+Each step is a `PipelineStep`: `name`, `cueArgs` (argv after `pnpm run cue --`), `critical`, `runOn`, optional `forwardArgs` (e.g. `--mode` → `--mode <resolved>`).
 
-### Module Map
+**Criticality (current):** `ingest` + `screen` critical; `enrich` non-critical; `brief` non-critical (alerts must not block dashboard delivery).
 
-| Module | Path | CLI |
+### Module map (canonical paths)
+
+| Concern | Path | CLI |
 |---|---|---|
-| Fetcher | `src/fetcher/index.ts` | `pnpm run fetch` |
-| Screener | `src/strategy/signals.ts` + `screenRunner.ts` | `pnpm run screen` |
-| Backtest | `src/backtest/` | `pnpm run backtest` |
-| AI Enrichment | `src/ai/enrichment.ts` + `factory.ts` | `pnpm run enrich` |
-| Alerts | `src/alerts/telegram.ts` | `pnpm run alert` |
-| Dashboard | `src/dashboard/index.ts` + `queries.ts` + `template.ts` | `pnpm run dashboard` |
-| Pipeline | `src/pipeline.ts` | `pnpm run pipeline` / `pipeline:now` |
+| CLI router | `src/cli.ts` + `src/cli/cue-logger.ts` + `src/cli/doctor.ts` | `pnpm run cue …` |
+| Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` / `pnpm run ingest` |
+| Fundamentals (Phase 4) | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
+| Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` |
+| LLM enrich | `src/agents/thesis-generator.ts` + `src/llm/enricher.ts` | `cue enrich` |
+| Alerts + dashboard | `src/briefing/telegram-dispatcher.ts`, `src/briefing/dashboard.ts` | `cue brief`, `cue brief:alert`, `cue brief:dashboard` |
+| Pipeline / scheduler | `src/agents/daily-workflow.ts` | `cue pipeline`, `cue pipeline --now`, `cue schedule`, `cue run-all` |
+| Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
 ### Scheduler (daemon mode)
 
-`pnpm run pipeline` starts a `setInterval` polling loop (60s tick). On each tick:
+`cue schedule` (or `cue pipeline` without `--now`) starts a `setInterval` polling loop (60s tick). On each tick:
 1. Compute current ET time via `Intl.DateTimeFormat` (no moment/luxon).
 2. Check execution window: `16:05–16:15 ET`.
 3. Idempotency guard: `lastRunDate: string` (YYYY-MM-DD) — skip if already ran today.
@@ -106,19 +98,23 @@ interface PipelineStep {
 
 ## 4. Data Layer
 
-### Fetcher (`src/fetcher/index.ts`)
+### Ingest (`src/ingestors/massive-price-ingestor.ts`)
 
 - **Source:** Massive.com REST API (`POLYGON_API_KEY` env var — legacy name retained).
-- **Range:** `today - 400 calendar days` → today. Yields ~275 bars, well under Massive's 499-bar cap.
-- **Cache guard:** Checks `MAX(date) FROM daily_prices WHERE ticker = ?` against `expectedLastTradingDate` (most recent weekday before today via `latestWeekday()` helper). If DB is current → skip API call. If stale → fetch regardless of last request time.
-- **Known data lag:** Massive.com posts EOD data with ~1–2 day lag. `asOf` will reflect last available bar, not necessarily yesterday's close.
+- **Range:** ~400 calendar days lookback from range end. Guarded under Massive aggregate limits.
+- **Cache guard:** Disk OHLCV cache + `MAX(date) FROM daily_prices` vs expected last trading session.
+- **Known data lag:** Massive.com posts EOD data with ~1–2 day lag. `asOf` in the screen reflects last available bar.
 
-### AI Enrichment (`src/ai/`)
+### Migrations (`src/db/migrations/`)
 
-- **Context source:** `yahoo-finance2` — news headlines, earnings calendar, sector, market cap. Cached as JSON (24h TTL for news/calendar, 7d TTL for profiles).
-- **LLM abstraction:** `src/ai/factory.ts` exposes `LLMProvider` interface. Runtime selection via `LLM_PROVIDER` env var: `anthropic` | `openai` | `google`. Implemented via `axios` (not SDK).
-- **Hallucination guard:** Bounded prompt → `EnrichmentResultSchema` (Zod). 1-retry on malformed JSON. Explicit earnings proximity rules.
-- **Alpha Vantage:** Deprecated. Not in codebase.
+- **DDL:** Numbered `*.sql` files only; ledger table `_migrations` records applied ids.
+- **Runner:** `src/db/migrations/migrate.ts`; **`src/db/schema.ts`** re-exports `initSchema` / `migrateTracked` for app entry and `pnpm run db:init`.
+
+### LLM enrichment (`src/llm/` + `src/agents/thesis-generator.ts`)
+
+- **Context source:** `yahoo-finance2` via `src/llm/yahooContext.ts` — news, earnings calendar, sector, market cap (JSON cache under `CACHE_DIR`).
+- **Providers:** `src/llm/provider.ts` + env `LLM_PROVIDER` (`anthropic` \| `openai` \| `google` \| `vertex`).
+- **Hallucination guard:** Zod schemas on model output; bounded prompts.
 
 ---
 
@@ -128,9 +124,10 @@ interface PipelineStep {
 - **`signals`** — BUY/SELL signals. BUY rows denormalized with momentum context: `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return`, `atr14`, `initial_atr_stop`, `alerted` flag.
 - **`enrichments`** — Per-signal LLM output: `sentiment`, `rationale`, `earnings_date`, `sector`, `confidence`.
 - **`positions`** — Live position tracker: `entry_date`, `entry_price`, `exit_date`, `highest_close_since_entry`, `current_stop_loss`.
-- **`backtest_runs`** — Historical simulation results: `run_date`, `cagr`, `sharpe`, `max_drawdown`, `expectancy`, `total_trades`.
+- **`fundamentals_cache`** — Phase 4 placeholder table for persisted fundamentals blobs (`ticker`, `as_of_date`); population TBD.
+- **`_migrations`** — Applied SQL migration ids.
 
-*Full schema will be attached as `db-schema.md` in next session.*
+*Schema source files live under `src/db/migrations/`.*
 
 ---
 
@@ -142,7 +139,7 @@ interface PipelineStep {
 | `LLM_PROVIDER` | `anthropic` \| `openai` \| `google` (default: `anthropic`) |
 | `ANTHROPIC_API_KEY` | Required if provider = anthropic |
 | `OPENAI_API_KEY` | Required if provider = openai |
-| `GOOGLE_API_KEY` | Required if provider = google |
+| `GOOGLE_AI_API_KEY` | Required if provider = google |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot credentials |
 | `TELEGRAM_CHAT_ID` | Telegram target chat |
 
@@ -166,7 +163,7 @@ interface PipelineStep {
 | 2 | FIXED | `--force-rebalance` not propagating from pipeline to screen subprocess | ✅ Fixed via `forwardArgs` in step registry |
 | 3 | FIXED | Fetcher cache guard checked request recency, not DB currency — stale data on Mondays | ✅ Fixed via `MAX(date)` vs `expectedLastTradingDate` |
 | 4 | FIXED | Massive.com 499-bar cap truncating recent closes — range was 5yr, now 400 days | ✅ Fixed |
-| 5 | **OPEN** | BUY alerts fire on stop runs — alert module has no run-mode awareness | 🔴 Fix in progress — see §9 |
+| 5 | FIXED | BUY Telegram noise on stop runs | ✅ `brief` forwards `--mode`; dispatcher suppresses BUY sends when `mode=stop` |
 | 6 | DATA | Massive.com 1–2 day EOD data lag — `asOf` trails real date | Accepted limitation — not fixable in code |
 | 7 | DATA | `GOOGL BUY 2026-05-19 alerted=1` was sent prematurely by a stop run | Needs manual DB reset: `UPDATE signals SET alerted=0 WHERE ticker='GOOGL' AND signal_date='2026-05-19'` |
 
@@ -174,13 +171,10 @@ interface PipelineStep {
 
 ## 9. Immediate Next Steps (Phase 3 Completion)
 
-### 9.1 — OPEN: Alert Run-Mode Gating (Bug #5)
-**Files:** `src/alerts/telegram.ts`, `src/pipeline.ts`
-- Add `--mode <rebalance|stop>` argv parsing to `telegram.ts`
-- Gate BUY alert query behind `mode === 'rebalance'`
-- SELL/stop-hit alerts fire on both modes
-- Pipeline forwards `--mode rebalance|stop` via `forwardArgs` on the alert step
-- After fix: reset premature signal (Issue #7 above)
+### 9.1 — Follow-ups
+
+- **Fundamentals cache:** wire `cue enrich-fundamentals` output into `fundamentals_cache` rows (migration + queries).
+- **Systemd:** replace ad-hoc PM2 notes with `cue.service` if moving off PM2 (see §9.2).
 
 ### 9.2 — TODO: VPS Deployment (Phase 3 Gate)
 - Write `cue.service` systemd unit file

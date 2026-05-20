@@ -1,6 +1,6 @@
-# Cue — Phase 1
+# Cue — US equity signal pipeline
 
-US Equity Signal System scaffold: SQLite schema, pure strategy math (RSI / momentum / volume ratio), and unit tests. Fetcher, backtester, and live `screen` are not implemented in this increment.
+Nasdaq 100 momentum system: SQLite + Massive EOD ingest, live momentum screen (ATR trailing stops), LLM enrichment, Telegram alerts, and a static HTML dashboard. Strategy math and backtest gates are documented in `.cursor/rules/project-spec.md`.
 
 ## Requirements
 
@@ -24,16 +24,22 @@ US Equity Signal System scaffold: SQLite schema, pure strategy math (RSI / momen
    pnpm run rebuild:native
    ```
 
-2. Copy environment template and adjust values (all keys are required for config validation; use placeholders until you wire APIs):
+2. Copy environment template and adjust values (see `src/config/index.ts` / `.env.example` for required keys):
 
    ```bash
    cp .env.example .env
    ```
 
-3. Initialize the SQLite database (creates `daily_prices`, `signals`, `enrichments`, `backtest_runs`, `positions`):
+3. Initialize the database (applies all pending SQL migrations in `src/db/migrations/`):
 
    ```bash
    pnpm run db:init
+   ```
+
+   To re-run migrations on an existing file (prints applied/skipped ids):
+
+   ```bash
+   pnpm run db:migrate
    ```
 
 4. Run tests:
@@ -48,6 +54,38 @@ US Equity Signal System scaffold: SQLite schema, pure strategy math (RSI / momen
    pnpm run typecheck
    pnpm run lint
    ```
+
+## CLI (`pnpm run cue`)
+
+Entry point: `tsx src/cli.ts` (script name **`cue`**). Granular subcommands for diagnostics and automation:
+
+| Command | Purpose |
+|---------|---------|
+| `pnpm run cue --help` | List all subcommands |
+| `pnpm run cue db:migrate` | Apply numbered `*.sql` under `src/db/migrations/` (`_migrations` ledger) |
+| `pnpm run cue ingest` | Massive / Polygon EOD OHLCV (`--ticker` optional) |
+| `pnpm run cue enrich-fundamentals` | Yahoo context → disk cache (Phase 4; `--ticker` / `--limit` / `--force`) |
+| `pnpm run cue screen` | Live momentum screen (`--ticker` probe, `--force-rebalance`) |
+| `pnpm run cue enrich` | LLM enrich pending BUYs |
+| `pnpm run cue brief` | Dashboard HTML + Telegram (`--mode`, `--skip-*`, `--open`) |
+| `pnpm run cue execute-stops` | Stop-day path only (stops / max-hold, no rebalance BUYs) |
+| `pnpm run cue run-all` | One-shot full pipeline (same step order as scheduler) |
+| `pnpm run cue schedule` | Long-running ET window scheduler (16:05–16:15) |
+| `pnpm run cue doctor` | Config + DB probe + env key presence (no secrets printed) |
+| `pnpm run cue pipeline` | Legacy: `--now` = one-shot; no flag = same as `schedule` |
+
+Shortcuts in `package.json` include `ingest`, `screen`, `pipeline`, `pipeline:now`, `schedule`, `run-all`, `doctor`, `execute-stops`, `enrich-fundamentals`, etc.
+
+## Database migrations
+
+- **Source of truth:** `src/db/migrations/*.sql` (lexicographic order).
+- **Runner:** `src/db/migrations/migrate.ts` (creates `_migrations`, runs each file once).
+- **Public entry:** `src/db/schema.ts` exports `initSchema`, `migrateTracked`, `runDbInitFromConfig`.
+- See `src/db/migrations/README.md` for naming conventions.
+
+## Architecture reference
+
+Authoritative high-level architecture, pipeline registry, and locked strategy parameters: **`.cursor/rules/project-spec.md`**. (Optionally keep a personal copy under `spec/` — that directory is gitignored.)
 
 ## Troubleshooting: native SQLite build
 
@@ -126,4 +164,4 @@ That command only applies when the active developer directory is **full Xcode** 
 ## Notes
 
 - Default DB path is `./db/cue.db` (override with `DB_PATH`).
-- `pnpm run screen` exits with an error in Phase 1; the signal engine is exercised via `pnpm test` and imports from `src/strategy/`.
+- PM2 / VPS: see `deploy/ecosystem.config.cjs` (`tsx src/cli.ts pipeline` or use `cue schedule` after aligning process manager args).
