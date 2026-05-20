@@ -1,15 +1,18 @@
-import fs from "node:fs";
 import path from "node:path";
 import util from "node:util";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
-import { z } from "zod";
 import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
+import {
+  loadUniverseTickers,
+  tryLoadUniverseMeta,
+  universeMetaMatchesTickerCount,
+} from "../universe/load-universe.js";
 import {
   massiveGroupedResponseSchema,
   type MassiveGroupedBar,
@@ -48,10 +51,6 @@ function createHttpClient(): import("axios").AxiosInstance {
 
   return client;
 }
-
-const universeSchema = z.object({
-  tickers: z.array(z.string().min(1)),
-});
 
 const MASSIVE_REST_BASE = "https://api.massive.com";
 
@@ -191,14 +190,6 @@ function parseFetchArgs(argv: string[]): {
   return { force, explicitSessionDate };
 }
 
-function loadUniverseTickers(projectRoot: string): string[] {
-  const filePath = path.join(projectRoot, "data", "universe", "nasdaq100.json");
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
-  const data = universeSchema.parse(parsed);
-  return data.tickers.map((t) => t.toUpperCase());
-}
-
 /**
  * True when every `ticker` already has at least one daily row on or after `sessionDate`
  * (same per-symbol currency idea as the legacy per-ticker aggs path).
@@ -315,6 +306,21 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   const { ticker: singleTicker, force, explicitSessionDate } = parseFetchArgs([...argv]);
 
   const universe = loadUniverseTickers(projectRoot);
+  const meta = tryLoadUniverseMeta(projectRoot);
+  if (meta !== null && !universeMetaMatchesTickerCount(meta, universe.length)) {
+    logger.warn(
+      `Universe metadata mismatch: _meta.json total_ticker_count=${String(meta.total_ticker_count)} but ${String(universe.length)} tickers in universe file`,
+      { universeName: meta.universe_name, asOf: meta.as_of_date },
+    );
+  } else if (meta !== null) {
+    logger.info("Universe metadata", {
+      universeName: meta.universe_name,
+      asOf: meta.as_of_date,
+      tickerCount: universe.length,
+      systemAdditions: meta.system_additions,
+    });
+  }
+
   const tickersForMask =
     singleTicker !== undefined ? [singleTicker.toUpperCase()] : [...universe, "QQQ"];
 
