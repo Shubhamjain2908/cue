@@ -1,15 +1,19 @@
-import fs from "node:fs";
 import path from "node:path";
 import util from "node:util";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
-import { z } from "zod";
 import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
+import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
+import {
+  loadUniverseTickers,
+  tryLoadUniverseMeta,
+  universeMetaMatchesTickerCount,
+} from "../universe/load-universe.js";
 import {
   massiveGroupedResponseSchema,
   type MassiveGroupedBar,
@@ -48,10 +52,6 @@ function createHttpClient(): import("axios").AxiosInstance {
 
   return client;
 }
-
-const universeSchema = z.object({
-  tickers: z.array(z.string().min(1)),
-});
 
 const MASSIVE_REST_BASE = "https://api.massive.com";
 
@@ -147,56 +147,19 @@ function rangeEndYmd(): string {
   return formatEtYmd(new Date());
 }
 
-const ymdArgRegex = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Validates `YYYY-MM-DD` and that the calendar date exists (e.g. not 2026-02-31). */
-function parseExplicitSessionDate(raw: string): string {
-  const trimmed = raw.trim();
-  if (!ymdArgRegex.test(trimmed)) {
-    throw new Error(
-      `Invalid --date "${raw}": expected YYYY-MM-DD (example: 2026-05-19)`,
-    );
-  }
-  const [ys, ms, ds] = trimmed.split("-");
-  const y = Number(ys);
-  const m = Number(ms);
-  const d = Number(ds);
-  const civil = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  if (
-    civil.getUTCFullYear() !== y ||
-    civil.getUTCMonth() + 1 !== m ||
-    civil.getUTCDate() !== d
-  ) {
-    throw new Error(`Invalid --date "${raw}": not a valid calendar day`);
-  }
-  return trimmed;
-}
-
 function parseFetchArgs(argv: string[]): {
   ticker?: string;
   force: boolean;
   explicitSessionDate?: string;
 } {
   const force = argv.includes("--force");
-  const dateIdx = argv.indexOf("--date");
-  let explicitSessionDate: string | undefined;
-  if (dateIdx !== -1 && argv[dateIdx + 1] !== undefined && argv[dateIdx + 1]!.length > 0) {
-    explicitSessionDate = parseExplicitSessionDate(String(argv[dateIdx + 1]));
-  }
+  const explicitSessionDate = parseOptionalYmdFromArgv(argv, "--date");
 
   const idx = argv.indexOf("--ticker");
   if (idx !== -1 && argv[idx + 1] !== undefined && argv[idx + 1]!.length > 0) {
     return { ticker: argv[idx + 1], force, explicitSessionDate };
   }
   return { force, explicitSessionDate };
-}
-
-function loadUniverseTickers(projectRoot: string): string[] {
-  const filePath = path.join(projectRoot, "data", "universe", "nasdaq100.json");
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
-  const data = universeSchema.parse(parsed);
-  return data.tickers.map((t) => t.toUpperCase());
 }
 
 /**
@@ -315,6 +278,21 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   const { ticker: singleTicker, force, explicitSessionDate } = parseFetchArgs([...argv]);
 
   const universe = loadUniverseTickers(projectRoot);
+  const meta = tryLoadUniverseMeta(projectRoot);
+  if (meta !== null && !universeMetaMatchesTickerCount(meta, universe.length)) {
+    logger.warn(
+      `Universe metadata mismatch: _meta.json total_ticker_count=${String(meta.total_ticker_count)} but ${String(universe.length)} tickers in universe file`,
+      { universeName: meta.universe_name, asOf: meta.as_of_date },
+    );
+  } else if (meta !== null) {
+    logger.info("Universe metadata", {
+      universeName: meta.universe_name,
+      asOf: meta.as_of_date,
+      tickerCount: universe.length,
+      systemAdditions: meta.system_additions,
+    });
+  }
+
   const tickersForMask =
     singleTicker !== undefined ? [singleTicker.toUpperCase()] : [...universe, "QQQ"];
 

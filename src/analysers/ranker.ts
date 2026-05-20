@@ -10,7 +10,9 @@ import type { RankedTicker, RankingConfig } from "../enrichers/momentum-types.js
  * Computes the 12-1 momentum return for a single ticker's close series.
  * Index 0 = oldest, index [n-1] = most recent (today).
  *
- * Formula: (close[today - skipDays] - close[today - lookbackDays]) / close[today - lookbackDays]
+ * Jegadeesh–Titman 12-1 (matches project-spec §3.1):
+ * `momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]`
+ * with `lookbackDays=252`, `skipDays=21`.
  *
  * Returns null if the series is too short to compute.
  */
@@ -38,10 +40,11 @@ export function computeMomentumReturn(
 /**
  * Ranks the full universe by 12-1 momentum return as of a given rebalance date.
  *
- * @param priceMap  Map<ticker, closes[]> — closes arrays aligned to asOf date
+ * @param priceMap  Map<ticker, closes[]> — closes arrays aligned to as-of date
  *                  (caller is responsible for slicing to the correct date window)
  * @param config    RankingConfig
- * @returns         Array sorted descending by momentumReturn, rank 1 = strongest
+ * @returns         Array sorted descending by momentumReturn; `rank` runs **1 … N**
+ *                  over tickers that produced a finite score (N ≤ universe size if some series are too short).
  */
 export function rankUniverse(
   priceMap: Map<string, number[]>,

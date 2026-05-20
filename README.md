@@ -129,8 +129,8 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 |---------|-------------|
 | `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: latest ET weekday on/before now), `--ticker SYM`, `--force` refetches that session |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache (`--ticker`, `--limit`, `--force`, `--date` reserved) |
-| `pnpm run cue -- screen` | Momentum screener / ranking. `--ticker`, `--force-rebalance` |
-| `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--dry-run` reserved |
+| `pnpm run cue -- screen` | Momentum screener / ranking. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
+| `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
 
 ### LLM & brief
 
@@ -202,15 +202,18 @@ Defined in **`src/config/cue-timezone.ts`** and used from ingest date helpers, `
 
 ```
 cue/
+  data/
+    universe/       `nasdaq100.json` (constituents) + `_meta.json` (as-of, counts, QQQ note)
   src/
     agents/           thesis-generator, daily-workflow (registry), scheduler.ts (daemon)
     analysers/        momentum-screener (screen, execute-stops CLI)
     briefing/         dashboard HTML, Telegram dispatcher
-    cli/              doctor, llm-smoke helpers
+    cli/              doctor, llm-smoke, shared CLI helpers (`ymd-arg.ts`)
     config/           env (zod), cue-timezone.ts
     db/               migrations/, queries.ts, provider.ts, schema.ts
     enrichers/        momentum types / math used by screener
     ingestors/        Massive price ingest, enrich-fundamentals CLI
+    universe/         shared `load-universe.ts` (tickers + `_meta.json`)
     llm/              provider adapters, enricher, prompt, yahooContext
     backtest/         historical runner (separate tsx entry)
   deploy/             PM2 ecosystem example

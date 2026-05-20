@@ -3,14 +3,13 @@
  * Mirrors `runBacktest` §6.2–6.3 semantics at a single as-of date (last QQQ trading day in DB).
  */
 
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
 
 import Database from "better-sqlite3";
 
 import { detectRunMode } from "../agents/daily-workflow.js";
+import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
 import { getConfig } from "../config/index.js";
 import {
   closePosition,
@@ -31,11 +30,13 @@ import {
   type RankedTicker,
 } from "../enrichers/momentum-types.js";
 
-type SqliteConnection = InstanceType<typeof Database>;
+import {
+  loadUniverseTickers,
+  tryLoadUniverseMeta,
+  universeMetaMatchesTickerCount,
+} from "../universe/load-universe.js";
 
-const universeSchema = z.object({
-  tickers: z.array(z.string().min(1)),
-});
+type SqliteConnection = InstanceType<typeof Database>;
 
 interface DailyBar {
   ticker: string;
@@ -106,17 +107,6 @@ function tradingDaysHeld(
   return count;
 }
 
-function loadUniverseTickers(): string[] {
-  const { UNIVERSE } = getConfig();
-  const filePath = path.join(process.cwd(), "data", "universe", `${UNIVERSE}.json`);
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = universeSchema.safeParse(JSON.parse(raw) as unknown);
-  if (!parsed.success) {
-    throw new Error(`Invalid universe file ${filePath}: ${parsed.error.message}`);
-  }
-  return parsed.data.tickers.map((t) => t.toUpperCase());
-}
-
 function loadQqqTradingDates(db: SqliteConnection, dateFrom: string, dateTo: string): string[] {
   const rows = db
     .prepare(
@@ -166,6 +156,34 @@ function latestQqqDate(db: SqliteConnection): string | null {
     .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = 'QQQ'`)
     .get() as { d: string | null };
   return row.d;
+}
+
+/**
+ * As-of date for screening: latest QQQ session in DB, or an explicit calendar date
+ * that has a QQQ bar and is not after the DB's last QQQ date.
+ */
+function resolveScreenAsOfDate(db: SqliteConnection, explicitYmd?: string): string {
+  const maxQ = latestQqqDate(db);
+  if (maxQ === null) {
+    throw new Error("screen: no QQQ rows in daily_prices — run ingest first");
+  }
+  if (explicitYmd === undefined || explicitYmd.length === 0) {
+    return maxQ;
+  }
+  if (explicitYmd.localeCompare(maxQ) > 0) {
+    throw new Error(
+      `screen: --date ${explicitYmd} is after last QQQ date in DB (${maxQ})`,
+    );
+  }
+  const row = db
+    .prepare(`SELECT 1 AS x FROM daily_prices WHERE ticker = 'QQQ' AND date = ?`)
+    .get(explicitYmd) as { x: number } | undefined;
+  if (row === undefined) {
+    throw new Error(
+      `screen: no QQQ daily bar for --date=${explicitYmd} (ingest that session or pick another date)`,
+    );
+  }
+  return explicitYmd;
 }
 
 interface OpenPositionRow {
@@ -256,19 +274,30 @@ function replayExitReason(
 }
 
 /**
- * Run one screening pass for the last QQQ date present in `daily_prices`.
+ * Run one screening pass for an as-of date (latest QQQ date in DB, or `options.asOf`).
  */
-export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"): void {
+export interface RunLiveScreenOptions {
+  /** Calendar session `YYYY-MM-DD` (must exist for QQQ in `daily_prices`). */
+  readonly asOf?: string;
+}
+
+export function runLiveScreen(
+  db: SqliteConnection,
+  mode: "rebalance" | "stop",
+  options?: RunLiveScreenOptions,
+): void {
   const cfg: RankingConfig = { ...DEFAULT_RANKING_CONFIG };
   const appCfg = getConfig();
   const maxConcurrent = appCfg.MAX_POSITIONS;
 
-  const asOf = latestQqqDate(db);
-  if (asOf === null) {
-    throw new Error("screen: no QQQ rows in daily_prices — run fetch first");
-  }
-
+  const asOf = resolveScreenAsOfDate(db, options?.asOf);
   const universe = loadUniverseTickers();
+  const meta = tryLoadUniverseMeta();
+  if (meta !== null && !universeMetaMatchesTickerCount(meta, universe.length)) {
+    console.warn(
+      `screen: universe _meta.json total_ticker_count (${String(meta.total_ticker_count)}) !== universe file length (${String(universe.length)})`,
+    );
+  }
   const allTickers = [...new Set([...universe, "QQQ"])].sort((a, b) => a.localeCompare(b));
   const dataFrom = addCalendarDays(asOf, -600);
   const rows = hydrateDailyPrices(db, allTickers, dataFrom, asOf);
@@ -332,6 +361,12 @@ export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"):
       skipDays: cfg.skipDays,
       topN: cfg.topN,
     });
+    const quorum = universe.length * 0.8;
+    if (fullRanked.length < quorum) {
+      console.warn(
+        `screen: partial cross-section — ranked ${String(fullRanked.length)} of ${String(universe.length)} universe tickers (12-1 needs full history; quorum ~${String(Math.ceil(quorum))})`,
+      );
+    }
     const topSet = new Set(fullRanked.slice(0, cfg.topN).map((r) => r.ticker));
 
     for (const pos of openRows) {
@@ -446,6 +481,16 @@ export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"):
  * @param argv Flags only (e.g. `["--ticker","AAPL"]` or `["--force-rebalance"]`); defaults to `process.argv.slice(2)`.
  */
 export function runScreenCli(argv: readonly string[] = process.argv.slice(2)): void {
+  let explicitAsOf: string | undefined;
+  try {
+    explicitAsOf = parseOptionalYmdFromArgv(argv, "--date");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(msg);
+    process.exitCode = 1;
+    return;
+  }
+
   const tIdx = argv.indexOf("--ticker");
   const raw = tIdx >= 0 ? argv[tIdx + 1] : undefined;
   if (raw !== undefined && raw.length > 0) {
@@ -463,20 +508,34 @@ export function runScreenCli(argv: readonly string[] = process.argv.slice(2)): v
         console.log("HOLD");
         return;
       }
-      const lastDate = rows[rows.length - 1]!.date;
+
+      let rowsThrough = rows;
+      let qqqAsOf: string;
+      if (explicitAsOf !== undefined) {
+        qqqAsOf = resolveScreenAsOfDate(db, explicitAsOf);
+        rowsThrough = rows.filter((r) => r.date <= qqqAsOf);
+        if (rowsThrough.length === 0) {
+          console.error(`screen: no ${ticker} bars on or before --date=${qqqAsOf}`);
+          process.exitCode = 1;
+          return;
+        }
+      } else {
+        qqqAsOf = rows[rows.length - 1]!.date;
+      }
+
       const qqqRows = db
         .prepare(
           `SELECT close FROM daily_prices WHERE ticker = 'QQQ' AND date <= ? ORDER BY date ASC`,
         )
-        .all(lastDate) as Array<{ close: number }>;
+        .all(qqqAsOf) as Array<{ close: number }>;
       if (qqqRows.length === 0) {
         console.error("QQQ not found in daily_prices — required for regime filter");
         process.exitCode = 1;
         return;
       }
       const { signal } = generateSignal({
-        close: rows.map((r) => r.close),
-        volume: rows.map((r) => r.volume),
+        close: rowsThrough.map((r) => r.close),
+        volume: rowsThrough.map((r) => r.volume),
         qqqCloses: qqqRows.map((r) => r.close),
         thresholds: buildSignalThresholdsFromConfig(),
         positionOpen: false,
@@ -491,7 +550,7 @@ export function runScreenCli(argv: readonly string[] = process.argv.slice(2)): v
     try {
       initSchema(db);
       const mode = detectRunMode({ argv });
-      runLiveScreen(db, mode);
+      runLiveScreen(db, mode, { asOf: explicitAsOf });
     } finally {
       db.close();
     }
@@ -499,12 +558,22 @@ export function runScreenCli(argv: readonly string[] = process.argv.slice(2)): v
 }
 
 /** Stop-day path only: trailing stops, high-water replay, max-hold / stop-out → SELL + close (no rebalance BUYs). */
-export function runExecuteStopsCli(): void {
+export function runExecuteStopsCli(argv: readonly string[] = process.argv.slice(2)): void {
+  let explicitAsOf: string | undefined;
+  try {
+    explicitAsOf = parseOptionalYmdFromArgv(argv, "--date");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(msg);
+    process.exitCode = 1;
+    return;
+  }
+
   const config = getConfig();
   const db = new Database(config.DB_PATH);
   try {
     initSchema(db);
-    runLiveScreen(db, "stop");
+    runLiveScreen(db, "stop", { asOf: explicitAsOf });
   } finally {
     db.close();
   }

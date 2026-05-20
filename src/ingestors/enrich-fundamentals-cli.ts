@@ -1,24 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
-
-import { z } from "zod";
-
-import { getConfig } from "../config/index.js";
 import { fetchYahooEnrichmentDto } from "../llm/yahooContext.js";
 import { cueLogger } from "../cli/cue-logger.js";
-
-const universeSchema = z.object({ tickers: z.array(z.string()) });
-
-function loadUniverseTickers(): string[] {
-  const { UNIVERSE } = getConfig();
-  const filePath = path.join(process.cwd(), "data", "universe", `${UNIVERSE}.json`);
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = universeSchema.safeParse(JSON.parse(raw) as unknown);
-  if (!parsed.success) {
-    throw new Error(`Invalid universe file ${filePath}: ${parsed.error.message}`);
-  }
-  return parsed.data.tickers.map((t) => t.toUpperCase());
-}
+import { loadUniverseTickers } from "../universe/load-universe.js";
 
 export interface EnrichFundamentalsOpts {
   readonly ticker?: string;

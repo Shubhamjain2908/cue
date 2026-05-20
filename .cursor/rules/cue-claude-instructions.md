@@ -71,8 +71,8 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 |---|---|
 | 4.0 Schema (stops + signal uniqueness) | **Applied** in migration `001` (confirm vs `spec/cue-db-schema.md` if stale). |
 | 4.1 Scheduler concurrency | **Implemented** — `isRunning` + **`LOCK_PATH`** PID file in **`scheduler.ts`**. |
-| 4.2 Grouped Massive fetch | **Open** — primary rate-limit fix. |
-| 4.3 Full universe daily | **Open** — blocked on **4.2** / quotas. |
+| 4.2 Grouped Massive fetch | **Shipped** — `massive-price-ingestor.ts` (one REST call / run). |
+| 4.3 Full universe daily | **Shipped** — `nasdaq100.json` + `_meta.json`; shared `load-universe.ts` (no stale cache). |
 | 4.4 Dashboard stop / high-since-entry | **Partial** — depends on DB + `briefing` queries; confirm against migrations. |
 | 4.5 Cosmetic logs (`rankedUniverse=0`) | **Open**. |
 | 4.6 Quality-GARP backtest (research) | **Research only** — no production screener code until gates pass (Sharpe **> 0.8**, expectancy **> 0** per arch §11). |

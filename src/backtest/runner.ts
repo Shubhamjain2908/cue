@@ -1,9 +1,7 @@
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
-import { z } from "zod";
 
 import { getConfig } from "../config/index.js";
 import { insertBacktestRun } from "../db/queries.js";
@@ -19,12 +17,9 @@ import {
   BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
   BACKTEST_POSITION_USD,
 } from "./types.js";
+import { loadUniverseTickers } from "../universe/load-universe.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
-
-const universeSchema = z.object({
-  tickers: z.array(z.string().min(1)),
-});
 
 /** Nasdaq-100 proxy for Phase 1 (SPY not required in DB). */
 export const BACKTEST_BENCHMARK_TICKER = "QQQ";
@@ -178,17 +173,6 @@ function loadQqqTradingDates(
     )
     .all(BACKTEST_BENCHMARK_TICKER, dateFrom, dateTo) as { date: string }[];
   return rows.map((r) => r.date);
-}
-
-function loadUniverseTickers(): string[] {
-  const { UNIVERSE } = getConfig();
-  const filePath = path.join(process.cwd(), "data", "universe", `${UNIVERSE}.json`);
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = universeSchema.safeParse(JSON.parse(raw));
-  if (!parsed.success) {
-    throw new Error(`Invalid universe file ${filePath}: ${parsed.error.message}`);
-  }
-  return parsed.data.tickers.map((t) => t.toUpperCase());
 }
 
 function hydrateDailyPrices(
