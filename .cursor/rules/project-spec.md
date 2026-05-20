@@ -254,6 +254,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | `.cursor/rules/cue-guardrails.md` | Hard constraints (**paths aligned to this repo** in v1.1) |
 | `README.md` | Operator-facing commands + quickstart |
 | `.cursor/rules/project-spec.md` | **This file** — repo-accurate engineering spec |
+| `.cursor/rules/cue-claude-instructions.md` | **Claude / Cursor agent** role, SoU reading order, stack, workflow directives, path map |
 
 ---
 
