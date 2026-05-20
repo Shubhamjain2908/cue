@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS signals (
   momentum_12_1_return REAL,
   atr14 REAL,
   initial_atr_stop REAL,
-  UNIQUE (ticker, date, signal, signal_type)
+  UNIQUE (ticker, date)
 );
 
 CREATE TABLE IF NOT EXISTS enrichments (
@@ -64,7 +64,5 @@ CREATE TABLE IF NOT EXISTS positions (
   entry_price REAL NOT NULL,
   status TEXT NOT NULL,
   exit_date TEXT,
-  exit_price REAL,
-  highest_close_since_entry REAL,
-  current_stop_loss REAL
+  exit_price REAL
 );
