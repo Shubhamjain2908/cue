@@ -9,21 +9,14 @@ import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
-import { insertDailyPrices } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
 import {
-  readCachedOhlcvIfFresh,
-  writeCachedOhlcv,
-} from "./cache.js";
-import {
-  type CachedOhlcvBundle,
-  type DailyOhlcvBar,
-  massiveStocksAggregatesResponseSchema,
-  type MassiveStocksAggResult,
+  massiveGroupedResponseSchema,
+  type MassiveGroupedBar,
 } from "./types.js";
 
 function createHttpClient(): import("axios").AxiosInstance {
-  const client = axios.create({ timeout: 60_000 });
+  const client = axios.create({ timeout: 120_000 });
 
   client.interceptors.response.use(
     (response) => response,
@@ -61,8 +54,6 @@ const universeSchema = z.object({
 });
 
 const MASSIVE_REST_BASE = "https://api.massive.com";
-const AGGS_PAGE_LIMIT = 50_000;
-const MAX_AGG_PAGES = 500;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -156,42 +147,48 @@ function rangeEndYmd(): string {
   return formatEtYmd(new Date());
 }
 
-/** ~13 months calendar (~278 trading days) — covers 252+21 momentum lookback under Massive's 499-bar cap. */
-const RANGE_START_LOOKBACK_CALENDAR_DAYS = 400;
+const ymdArgRegex = /^\d{4}-\d{2}-\d{2}$/;
 
-function rangeStartYmdMinusLookback(end: string): string {
-  const [yy, mm, dd] = end.split("-").map(Number);
-  const civil = new Date(Date.UTC(yy!, mm! - 1, dd!, 12, 0, 0));
-  civil.setUTCDate(civil.getUTCDate() - RANGE_START_LOOKBACK_CALENDAR_DAYS);
-  const y = civil.getUTCFullYear();
-  const m = String(civil.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(civil.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/** Validates `YYYY-MM-DD` and that the calendar date exists (e.g. not 2026-02-31). */
+function parseExplicitSessionDate(raw: string): string {
+  const trimmed = raw.trim();
+  if (!ymdArgRegex.test(trimmed)) {
+    throw new Error(
+      `Invalid --date "${raw}": expected YYYY-MM-DD (example: 2026-05-19)`,
+    );
+  }
+  const [ys, ms, ds] = trimmed.split("-");
+  const y = Number(ys);
+  const m = Number(ms);
+  const d = Number(ds);
+  const civil = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  if (
+    civil.getUTCFullYear() !== y ||
+    civil.getUTCMonth() + 1 !== m ||
+    civil.getUTCDate() !== d
+  ) {
+    throw new Error(`Invalid --date "${raw}": not a valid calendar day`);
+  }
+  return trimmed;
 }
 
-function barDateFromUnixMs(t: number): string {
-  return new Date(t).toISOString().slice(0, 10);
-}
+function parseFetchArgs(argv: string[]): {
+  ticker?: string;
+  force: boolean;
+  explicitSessionDate?: string;
+} {
+  const force = argv.includes("--force");
+  const dateIdx = argv.indexOf("--date");
+  let explicitSessionDate: string | undefined;
+  if (dateIdx !== -1 && argv[dateIdx + 1] !== undefined && argv[dateIdx + 1]!.length > 0) {
+    explicitSessionDate = parseExplicitSessionDate(String(argv[dateIdx + 1]));
+  }
 
-function mapMassiveResultsToBars(results: MassiveStocksAggResult[]): DailyOhlcvBar[] {
-  const bars = results.map((r) => ({
-    date: barDateFromUnixMs(r.t),
-    open: r.o,
-    high: r.h,
-    low: r.l,
-    close: r.c,
-    volume: Math.trunc(r.v),
-  }));
-  bars.sort((a, b) => a.date.localeCompare(b.date));
-  return bars;
-}
-
-function parseFetchArgs(argv: string[]): { ticker?: string } {
   const idx = argv.indexOf("--ticker");
   if (idx !== -1 && argv[idx + 1] !== undefined && argv[idx + 1]!.length > 0) {
-    return { ticker: argv[idx + 1] };
+    return { ticker: argv[idx + 1], force, explicitSessionDate };
   }
-  return {};
+  return { force, explicitSessionDate };
 }
 
 function loadUniverseTickers(projectRoot: string): string[] {
@@ -202,183 +199,166 @@ function loadUniverseTickers(projectRoot: string): string[] {
   return data.tickers.map((t) => t.toUpperCase());
 }
 
-function maxDailyPriceDate(db: CueDatabase, ticker: string): string | null {
-  const row = db
-    .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = ?`)
-    .get(ticker.toUpperCase()) as { d: string | null };
-  return row.d;
+/**
+ * True when every `ticker` already has at least one daily row on or after `sessionDate`
+ * (same per-symbol currency idea as the legacy per-ticker aggs path).
+ */
+function isDbCurrentForSession(
+  db: CueDatabase,
+  tickersUpper: readonly string[],
+  sessionDate: string,
+): boolean {
+  if (tickersUpper.length === 0) {
+    return true;
+  }
+  const placeholders = tickersUpper.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT ticker, MAX(date) AS m FROM daily_prices WHERE ticker IN (${placeholders}) GROUP BY ticker`,
+    )
+    .all(...tickersUpper) as { ticker: string; m: string | null }[];
+
+  const maxByTicker = new Map(rows.map((r) => [r.ticker.toUpperCase(), r.m]));
+  for (const t of tickersUpper) {
+    const m = maxByTicker.get(t);
+    if (m === undefined || m === null || m.localeCompare(sessionDate) < 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
-function buildInitialAggsUrl(input: {
-  ticker: string;
-  start: string;
-  end: string;
-  apiKey: string;
-}): string {
-  const pathSeg = `/v2/aggs/ticker/${encodeURIComponent(input.ticker)}/range/1/day/${input.start}/${input.end}`;
+function buildGroupedDailyUrl(dateString: string, apiKey: string): string {
+  const pathSeg = `/v2/aggs/grouped/locale/us/market/stocks/${dateString}`;
   const u = new URL(pathSeg, `${MASSIVE_REST_BASE}/`);
   u.searchParams.set("adjusted", "true");
-  u.searchParams.set("sort", "asc");
-  u.searchParams.set("limit", String(AGGS_PAGE_LIMIT));
-  u.searchParams.set("apiKey", input.apiKey);
+  u.searchParams.set("apiKey", apiKey);
   return u.toString();
 }
 
-/** Ensures `apiKey` is present (Massive `next_url` pages may omit it). */
-function ensureApiKeyOnUrl(url: string, apiKey: string): string {
-  const u = new URL(url);
-  if (!u.searchParams.has("apiKey")) {
-    u.searchParams.set("apiKey", apiKey);
-  }
-  return u.toString();
-}
-
-async function fetchMassiveDailyAggs(input: {
+async function fetchGroupedDaily(input: {
   apiKey: string;
-  ticker: string;
-  start: string;
-  end: string;
-}): Promise<DailyOhlcvBar[]> {
-  const byTs = new Map<number, MassiveStocksAggResult>();
-  let nextUrl: string | null = buildInitialAggsUrl(input);
-  let pageIndex = 0;
+  dateString: string;
+}): Promise<MassiveGroupedBar[]> {
+  const url = buildGroupedDailyUrl(input.dateString, input.apiKey);
+  const httpClient = createHttpClient();
+  const http = await httpClient.get<unknown>(url, {
+    validateStatus: () => true,
+  });
+  if (http.status !== 200) {
+    throw new Error(`Massive grouped HTTP ${String(http.status)}: ${JSON.stringify(http.data)}`);
+  }
+  const parsed = massiveGroupedResponseSchema.safeParse(http.data);
+  if (!parsed.success) {
+    throw new Error(`Massive grouped response validation failed: ${parsed.error.message}`);
+  }
+  const body = parsed.data;
+  if (body.status !== undefined && body.status.toUpperCase() === "ERROR") {
+    throw new Error(`Massive grouped error: ${JSON.stringify(http.data)}`);
+  }
+  return body.results;
+}
 
-  while (nextUrl !== null) {
-    if (pageIndex > 0) {
-      await delay(12_000);
-    }
-    if (pageIndex >= MAX_AGG_PAGES) {
-      throw new Error(
-        `Massive aggs pagination exceeded ${String(MAX_AGG_PAGES)} pages`,
-      );
-    }
-    const url = ensureApiKeyOnUrl(nextUrl, input.apiKey);
-    const httpClient = createHttpClient();
-    const http = await httpClient.get<unknown>(url, {
-      validateStatus: () => true,
-    });
-    if (http.status !== 200) {
-      throw new Error(
-        `Massive HTTP ${String(http.status)}: ${JSON.stringify(http.data)}`,
-      );
-    }
-    const parsed = massiveStocksAggregatesResponseSchema.safeParse(http.data);
-    if (!parsed.success) {
-      throw new Error(
-        `Massive response validation failed: ${parsed.error.message}`,
-      );
-    }
-    const body = parsed.data;
-    if (body.status !== undefined && body.status.toUpperCase() === "ERROR") {
-      throw new Error(`Massive aggregates error: ${JSON.stringify(http.data)}`);
-    }
-    for (const r of body.results ?? []) {
-      byTs.set(r.t, r);
-    }
-    const rawNext = body.next_url;
-    nextUrl =
-      rawNext !== undefined && rawNext !== null && rawNext.length > 0
-        ? rawNext
-        : null;
-    pageIndex += 1;
+/**
+ * One grouped-daily HTTP response → SQLite `daily_prices` for `sessionDate`, universe-masked,
+ * single transaction, quorum guard.
+ */
+function insertGroupedSessionRows(input: {
+  db: CueDatabase;
+  sessionDate: string;
+  tickerMask: ReadonlySet<string>;
+  expectedMaskCount: number;
+  rows: MassiveGroupedBar[];
+  logger: winston.Logger;
+}): void {
+  const { db, sessionDate, tickerMask, expectedMaskCount, rows, logger } = input;
+
+  const matched = rows.filter((r) => tickerMask.has(r.T.toUpperCase()));
+  const quorum = expectedMaskCount * 0.8;
+  if (matched.length < quorum) {
+    logger.warn(
+      `Partial data anomaly: expected at least ${String(Math.ceil(quorum))} universe matches for ${sessionDate}, found ${String(matched.length)}. Aborting transactional commit.`,
+      { sessionDate, expectedMaskCount, matchedCount: matched.length },
+    );
+    throw new Error("Ingestion aborted: Massive grouped payload is incomplete.");
   }
 
-  const merged = [...byTs.values()].sort((a, b) => a.t - b.t);
-  return mapMassiveResultsToBars(merged);
+  const insertStmt = db.prepare(`
+    INSERT INTO daily_prices (ticker, date, open, high, low, close, volume, created_at)
+    VALUES (@ticker, @date, @open, @high, @low, @close, @volume, CURRENT_TIMESTAMP)
+    ON CONFLICT(ticker, date) DO NOTHING
+  `);
+
+  const runInsertTransaction = db.transaction((batch: MassiveGroupedBar[]) => {
+    for (const row of batch) {
+      const ticker = row.T.toUpperCase();
+      insertStmt.run({
+        ticker,
+        date: sessionDate,
+        open: row.o,
+        high: row.h,
+        low: row.l,
+        close: row.c,
+        volume: Math.trunc(row.v),
+      });
+    }
+  });
+
+  runInsertTransaction(matched);
+  logger.info(`Grouped ingest: wrote ${String(matched.length)} rows for ${sessionDate}.`);
 }
 
 async function run(argv: readonly string[] = process.argv): Promise<void> {
   const config = getConfig();
   const logger = createLogger();
   const projectRoot = process.cwd();
-  const { ticker: singleTicker } = parseFetchArgs([...argv]);
+  const { ticker: singleTicker, force, explicitSessionDate } = parseFetchArgs([...argv]);
 
-  const tickers =
-    singleTicker !== undefined
-      ? [singleTicker.toUpperCase()]
-      : loadUniverseTickers(projectRoot);
+  const universe = loadUniverseTickers(projectRoot);
+  const tickersForMask =
+    singleTicker !== undefined ? [singleTicker.toUpperCase()] : [...universe, "QQQ"];
 
-  const rangeEnd = rangeEndYmd();
-  const rangeStart = rangeStartYmdMinusLookback(rangeEnd);
-  const [ey, em, ed] = rangeEnd.split("-").map(Number);
-  const expectedLastTradingDate = latestWeekdayOnOrBeforeEtCivil(ey!, em!, ed!);
+  const tickerMask = new Set(tickersForMask.map((t) => t.toUpperCase()));
+  const expectedMaskCount = tickerMask.size;
+
+  let sessionDate: string;
+  if (explicitSessionDate !== undefined) {
+    sessionDate = explicitSessionDate;
+  } else {
+    const rangeEnd = rangeEndYmd();
+    const [ey, em, ed] = rangeEnd.split("-").map(Number);
+    const resolved = latestWeekdayOnOrBeforeEtCivil(ey!, em!, ed!);
+    if (resolved === null) {
+      throw new Error("Could not resolve ET session date for grouped ingest");
+    }
+    sessionDate = resolved;
+  }
 
   const db = openCueDb(config.DB_PATH);
   try {
-    for (let i = 0; i < tickers.length; i++) {
-      const ticker = tickers[i]!;
-      const maxDate = maxDailyPriceDate(db, ticker);
-      const dbCurrent =
-        expectedLastTradingDate !== null &&
-        maxDate !== null &&
-        maxDate.localeCompare(expectedLastTradingDate) >= 0;
-
-      const cached = readCachedOhlcvIfFresh(
-        config.CACHE_DIR,
-        ticker,
-        rangeStart,
-        rangeEnd,
-        Number.MAX_SAFE_INTEGER,
-      );
-      if (cached !== null) {
-        logger.info("OHLCV cache hit; skipping Massive API", {
-          ticker,
-          rangeStart,
-          rangeEnd,
-          maxDate,
-          dbCurrent,
-          expectedLastTradingDate,
-        });
-        insertDailyPrices(db, ticker, cached.bars);
-        continue;
-      }
-
-      if (dbCurrent) {
-        logger.info("OHLCV DB current; skipping Massive API (no disk cache for range)", {
-          ticker,
-          rangeStart,
-          rangeEnd,
-          maxDate,
-          expectedLastTradingDate,
-        });
-        continue;
-      }
-
-      let bars: DailyOhlcvBar[] = [];
-      try {
-        bars = await fetchMassiveDailyAggs({
-          apiKey: config.POLYGON_API_KEY,
-          ticker,
-          start: rangeStart,
-          end: rangeEnd,
-        });
-        const bundle: CachedOhlcvBundle = {
-          ticker,
-          rangeStart,
-          rangeEnd,
-          bars,
-        };
-        writeCachedOhlcv(config.CACHE_DIR, bundle);
-        insertDailyPrices(db, ticker, bars);
-        logger.info("Fetched OHLCV from Massive", {
-          ticker,
-          barCount: bars.length,
-          rangeStart,
-          rangeEnd,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.warn("Massive fetch failed; skipping ticker", {
-          ticker,
-          error: message,
-        });
-      }
-
-      const isLast = i === tickers.length - 1;
-      if (!isLast) {
-        await delay(12_000);
-      }
+    const tickersUpper = [...tickerMask];
+    if (!force && isDbCurrentForSession(db, tickersUpper, sessionDate)) {
+      logger.info("daily_prices already current for session; skipping Massive API", {
+        sessionDate,
+        force,
+        tickerCount: tickersUpper.length,
+      });
+      return;
     }
+
+    const results = await fetchGroupedDaily({
+      apiKey: config.POLYGON_API_KEY,
+      dateString: sessionDate,
+    });
+
+    insertGroupedSessionRows({
+      db,
+      sessionDate,
+      tickerMask,
+      expectedMaskCount,
+      rows: results,
+      logger,
+    });
   } finally {
     db.close();
   }

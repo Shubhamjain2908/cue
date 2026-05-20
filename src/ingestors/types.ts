@@ -58,3 +58,35 @@ export const massiveStocksAggregatesResponseSchema = z
 export type MassiveStocksAggregatesResponse = z.infer<
   typeof massiveStocksAggregatesResponseSchema
 >;
+
+/** One row from Massive `GET /v2/aggs/grouped/locale/us/market/stocks/{date}` (bulk daily). */
+export const massiveGroupedBarSchema = z
+  .object({
+    T: z.string().min(1),
+    o: z.number(),
+    h: z.number(),
+    l: z.number(),
+    c: z.number(),
+    v: z.number(),
+    t: z.number().optional(),
+    vw: z.number().optional(),
+    n: z.number().optional(),
+  })
+  .passthrough();
+
+export type MassiveGroupedBar = z.infer<typeof massiveGroupedBarSchema>;
+
+/** Envelope for Massive grouped daily US stocks JSON. */
+export const massiveGroupedResponseSchema = z
+  .object({
+    queryCount: z.number(),
+    resultsCount: z.number(),
+    results: z.array(massiveGroupedBarSchema),
+    status: z.string().optional(),
+    adjusted: z.boolean().optional(),
+    request_id: z.string().optional(),
+    count: z.number().optional(),
+  })
+  .passthrough();
+
+export type MassiveGroupedResponse = z.infer<typeof massiveGroupedResponseSchema>;

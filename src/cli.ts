@@ -16,6 +16,33 @@ import { runDoctorCli } from "./cli/doctor.js";
 import { initSchema } from "./db/schema.js";
 import { resolveDbPath } from "./db/provider.js";
 
+/**
+ * Arguments for Commander after `node <script>` (see `parseAsync` with `from: 'node'`).
+ *
+ * With `pnpm run cue -- ingest …`, `process.argv` is often:
+ * `[node, tsx, …/src/cli.ts, '--', 'ingest', '--flags', …]`.
+ * Commander treats `--` as "end of options" and bundles `ingest` + flags into operands, so
+ * subcommand `.opts()` (e.g. `--date`) stay empty. Strip the entry file and a leading `--`.
+ */
+function cueUserArgsAfterEntry(argv: string[]): string[] {
+  const rest = argv.slice(2);
+  let i = 0;
+  while (i < rest.length) {
+    const a = rest[i]!;
+    if (a === "--") {
+      i += 1;
+      continue;
+    }
+    const base = path.basename(a);
+    if (base === "cli.ts" || base === "cli.tsx") {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return rest.slice(i);
+}
+
 function wrap(subcommand: string, fn: () => void | Promise<void>): () => void | Promise<void> {
   return async () => {
     try {
@@ -81,14 +108,21 @@ const ingest = program
   .command("ingest")
   .description("Ingest Nasdaq 100 EOD OHLCV via Massive (Massive.com / Polygon key)")
   .option("--ticker <symbol>", "fetch a single ticker only")
-  .option("--force", "reserved for future forced refetch", false);
+  .option(
+    "--date <ymd>",
+    "calendar date for grouped daily bars (YYYY-MM-DD); default: latest ET weekday on or before now",
+  )
+  .option("--force", "refetch latest session even if daily_prices already has that session", false);
 
 ingest.action(
   wrap("ingest", async () => {
-    const o = ingest.opts<{ ticker?: string; force: boolean }>();
+    const o = ingest.opts<{ ticker?: string; force: boolean; date?: string }>();
     const argv = ["node", "cue", "ingest"];
     if (o.ticker !== undefined && o.ticker.length > 0) {
       argv.push("--ticker", o.ticker.toUpperCase());
+    }
+    if (o.date !== undefined && o.date.length > 0) {
+      argv.push("--date", o.date);
     }
     if (o.force) {
       argv.push("--force");
@@ -270,7 +304,8 @@ program
   );
 
 async function main(): Promise<void> {
-  await program.parseAsync(process.argv);
+  const userArgs = cueUserArgsAfterEntry(process.argv);
+  await program.parseAsync(["node", "cue", ...userArgs], { from: "node" });
 }
 
 main().catch((err: unknown) => {

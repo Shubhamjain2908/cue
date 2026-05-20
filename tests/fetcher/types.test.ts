@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { massiveStocksAggregatesResponseSchema } from "../../src/ingestors/types.js";
+import {
+  massiveGroupedResponseSchema,
+  massiveStocksAggregatesResponseSchema,
+} from "../../src/ingestors/types.js";
 
 /** Representative Massive v2 aggs JSON (includes `next_url` + optional `count`). */
 const sampleAggregatesResponse = {
@@ -37,7 +40,40 @@ const sampleAggregatesResponse = {
   ticker: "AAPL",
 } as const;
 
+const sampleGroupedResponse = {
+  queryCount: 11630,
+  resultsCount: 11630,
+  adjusted: true,
+  results: [
+    {
+      T: "RSPN",
+      v: 219346,
+      vw: 55.5793,
+      o: 55.86,
+      c: 55.58,
+      h: 55.86,
+      l: 55.2,
+      t: 1762203600000,
+      n: 384,
+    },
+  ],
+  status: "OK",
+  request_id: "0a618fcaeb9c3ddd770ca89e03958d63",
+  count: 11630,
+} as const;
+
 describe("fetcher types", () => {
+  it("parses Massive grouped daily sample response", () => {
+    const parsed = massiveGroupedResponseSchema.safeParse(sampleGroupedResponse);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.status).toBe("OK");
+      expect(parsed.data.results).toHaveLength(1);
+      expect(parsed.data.results[0]?.T).toBe("RSPN");
+      expect(parsed.data.results[0]?.o).toBe(55.86);
+    }
+  });
+
   it("parses Massive stocks aggregates sample response", () => {
     const parsed = massiveStocksAggregatesResponseSchema.safeParse(
       sampleAggregatesResponse,

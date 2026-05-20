@@ -127,7 +127,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 
 | Command | Description |
 |---------|-------------|
-| `pnpm run cue -- ingest` | Massive EOD OHLCV for universe (+ QQQ). Options: `--ticker SYM`, `--force` (reserved) |
+| `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: latest ET weekday on/before now), `--ticker SYM`, `--force` refetches that session |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache (`--ticker`, `--limit`, `--force`, `--date` reserved) |
 | `pnpm run cue -- screen` | Momentum screener / ranking. `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--dry-run` reserved |
@@ -155,7 +155,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 
 | Script | Maps to |
 |--------|---------|
-| `pnpm cue` | `tsx src/cli.ts` (pass args after `--`) |
+| `pnpm cue` | `tsx src/cli.ts` (pass args after the script name, e.g. `pnpm run cue ingest --date …` or `pnpm run cue -- ingest --date …`) |
 | `pnpm db:init` | `tsx src/db/schema.ts` (init + migrate from config) |
 | `pnpm db:migrate` | `pnpm run cue -- db:migrate` |
 | `pnpm backtest` | `tsx src/backtest/runner.ts` |
