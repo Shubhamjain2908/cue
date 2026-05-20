@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
 import { detectRunMode } from "../agents/daily-workflow.js";
+import { cueLogger } from "../cli/cue-logger.js";
 import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
 import { getConfig } from "../config/index.js";
 import {
@@ -471,9 +472,15 @@ export function runLiveScreen(
   tx();
 
   const sells = openRows.filter((p) => exitReasonByTicker.has(p.ticker)).length;
-  console.log(
-    `screen: asOf=${asOf} mode=${mode} regimeOk=${regimeOk ? "1" : "0"} sells=${sells} rankedUniverse=${fullRanked.length}`,
-  );
+  const baseSummary = `screen: asOf=${asOf} mode=${mode} regimeOk=${regimeOk ? "1" : "0"} sells=${sells}`;
+  if (mode === "stop") {
+    cueLogger.debug(
+      `${baseSummary} rankedUniverse=skipped (intentional stop-mode execution; cross-sectional ranking not run)`,
+    );
+    cueLogger.info(baseSummary);
+  } else {
+    cueLogger.info(`${baseSummary} rankedUniverse=${fullRanked.length}`);
+  }
 }
 
 /**
