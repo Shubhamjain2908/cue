@@ -7,6 +7,7 @@ import axios from "axios";
 import { z } from "zod";
 import winston from "winston";
 
+import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
 import { insertDailyPrices } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
@@ -88,8 +89,8 @@ function createLogger(): winston.Logger {
 
 /** ET civil calendar parts for `now` (aligns ingest with US equity dates / pipeline). */
 function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
+    timeZone: CUE_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

@@ -1,14 +1,12 @@
 import { spawnSync } from "node:child_process";
-import path from "node:path";
-import { clearInterval, setInterval } from "node:timers";
-import { fileURLToPath } from "node:url";
 
 import winston from "winston";
+
+import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 
 /** Friday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 5 Fri). */
 export const REBALANCE_DAY_OF_WEEK = 5;
 
-const POLL_MS = 60_000;
 const WINDOW_START_MIN = 16 * 60 + 5;
 const WINDOW_END_MIN = 16 * 60 + 15;
 
@@ -51,8 +49,8 @@ const logger = winston.createLogger({
 });
 
 function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
+    timeZone: CUE_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -75,6 +73,12 @@ function getEtCalendarParts(now: Date): { year: number; month: number; day: numb
   return { year, month, day };
 }
 
+/** NY civil calendar weekday for an instant (0 Sunday … 6 Saturday). */
+export function getNyCalendarWeekday(now: Date): number {
+  const { year, month, day } = getEtCalendarParts(now);
+  return weekdayUtcForNyCalendarDate(year, month, day);
+}
+
 /** Gregorian weekday for an America/New_York calendar date (0 Sunday … 6 Saturday). */
 export function weekdayUtcForNyCalendarDate(year: number, month: number, day: number): number {
   return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
@@ -89,8 +93,8 @@ export function formatEtYmd(now: Date): string {
 }
 
 export function getEtMinutesSinceMidnight(now: Date): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
+    timeZone: CUE_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -125,8 +129,7 @@ export function detectRunMode(input?: DetectRunModeInput): "rebalance" | "stop" 
   if (argv.includes("--force-rebalance")) {
     return "rebalance";
   }
-  const { year, month, day } = getEtCalendarParts(now);
-  const dow = weekdayUtcForNyCalendarDate(year, month, day);
+  const dow = getNyCalendarWeekday(now);
   return dow === REBALANCE_DAY_OF_WEEK ? "rebalance" : "stop";
 }
 
@@ -156,15 +159,15 @@ export interface RunPipelineDeps {
 }
 
 /**
- * Runs filtered steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
+ * Runs the given steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
  */
-export function runPipeline(
+export function runPipelineWithSteps(
+  steps: PipelineStep[],
   mode: "rebalance" | "stop",
   deps: RunPipelineDeps = {},
 ): number {
   const spawnImpl = deps.spawn ?? spawnSync;
   const skippedSteps: string[] = [];
-  const steps = stepsForMode(mode);
   const t0 = Date.now();
   logger.info(
     `pipeline_start mode=${mode} steps=${steps.map((s) => s.name).join(",")} ts=${new Date().toISOString()}`,
@@ -194,41 +197,11 @@ export function runPipeline(
   return 0;
 }
 
-let lastRunEtYmd = "";
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-
-function schedulerTick(): void {
-  const now = new Date();
-  if (!isWithinExecutionWindow(now)) {
-    return;
-  }
-  const todayEt = formatEtYmd(now);
-  if (lastRunEtYmd === todayEt) {
-    return;
-  }
-  const mode = detectRunMode();
-  logger.info(`scheduler_fire mode=${mode} etDate=${todayEt}`);
-  const code = runPipeline(mode);
-  if (code === 0) {
-    lastRunEtYmd = todayEt;
-  }
-}
-
-function shutdown(): void {
-  logger.info("[pipeline] Shutdown signal received. Exiting.");
-  if (pollTimer !== undefined) {
-    clearInterval(pollTimer);
-  }
-  process.exit(0);
-}
-
-/** Long-running scheduler (16:05–16:15 ET window); does not exit on its own. */
-export function runScheduleDaemonCli(): void {
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-  logger.info("[pipeline] Scheduler started pollMs=60000 window=16:05-16:15 America/New_York");
-  pollTimer = setInterval(schedulerTick, POLL_MS);
-  schedulerTick();
+/**
+ * Runs filtered registry steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
+ */
+export function runPipeline(mode: "rebalance" | "stop", deps: RunPipelineDeps = {}): number {
+  return runPipelineWithSteps(stepsForMode(mode), mode, deps);
 }
 
 /** One-shot: full pipeline in subprocess order (ingest → screen → …). Returns exit code (0 ok, 1 critical failure). */
@@ -238,22 +211,10 @@ export function runAllPipelineCli(argv?: readonly string[]): number {
 }
 
 export function runDailyWorkflowCli(): void {
-  const runNow = process.argv.includes("--now");
-
-  if (runNow) {
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
-    const mode = detectRunMode();
-    const code = runPipeline(mode);
-    process.exit(code);
+  if (!process.argv.includes("--now")) {
+    throw new Error("runDailyWorkflowCli is only for --now; use `cue schedule` for the daemon.");
   }
-
-  runScheduleDaemonCli();
-}
-
-const isMain =
-  path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
-
-if (isMain) {
-  runDailyWorkflowCli();
+  const mode = detectRunMode();
+  const code = runPipeline(mode);
+  process.exit(code);
 }
