@@ -43,12 +43,7 @@ describe("detectRunMode", () => {
 
 describe("stepsForMode", () => {
   it("excludes enrich for stop mode", () => {
-    expect(stepsForMode("stop").map((s) => s.name)).toEqual([
-      "ingest",
-      "screen",
-      "alert",
-      "dashboard",
-    ]);
+    expect(stepsForMode("stop").map((s) => s.name)).toEqual(["ingest", "screen", "brief"]);
   });
 
   it("includes enrich for rebalance mode", () => {
@@ -56,8 +51,7 @@ describe("stepsForMode", () => {
       "ingest",
       "screen",
       "enrich",
-      "alert",
-      "dashboard",
+      "brief",
     ]);
   });
 });
@@ -103,25 +97,25 @@ describe("pnpmRunArgs", () => {
     expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "cue", "--", "screen"]);
   });
 
-  it("forwards --mode stop to alert via registry forwardArgs expansion", () => {
-    const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
-    expect(pnpmRunArgs(alert, "stop")).toEqual([
+  it("forwards --mode stop to brief via registry forwardArgs expansion", () => {
+    const brief = PIPELINE_STEPS.find((s) => s.name === "brief")!;
+    expect(pnpmRunArgs(brief, "stop")).toEqual([
       "run",
       "cue",
       "--",
-      "brief:alert",
+      "brief",
       "--mode",
       "stop",
     ]);
   });
 
-  it("forwards --mode rebalance to alert in rebalance pipeline mode", () => {
-    const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
-    expect(pnpmRunArgs(alert, "rebalance")).toEqual([
+  it("forwards --mode rebalance to brief in rebalance pipeline mode", () => {
+    const brief = PIPELINE_STEPS.find((s) => s.name === "brief")!;
+    expect(pnpmRunArgs(brief, "rebalance")).toEqual([
       "run",
       "cue",
       "--",
-      "brief:alert",
+      "brief",
       "--mode",
       "rebalance",
     ]);
@@ -139,8 +133,8 @@ describe("runPipeline", () => {
     runPipeline("rebalance", { spawn });
     const screenCall = calls.find((a) => a[3] === "screen");
     expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
-    const alertCall = calls.find((a) => a[3] === "brief:alert");
-    expect(alertCall).toEqual(["run", "cue", "--", "brief:alert", "--mode", "rebalance"]);
+    const briefCall = calls.find((a) => a[3] === "brief");
+    expect(briefCall).toEqual(["run", "cue", "--", "brief", "--mode", "rebalance"]);
   });
 
   it("passes --mode stop to alert subprocess in stop mode", () => {
@@ -151,8 +145,8 @@ describe("runPipeline", () => {
     }) as unknown as typeof spawnSync;
 
     runPipeline("stop", { spawn });
-    const alertCall = calls.find((a) => a[3] === "brief:alert");
-    expect(alertCall).toEqual(["run", "cue", "--", "brief:alert", "--mode", "stop"]);
+    const briefCall = calls.find((a) => a[3] === "brief");
+    expect(briefCall).toEqual(["run", "cue", "--", "brief", "--mode", "stop"]);
   });
 
   it("returns 1 and does not run downstream when ingest fails (critical)", () => {
@@ -168,7 +162,7 @@ describe("runPipeline", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  it("continues after enrich fails and still runs alert and dashboard", () => {
+  it("continues after enrich fails and still runs brief", () => {
     const scripts: string[] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       const script = args !== undefined && args.length > 3 ? args[3] : undefined;
@@ -183,6 +177,6 @@ describe("runPipeline", () => {
 
     const code = runPipeline("rebalance", { spawn });
     expect(code).toBe(0);
-    expect(scripts).toEqual(["ingest", "screen", "enrich", "brief:alert", "brief:dashboard"]);
+    expect(scripts).toEqual(["ingest", "screen", "enrich", "brief"]);
   });
 });

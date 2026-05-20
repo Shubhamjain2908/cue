@@ -286,11 +286,11 @@ async function fetchMassiveDailyAggs(input: {
   return mapMassiveResultsToBars(merged);
 }
 
-async function run(): Promise<void> {
+async function run(argv: readonly string[] = process.argv): Promise<void> {
   const config = getConfig();
   const logger = createLogger();
   const projectRoot = process.cwd();
-  const { ticker: singleTicker } = parseFetchArgs(process.argv);
+  const { ticker: singleTicker } = parseFetchArgs([...argv]);
 
   const tickers =
     singleTicker !== undefined
@@ -402,4 +402,6 @@ if (isMain) {
   });
 }
 
-export { run as runFetcher };
+export async function runFetcher(argv?: readonly string[]): Promise<void> {
+  await run(argv ?? process.argv);
+}

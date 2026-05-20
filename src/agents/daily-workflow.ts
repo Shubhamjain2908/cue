@@ -27,13 +27,12 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
   { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "rebalance" },
   {
-    name: "alert",
-    cueArgs: ["brief:alert"],
+    name: "brief",
+    cueArgs: ["brief"],
     critical: false,
     runOn: "both",
     forwardArgs: ["--mode"],
   },
-  { name: "dashboard", cueArgs: ["brief:dashboard"], critical: true, runOn: "both" },
 ];
 
 const logger = winston.createLogger({
@@ -223,22 +222,33 @@ function shutdown(): void {
   process.exit(0);
 }
 
-export function runDailyWorkflowCli(): void {
-  const argv = process.argv;
-  const runNow = argv.includes("--now");
-
+/** Long-running scheduler (16:05–16:15 ET window); does not exit on its own. */
+export function runScheduleDaemonCli(): void {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  logger.info("[pipeline] Scheduler started pollMs=60000 window=16:05-16:15 America/New_York");
+  pollTimer = setInterval(schedulerTick, POLL_MS);
+  schedulerTick();
+}
+
+/** One-shot: full pipeline in subprocess order (ingest → screen → …). Returns exit code (0 ok, 1 critical failure). */
+export function runAllPipelineCli(argv?: readonly string[]): number {
+  const mode = detectRunMode({ argv: argv ?? process.argv });
+  return runPipeline(mode);
+}
+
+export function runDailyWorkflowCli(): void {
+  const runNow = process.argv.includes("--now");
 
   if (runNow) {
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
     const mode = detectRunMode();
     const code = runPipeline(mode);
     process.exit(code);
   }
 
-  logger.info("[pipeline] Scheduler started pollMs=60000 window=16:05-16:15 America/New_York");
-  pollTimer = setInterval(schedulerTick, POLL_MS);
-  schedulerTick();
+  runScheduleDaemonCli();
 }
 
 const isMain =

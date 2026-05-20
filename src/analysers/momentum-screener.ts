@@ -443,9 +443,9 @@ export function runLiveScreen(db: SqliteConnection, mode: "rebalance" | "stop"):
 
 /**
  * CLI entry: `--ticker X` prints BUY/HOLD signal; otherwise runs live momentum screen.
+ * @param argv Flags only (e.g. `["--ticker","AAPL"]` or `["--force-rebalance"]`); defaults to `process.argv.slice(2)`.
  */
-export function runScreenCli(): void {
-  const argv = process.argv.slice(2);
+export function runScreenCli(argv: readonly string[] = process.argv.slice(2)): void {
   const tIdx = argv.indexOf("--ticker");
   const raw = tIdx >= 0 ? argv[tIdx + 1] : undefined;
   if (raw !== undefined && raw.length > 0) {
@@ -490,11 +490,23 @@ export function runScreenCli(): void {
     const db = new Database(config.DB_PATH);
     try {
       initSchema(db);
-      const mode = detectRunMode();
+      const mode = detectRunMode({ argv });
       runLiveScreen(db, mode);
     } finally {
       db.close();
     }
+  }
+}
+
+/** Stop-day path only: trailing stops, high-water replay, max-hold / stop-out → SELL + close (no rebalance BUYs). */
+export function runExecuteStopsCli(): void {
+  const config = getConfig();
+  const db = new Database(config.DB_PATH);
+  try {
+    initSchema(db);
+    runLiveScreen(db, "stop");
+  } finally {
+    db.close();
   }
 }
 
