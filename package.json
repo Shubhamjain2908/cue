@@ -31,6 +31,7 @@
     "schedule": "pnpm run cue -- schedule",
     "run-all": "pnpm run cue -- run-all",
     "doctor": "pnpm run cue -- doctor",
+    "llm-smoke": "pnpm run cue -- llm-smoke",
     "execute-stops": "pnpm run cue -- execute-stops",
     "enrich-fundamentals": "pnpm run cue -- enrich-fundamentals",
     "rebuild:native": "pnpm rebuild better-sqlite3"

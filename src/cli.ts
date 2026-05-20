@@ -20,7 +20,7 @@ function wrap(subcommand: string, fn: () => void | Promise<void>): () => void | 
   return async () => {
     try {
       cueLogger.info(`subcommand_start subcommand=${subcommand}`);
-      await Promise.resolve(fn());
+      await fn();
       cueLogger.info(`subcommand_done subcommand=${subcommand}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -48,6 +48,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUYs
+  llm-smoke            Live LLM check: text + JSON + mini thesis (active provider)
   brief                Static HTML dashboard + Telegram alerts
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
   run-all              Run full pipeline once (subprocess chain, same as scheduled window)
@@ -147,6 +148,16 @@ program
     wrap("enrich", async () => {
       const { runEnrichCli } = await import("./agents/thesis-generator.js");
       await runEnrichCli();
+    }),
+  );
+
+program
+  .command("llm-smoke")
+  .description("Live LLM smoke test: short text, JSON (zod), mini thesis JSON (uses LLM_PROVIDER + keys from .env)")
+  .action(
+    wrap("llm-smoke", async () => {
+      const { runLlmSmokeCli } = await import("./cli/llm-smoke.js");
+      await runLlmSmokeCli();
     }),
   );
 
