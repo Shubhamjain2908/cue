@@ -1,4 +1,4 @@
-import { fetchYahooEnrichmentDto } from "../llm/yahooContext.js";
+import { fetchExtendedYahooContext } from "../llm/yahooContext.js";
 import { cueLogger } from "../cli/cue-logger.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
 import { upsertFundamentalsCache } from "../db/queries.js";
@@ -40,9 +40,9 @@ export async function runEnrichFundamentalsCli(opts: EnrichFundamentalsOpts): Pr
   if (opts.ticker !== undefined && opts.ticker.trim().length > 0) {
     const t = opts.ticker.trim().toUpperCase();
     cueLogger.info(`enrich_fundamentals_ticker ticker=${t}`);
-    const dto = await fetchYahooEnrichmentDto(t);
-    console.log(JSON.stringify({ ticker: t, yahoo: dto }, null, 2));
-    persistFundamentalsCacheLedger(t, asOfDate, { ticker: t, yahoo: dto });
+    const payload = await fetchExtendedYahooContext(t, asOfDate);
+    console.log(JSON.stringify(payload, null, 2));
+    persistFundamentalsCacheLedger(t, asOfDate, payload);
     cueLogger.info("enrich_fundamentals_done single_ticker");
     return;
   }
@@ -54,9 +54,11 @@ export async function runEnrichFundamentalsCli(opts: EnrichFundamentalsOpts): Pr
       : Math.min(opts.limit ?? 3, tickers.length);
   cueLogger.info(`enrich_fundamentals_batch count=${n} force=${Boolean(opts.force)}`);
   for (const t of tickers.slice(0, n)) {
-    const dto = await fetchYahooEnrichmentDto(t);
-    cueLogger.info(`enrich_fundamentals_row ticker=${t} sector=${dto.sector ?? "n/a"}`);
-    persistFundamentalsCacheLedger(t, asOfDate, { ticker: t, yahoo: dto });
+    const payload = await fetchExtendedYahooContext(t, asOfDate);
+    cueLogger.info(
+      `enrich_fundamentals_row ticker=${t} sector=${payload.yahoo.sector ?? "n/a"} pe=${payload.yahoo.financials.trailingPE ?? "n/a"}`,
+    );
+    persistFundamentalsCacheLedger(t, asOfDate, payload);
     await new Promise((r) => setTimeout(r, 200));
   }
   cueLogger.info("enrich_fundamentals_done batch");
