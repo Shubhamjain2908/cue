@@ -848,7 +848,7 @@ if (isMain) {
 
       if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
         console.warn(
-          "Quality-GARP: 0 round-trip trades — regime gate, filters, or sparse fundamentals/EPS data.",
+          "Quality-GARP: 0 round-trip trades — regime gate, filters, or sparse EPS/quality snapshot vs price data.",
         );
       }
 

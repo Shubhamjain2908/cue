@@ -2,7 +2,8 @@
  * Isolated Quality–GARP factor overlay backtest (research only).
  * Does not read or write `signals` / production screeners.
  *
- * Data: `daily_prices`, `fundamentals_cache`, `data/fundamentals/eps_history_20260520.json`.
+ * Data: `daily_prices` (SQLite), `data/fundamentals/eps_history_20260520.json`,
+ * `data/fundamentals/quality_snapshot_20260520.json`. Does not read `fundamentals_cache`.
  */
 
 import fs from "node:fs";
@@ -23,19 +24,6 @@ import {
 } from "../types.js";
 import { loadUniverseTickers } from "../../universe/load-universe.js";
 
-interface YahooFundamentalsJson {
-  yahoo?: {
-    financials?: {
-      trailingPE?: number | null;
-      returnOnEquity?: number | null;
-      debtToEquity?: number | null;
-    };
-    summaryDetail?: {
-      epsTrailingTwelveMonths?: number | null;
-    };
-  };
-}
-
 type SqliteConnection = InstanceType<typeof Database>;
 
 const BENCHMARK_TICKER = "QQQ";
@@ -48,6 +36,7 @@ const GARP_TOP_N = 3;
 const GARP_MAX_CONCURRENT = 3;
 
 const DEFAULT_EPS_HISTORY = "data/fundamentals/eps_history_20260520.json";
+const DEFAULT_QUALITY_SNAPSHOT = "data/fundamentals/quality_snapshot_20260520.json";
 
 type StrategyExitReason = "TRAILING_STOP" | "MAX_HOLD" | "FORCED_CLOSE";
 
@@ -71,6 +60,15 @@ interface SimPosition {
 }
 
 type EpsHistoryFile = Record<string, Record<string, number>>;
+
+/** Parsed FYE row with numeric fields (from `quality_snapshot_*.json`). */
+interface QualityBalanceSheetRow {
+  netIncome: number;
+  totalEquity: number;
+  totalDebt: number;
+}
+
+type QualitySnapshotFile = Record<string, Record<string, unknown>>;
 
 function compareIsoDate(a: string, b: string): number {
   if (a < b) {
@@ -247,97 +245,60 @@ function benchmarkBuyHoldCagrPct(
   return cagrPct(start, end, yf);
 }
 
-export interface ResolvedGarpFundamentals {
-  trailingPe: number | null;
-  roe: number;
-  debtToEquityRaw: number;
-  epsTrailingTtm: number | null;
-  lookaheadWarning: boolean;
+function qualityBookForTicker(
+  snap: QualitySnapshotFile,
+  ticker: string,
+): Record<string, unknown> | undefined {
+  const u = ticker.toUpperCase();
+  const book = snap[u] ?? snap[ticker];
+  return book !== undefined && typeof book === "object" && book !== null ? (book as Record<string, unknown>) : undefined;
 }
 
-function numOrNull(v: unknown): number | null {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
+function qualityRowHasNumericBalanceSheet(r: unknown): r is QualityBalanceSheetRow {
+  if (r === null || typeof r !== "object") {
+    return false;
+  }
+  const o = r as Record<string, unknown>;
+  const ni = o.netIncome;
+  const eq = o.totalEquity;
+  const td = o.totalDebt;
+  return (
+    typeof ni === "number" &&
+    Number.isFinite(ni) &&
+    typeof eq === "number" &&
+    Number.isFinite(eq) &&
+    eq > 0 &&
+    typeof td === "number" &&
+    Number.isFinite(td)
+  );
 }
 
 /**
- * Point-in-time fundamentals from `fundamentals_cache` with research fallback (earliest row).
+ * Balance-sheet row aligned to EPS `epsNowDate`, or latest prior FYE with usable numbers.
  */
-export function resolveStrategyFundamentals(
-  db: SqliteConnection,
+function pickQualityRowForEpsFye(
+  snap: QualitySnapshotFile,
   ticker: string,
-  simDate: string,
-  onWarn: (msg: string) => void,
-): ResolvedGarpFundamentals | null {
-  const upper = ticker.toUpperCase();
-  let row = db
-    .prepare(
-      `SELECT payload_json FROM fundamentals_cache
-       WHERE ticker = ? AND as_of_date <= ?
-       ORDER BY as_of_date DESC LIMIT 1`,
-    )
-    .get(upper, simDate) as { payload_json: string } | undefined;
-
-  let lookaheadWarning = false;
-  if (!row) {
-    row = db
-      .prepare(
-        `SELECT payload_json FROM fundamentals_cache
-         WHERE ticker = ?
-         ORDER BY as_of_date ASC LIMIT 1`,
-      )
-      .get(upper) as { payload_json: string } | undefined;
-    if (row) {
-      lookaheadWarning = true;
-      onWarn(
-        `LOOK-AHEAD BIAS WARNING: sourcing earliest fundamentals_cache row for ${upper} at simDate=${simDate}`,
-      );
+  epsNowDate: string,
+): QualityBalanceSheetRow | null {
+  const book = qualityBookForTicker(snap, ticker);
+  if (!book) {
+    return null;
+  }
+  const direct = book[epsNowDate];
+  if (direct !== undefined && qualityRowHasNumericBalanceSheet(direct)) {
+    return direct;
+  }
+  const dates = Object.keys(book)
+    .filter((d) => compareIsoDate(d, epsNowDate) <= 0)
+    .sort();
+  for (let i = dates.length - 1; i >= 0; i--) {
+    const row = book[dates[i]!]!;
+    if (qualityRowHasNumericBalanceSheet(row)) {
+      return row;
     }
   }
-  if (!row) {
-    return null;
-  }
-
-  let payload: YahooFundamentalsJson;
-  try {
-    payload = JSON.parse(row.payload_json) as YahooFundamentalsJson;
-  } catch {
-    return null;
-  }
-
-  const fin = payload.yahoo?.financials;
-  const roe = numOrNull(fin?.returnOnEquity);
-  const debtRaw = numOrNull(fin?.debtToEquity);
-  if (roe === null || debtRaw === null) {
-    return null;
-  }
-
-  return {
-    trailingPe: numOrNull(fin?.trailingPE),
-    roe,
-    debtToEquityRaw: debtRaw,
-    epsTrailingTtm: numOrNull(payload.yahoo?.summaryDetail?.epsTrailingTwelveMonths),
-    lookaheadWarning,
-  };
-}
-
-function resolvePeTtm(
-  trailingPe: number | null,
-  closePx: number,
-  epsNowSnapshot: number,
-  epsTrailingTtm: number | null,
-): number | null {
-  let pe = trailingPe;
-  if (pe === null || pe <= 0) {
-    if (epsTrailingTtm !== null && epsTrailingTtm > 0) {
-      pe = closePx / epsTrailingTtm;
-    } else if (epsNowSnapshot > 0 && closePx > 0) {
-      pe = closePx / epsNowSnapshot;
-    }
-  }
-  if (pe === null || pe <= 0 || !Number.isFinite(pe)) {
-    return null;
-  }
-  return pe;
+  return null;
 }
 
 function pickEpsPair(
@@ -396,12 +357,11 @@ interface PegCandidate {
 }
 
 function computePegSurvivors(
-  db: SqliteConnection,
   universe: readonly string[],
   simDate: string,
   byTicker: Map<string, DailyBar[]>,
   epsHistory: EpsHistoryFile,
-  onWarn: (msg: string) => void,
+  qualitySnapshot: QualitySnapshotFile,
 ): PegCandidate[] {
   const out: PegCandidate[] = [];
   for (const t of universe) {
@@ -414,31 +374,27 @@ function computePegSurvivors(
       continue;
     }
 
-    const rawF = resolveStrategyFundamentals(db, t, simDate, onWarn);
-    if (!rawF) {
-      continue;
-    }
-
     const epsPair = pickEpsPair(epsHistory, t, simDate);
     if (!epsPair) {
       continue;
     }
 
-    const peTtm = resolvePeTtm(
-      rawF.trailingPe,
-      closePx,
-      epsPair.epsNow,
-      rawF.epsTrailingTtm,
-    );
-    if (peTtm === null) {
+    const qRow = pickQualityRowForEpsFye(qualitySnapshot, t, epsPair.epsNowDate);
+    if (!qRow) {
       continue;
     }
 
-    if (rawF.roe < 0.15) {
+    const roe = qRow.netIncome / qRow.totalEquity;
+    const debtEquityRatio = qRow.totalDebt / qRow.totalEquity;
+    if (!Number.isFinite(roe) || roe < 0.15) {
       continue;
     }
-    const deLeveraged = rawF.debtToEquityRaw / 100;
-    if (!Number.isFinite(deLeveraged) || deLeveraged > 1.5) {
+    if (!Number.isFinite(debtEquityRatio) || debtEquityRatio > 1.5) {
+      continue;
+    }
+
+    const peTtm = closePx / epsPair.epsNow;
+    if (!Number.isFinite(peTtm) || peTtm <= 0) {
       continue;
     }
 
@@ -521,9 +477,17 @@ function loadEpsHistory(filePath: string): EpsHistoryFile {
   return JSON.parse(raw) as EpsHistoryFile;
 }
 
+function loadQualitySnapshot(filePath: string): QualitySnapshotFile {
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+  const raw = fs.readFileSync(resolved, "utf8");
+  return JSON.parse(raw) as QualitySnapshotFile;
+}
+
 export interface RunQualityGarpBacktestOpts {
   /** Defaults to `data/fundamentals/eps_history_20260520.json` under cwd. */
   readonly epsHistoryPath?: string;
+  /** Defaults to `data/fundamentals/quality_snapshot_20260520.json` under cwd. */
+  readonly qualitySnapshotPath?: string;
 }
 
 /**
@@ -555,9 +519,15 @@ export function runQualityGarpBacktest(
     );
   }
 
-  const warn = (msg: string): void => {
-    console.warn(msg);
-  };
+  const qualityPath = opts.qualitySnapshotPath ?? DEFAULT_QUALITY_SNAPSHOT;
+  let qualitySnapshot: QualitySnapshotFile;
+  try {
+    qualitySnapshot = loadQualitySnapshot(qualityPath);
+  } catch (e) {
+    throw new Error(
+      `Quality-GARP: failed to load quality snapshot from ${qualityPath}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 
   const universe = loadUniverseTickers();
   const allTickers = [...new Set([...universe, BENCHMARK_TICKER])].sort((a, b) => a.localeCompare(b));
@@ -661,7 +631,7 @@ export function runQualityGarpBacktest(
       const regimeOk = smaRegime !== null && qqqBar.close > smaRegime;
 
       if (regimeOk) {
-        const picks = computePegSurvivors(db, universe, date, byTicker, epsHistory, warn);
+        const picks = computePegSurvivors(universe, date, byTicker, epsHistory, qualitySnapshot);
 
         for (const p of picks) {
           if (positions.size >= GARP_MAX_CONCURRENT) {
