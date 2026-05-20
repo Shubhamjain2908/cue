@@ -138,7 +138,7 @@ interface PipelineStep {
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
 | Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` |
-| DB | `src/db/migrations/*.sql`, `migrate.ts`, `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
+| DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
 ---
@@ -168,8 +168,8 @@ interface PipelineStep {
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `src/db/migrations/001_initial_schema.sql`, `002_create_fundamental_cache.sql`; ledger **`_migrations`**.
-- **Includes today’s repo:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`** (arch “S1/S2” **implemented** here; `spec/cue-db-schema.md` may still describe an older deployed snapshot — trust **`src/db/migrations`** first).
+- **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` (baseline), then **`003_positions_signals_upgrade.sql`** (Phase 4 S1/S2); ledger **`_migrations`**.
+- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**. (`spec/cue-db-schema.md` may still describe an older deployed snapshot — trust **`src/db/migrations`** first.)
 - **`fundamentals_cache`:** table exists; CLI still primarily writes **disk** cache — DB upsert wiring is a follow-up.
 - **Extended SQL / read patterns / deferred `backtest_trades`:** **`spec/cue-db-schema.md`**.
 
@@ -226,7 +226,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | — | FIXED (repo) | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard |
 | — | FIXED (repo) | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher |
 | — | FIXED (arch S3) | Scheduler overlap | ✅ **`isRunning`** in `scheduler.ts` |
-| — | FIXED (arch S1/S2) | Positions columns + signals uniqueness | ✅ **`001_initial_schema.sql`** |
+| — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline) |
 
 ---
 
