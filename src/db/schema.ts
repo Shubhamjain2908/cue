@@ -1,5 +1,5 @@
 /**
- * Public DB entry — implementation in `./migrations/migrate.ts` (+ `*.sql` alongside it).
+ * Public DB entry — `./migrate.ts` re-exports the runner; SQL migrations live in `./migrations/`.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import {
   migrateTracked,
   runDbInitFromConfig,
   type MigrateTrackedResult,
-} from "./migrations/migrate.js";
+} from "./migrate.js";
 
 export { initSchema, migrateTracked, runDbInitFromConfig, type MigrateTrackedResult };
 

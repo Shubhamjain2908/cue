@@ -1,6 +1,9 @@
 /**
- * Migration runner only: ensures `_migrations`, then runs each `*.sql` in this directory
- * exactly once (ledger id = filename without `.sql`). All DDL lives in the `.sql` files.
+ * Migration runner: ensures `_migrations`, then runs each `*.sql` in this directory **in
+ * lexicographic (filename) order**, skipping any stem already present in the ledger
+ * (`id` = filename without `.sql`). After a file executes successfully, the runner inserts
+ * that `id` into `_migrations` — **do not** `INSERT INTO _migrations` from inside `.sql` files
+ * (duplicate key). All DDL/DML lives in the `.sql` files; idempotency on re-run is ledger-based.
  */
 import fs from "node:fs";
 import path from "node:path";
