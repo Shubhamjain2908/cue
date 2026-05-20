@@ -26,6 +26,7 @@ const baseYahoo = (over: Partial<YahooEnrichmentDto> = {}): YahooEnrichmentDto =
   sector: "Technology",
   marketCap: 1e12,
   nextEarningsDate: "2024-08-01",
+  financials: { trailingPE: 20, returnOnEquity: 0.25, debtToEquity: 0.5 },
   ...over,
 });
 

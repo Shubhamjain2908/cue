@@ -68,6 +68,7 @@ describe("runEnrichment", () => {
       sector: "Technology",
       marketCap: 1000,
       nextEarningsDate: null,
+      financials: { trailingPE: null, returnOnEquity: null, debtToEquity: null },
     });
 
     const result = await runEnrichment(db, id, { provider, fetchYahoo });
