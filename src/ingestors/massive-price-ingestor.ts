@@ -147,13 +147,48 @@ function rangeEndYmd(): string {
   return formatEtYmd(new Date());
 }
 
-function parseFetchArgs(argv: string[]): { ticker?: string; force: boolean } {
+const ymdArgRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Validates `YYYY-MM-DD` and that the calendar date exists (e.g. not 2026-02-31). */
+function parseExplicitSessionDate(raw: string): string {
+  const trimmed = raw.trim();
+  if (!ymdArgRegex.test(trimmed)) {
+    throw new Error(
+      `Invalid --date "${raw}": expected YYYY-MM-DD (example: 2026-05-19)`,
+    );
+  }
+  const [ys, ms, ds] = trimmed.split("-");
+  const y = Number(ys);
+  const m = Number(ms);
+  const d = Number(ds);
+  const civil = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  if (
+    civil.getUTCFullYear() !== y ||
+    civil.getUTCMonth() + 1 !== m ||
+    civil.getUTCDate() !== d
+  ) {
+    throw new Error(`Invalid --date "${raw}": not a valid calendar day`);
+  }
+  return trimmed;
+}
+
+function parseFetchArgs(argv: string[]): {
+  ticker?: string;
+  force: boolean;
+  explicitSessionDate?: string;
+} {
   const force = argv.includes("--force");
+  const dateIdx = argv.indexOf("--date");
+  let explicitSessionDate: string | undefined;
+  if (dateIdx !== -1 && argv[dateIdx + 1] !== undefined && argv[dateIdx + 1]!.length > 0) {
+    explicitSessionDate = parseExplicitSessionDate(String(argv[dateIdx + 1]));
+  }
+
   const idx = argv.indexOf("--ticker");
   if (idx !== -1 && argv[idx + 1] !== undefined && argv[idx + 1]!.length > 0) {
-    return { ticker: argv[idx + 1], force };
+    return { ticker: argv[idx + 1], force, explicitSessionDate };
   }
-  return { force };
+  return { force, explicitSessionDate };
 }
 
 function loadUniverseTickers(projectRoot: string): string[] {
@@ -277,7 +312,7 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   const config = getConfig();
   const logger = createLogger();
   const projectRoot = process.cwd();
-  const { ticker: singleTicker, force } = parseFetchArgs([...argv]);
+  const { ticker: singleTicker, force, explicitSessionDate } = parseFetchArgs([...argv]);
 
   const universe = loadUniverseTickers(projectRoot);
   const tickersForMask =
@@ -286,12 +321,17 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   const tickerMask = new Set(tickersForMask.map((t) => t.toUpperCase()));
   const expectedMaskCount = tickerMask.size;
 
-  const rangeEnd = rangeEndYmd();
-  const [ey, em, ed] = rangeEnd.split("-").map(Number);
-  const sessionDate = latestWeekdayOnOrBeforeEtCivil(ey!, em!, ed!);
-
-  if (sessionDate === null) {
-    throw new Error("Could not resolve ET session date for grouped ingest");
+  let sessionDate: string;
+  if (explicitSessionDate !== undefined) {
+    sessionDate = explicitSessionDate;
+  } else {
+    const rangeEnd = rangeEndYmd();
+    const [ey, em, ed] = rangeEnd.split("-").map(Number);
+    const resolved = latestWeekdayOnOrBeforeEtCivil(ey!, em!, ed!);
+    if (resolved === null) {
+      throw new Error("Could not resolve ET session date for grouped ingest");
+    }
+    sessionDate = resolved;
   }
 
   const db = openCueDb(config.DB_PATH);
