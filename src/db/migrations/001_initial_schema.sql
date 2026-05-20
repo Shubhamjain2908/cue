@@ -64,5 +64,7 @@ CREATE TABLE IF NOT EXISTS positions (
   entry_price REAL NOT NULL,
   status TEXT NOT NULL,
   exit_date TEXT,
-  exit_price REAL
+  exit_price REAL,
+  highest_close_since_entry REAL,
+  current_stop_loss REAL
 );

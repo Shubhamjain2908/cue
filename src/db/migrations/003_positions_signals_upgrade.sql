@@ -8,10 +8,6 @@ PRAGMA foreign_keys = OFF;
 
 BEGIN IMMEDIATE TRANSACTION;
 
--- S1: add nullable columns, then backfill OPEN rows from entry + linked BUY context.
-ALTER TABLE positions ADD COLUMN highest_close_since_entry REAL;
-ALTER TABLE positions ADD COLUMN current_stop_loss REAL;
-
 UPDATE positions
 SET
   highest_close_since_entry = entry_price,
