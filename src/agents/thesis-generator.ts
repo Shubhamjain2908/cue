@@ -6,11 +6,7 @@ import { listUnenrichedBuySignals } from "../db/queries.js";
 import { openCueDb } from "../db/provider.js";
 import { runEnrichment } from "../llm/enricher.js";
 
-const isMain =
-  path.resolve(fileURLToPath(import.meta.url)) ===
-  path.resolve(process.argv[1] ?? "");
-
-async function main(): Promise<void> {
+export async function runEnrichCli(): Promise<void> {
   const config = getConfig();
   const db = openCueDb(config.DB_PATH);
   try {
@@ -32,8 +28,12 @@ async function main(): Promise<void> {
   }
 }
 
+const isMain =
+  path.resolve(fileURLToPath(import.meta.url)) ===
+  path.resolve(process.argv[1] ?? "");
+
 if (isMain) {
-  main().catch((e) => {
+  runEnrichCli().catch((e) => {
     console.error(e);
     process.exit(1);
   });

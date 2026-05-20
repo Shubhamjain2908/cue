@@ -44,7 +44,7 @@ describe("detectRunMode", () => {
 describe("stepsForMode", () => {
   it("excludes enrich for stop mode", () => {
     expect(stepsForMode("stop").map((s) => s.name)).toEqual([
-      "fetch",
+      "ingest",
       "screen",
       "alert",
       "dashboard",
@@ -53,7 +53,7 @@ describe("stepsForMode", () => {
 
   it("includes enrich for rebalance mode", () => {
     expect(stepsForMode("rebalance").map((s) => s.name)).toEqual([
-      "fetch",
+      "ingest",
       "screen",
       "enrich",
       "alert",
@@ -89,22 +89,42 @@ describe("formatEtYmd / getEtMinutesSinceMidnight", () => {
 describe("pnpmRunArgs", () => {
   it("forwards --force-rebalance to screen when pipeline mode is rebalance", () => {
     const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
-    expect(pnpmRunArgs(screen, "rebalance")).toEqual(["run", "screen", "--", "--force-rebalance"]);
+    expect(pnpmRunArgs(screen, "rebalance")).toEqual([
+      "run",
+      "cue",
+      "--",
+      "screen",
+      "--force-rebalance",
+    ]);
   });
 
   it("does not forward args for screen when pipeline mode is stop", () => {
     const screen = PIPELINE_STEPS.find((s) => s.name === "screen")!;
-    expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "screen"]);
+    expect(pnpmRunArgs(screen, "stop")).toEqual(["run", "cue", "--", "screen"]);
   });
 
   it("forwards --mode stop to alert via registry forwardArgs expansion", () => {
     const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
-    expect(pnpmRunArgs(alert, "stop")).toEqual(["run", "alert", "--", "--mode", "stop"]);
+    expect(pnpmRunArgs(alert, "stop")).toEqual([
+      "run",
+      "cue",
+      "--",
+      "brief:alert",
+      "--mode",
+      "stop",
+    ]);
   });
 
   it("forwards --mode rebalance to alert in rebalance pipeline mode", () => {
     const alert = PIPELINE_STEPS.find((s) => s.name === "alert")!;
-    expect(pnpmRunArgs(alert, "rebalance")).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
+    expect(pnpmRunArgs(alert, "rebalance")).toEqual([
+      "run",
+      "cue",
+      "--",
+      "brief:alert",
+      "--mode",
+      "rebalance",
+    ]);
   });
 });
 
@@ -117,10 +137,10 @@ describe("runPipeline", () => {
     }) as unknown as typeof spawnSync;
 
     runPipeline("rebalance", { spawn });
-    const screenCall = calls.find((a) => a[1] === "screen");
-    expect(screenCall).toEqual(["run", "screen", "--", "--force-rebalance"]);
-    const alertCall = calls.find((a) => a[1] === "alert");
-    expect(alertCall).toEqual(["run", "alert", "--", "--mode", "rebalance"]);
+    const screenCall = calls.find((a) => a[3] === "screen");
+    expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
+    const alertCall = calls.find((a) => a[3] === "brief:alert");
+    expect(alertCall).toEqual(["run", "cue", "--", "brief:alert", "--mode", "rebalance"]);
   });
 
   it("passes --mode stop to alert subprocess in stop mode", () => {
@@ -131,13 +151,13 @@ describe("runPipeline", () => {
     }) as unknown as typeof spawnSync;
 
     runPipeline("stop", { spawn });
-    const alertCall = calls.find((a) => a[1] === "alert");
-    expect(alertCall).toEqual(["run", "alert", "--", "--mode", "stop"]);
+    const alertCall = calls.find((a) => a[3] === "brief:alert");
+    expect(alertCall).toEqual(["run", "cue", "--", "brief:alert", "--mode", "stop"]);
   });
 
-  it("returns 1 and does not run downstream when fetch fails (critical)", () => {
+  it("returns 1 and does not run downstream when ingest fails (critical)", () => {
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
-      if (args?.[1] === "fetch") {
+      if (args?.[3] === "ingest") {
         return { status: 1 } as SpawnSyncReturns<Buffer>;
       }
       return { status: 0 } as SpawnSyncReturns<Buffer>;
@@ -151,7 +171,7 @@ describe("runPipeline", () => {
   it("continues after enrich fails and still runs alert and dashboard", () => {
     const scripts: string[] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
-      const script = args?.[1];
+      const script = args !== undefined && args.length > 3 ? args[3] : undefined;
       if (script !== undefined) {
         scripts.push(script);
       }
@@ -163,6 +183,6 @@ describe("runPipeline", () => {
 
     const code = runPipeline("rebalance", { spawn });
     expect(code).toBe(0);
-    expect(scripts).toEqual(["fetch", "screen", "enrich", "alert", "dashboard"]);
+    expect(scripts).toEqual(["ingest", "screen", "enrich", "brief:alert", "brief:dashboard"]);
   });
 });

@@ -29,7 +29,7 @@ module.exports = {
       // pipeline.ts runs a setInterval scheduler loop (per §3); this process
       // is long-lived and should never exit cleanly under normal operation.
       script: 'node_modules/.bin/tsx',
-      args: 'src/agents/daily-workflow.ts',
+      args: 'src/cli.ts pipeline',
       interpreter: 'none', // tsx is the interpreter — don't wrap with node
       instances: 1,
       autorestart: true,

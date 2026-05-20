@@ -91,14 +91,15 @@ async function sendTelegramMessage(text: string): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+export async function runBriefAlertCli(argv: readonly string[] = process.argv): Promise<void> {
   let mode: AlertRunMode;
   try {
-    mode = parseAlertModeFromArgv(process.argv);
+    mode = parseAlertModeFromArgv(argv);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logger.error(msg);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (mode === "stop") {
@@ -127,6 +128,10 @@ async function main(): Promise<void> {
   } finally {
     db.close();
   }
+}
+
+async function main(): Promise<void> {
+  await runBriefAlertCli(process.argv);
 }
 
 if (isMain) {

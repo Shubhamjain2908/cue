@@ -14,26 +14,26 @@ const WINDOW_END_MIN = 16 * 60 + 15;
 
 export interface PipelineStep {
   name: string;
-  command: string;
+  /** Arguments after `pnpm run cue --`. */
+  cueArgs: string[];
   critical: boolean;
   runOn: "rebalance" | "stop" | "both";
-  /** Appended after `pnpm run <name> --` when non-empty (passed through to the script). */
+  /** Appended after `pnpm run cue -- …` when non-empty (passed through to the CLI). */
   forwardArgs?: string[];
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
-  { name: "fetch", command: "pnpm run fetch", critical: true, runOn: "both" },
-  { name: "screen", command: "pnpm run screen", critical: true, runOn: "both" },
-  { name: "enrich", command: "pnpm run enrich", critical: false, runOn: "rebalance" },
+  { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+  { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
+  { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "rebalance" },
   {
     name: "alert",
-    command: "pnpm run alert",
+    cueArgs: ["brief:alert"],
     critical: false,
     runOn: "both",
-    /** Resolved in `pnpmRunArgs` as `--mode <rebalance|stop>`. */
     forwardArgs: ["--mode"],
   },
-  { name: "dashboard", command: "pnpm run dashboard", critical: true, runOn: "both" },
+  { name: "dashboard", cueArgs: ["brief:dashboard"], critical: true, runOn: "both" },
 ];
 
 const logger = winston.createLogger({
@@ -148,7 +148,8 @@ export function pnpmRunArgs(step: PipelineStep, mode: "rebalance" | "stop"): str
   const screenRebalance =
     step.name === "screen" && mode === "rebalance" ? (["--force-rebalance"] as const) : [];
   const forwarded = [...resolvedForwardArgs(step, mode), ...screenRebalance];
-  return forwarded.length > 0 ? ["run", step.name, "--", ...forwarded] : ["run", step.name];
+  const base = ["run", "cue", "--", ...step.cueArgs];
+  return forwarded.length > 0 ? [...base, ...forwarded] : base;
 }
 
 export interface RunPipelineDeps {
@@ -222,7 +223,7 @@ function shutdown(): void {
   process.exit(0);
 }
 
-function main(): void {
+export function runDailyWorkflowCli(): void {
   const argv = process.argv;
   const runNow = argv.includes("--now");
 
@@ -244,5 +245,5 @@ const isMain =
   path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
 
 if (isMain) {
-  main();
+  runDailyWorkflowCli();
 }

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS signals (
   ticker TEXT NOT NULL,
   date TEXT NOT NULL,
   signal TEXT NOT NULL,
+  signal_type TEXT NOT NULL DEFAULT 'MOMENTUM',
   price REAL NOT NULL,
   alerted INTEGER NOT NULL DEFAULT 0,
   momentum_rank INTEGER,
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS signals (
   momentum_12_1_return REAL,
   atr14 REAL,
   initial_atr_stop REAL,
-  UNIQUE (ticker, date)
+  UNIQUE (ticker, date, signal, signal_type)
 );
 
 CREATE TABLE IF NOT EXISTS enrichments (
@@ -74,7 +75,18 @@ CREATE TABLE IF NOT EXISTS positions (
   entry_price REAL NOT NULL,
   status TEXT NOT NULL,
   exit_date TEXT,
-  exit_price REAL
+  exit_price REAL,
+  highest_close_since_entry REAL,
+  current_stop_loss REAL
+);
+
+CREATE TABLE IF NOT EXISTS fundamentals_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker TEXT NOT NULL,
+  as_of_date TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  fetched_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  UNIQUE (ticker, as_of_date)
 );
 `;
 
@@ -115,6 +127,7 @@ export function migrateSchema(db: SqliteConnection): void {
         ticker TEXT NOT NULL,
         date TEXT NOT NULL,
         signal TEXT NOT NULL,
+        signal_type TEXT NOT NULL DEFAULT 'MOMENTUM',
         price REAL NOT NULL,
         alerted INTEGER NOT NULL DEFAULT 0,
         momentum_rank INTEGER,
@@ -122,14 +135,14 @@ export function migrateSchema(db: SqliteConnection): void {
         momentum_12_1_return REAL,
         atr14 REAL,
         initial_atr_stop REAL,
-        UNIQUE (ticker, date)
+        UNIQUE (ticker, date, signal, signal_type)
       );
       INSERT INTO signals_migrated (
-        id, ticker, date, signal, price, alerted,
+        id, ticker, date, signal, signal_type, price, alerted,
         momentum_rank, universe_ranked_count, momentum_12_1_return, atr14, initial_atr_stop
       )
       SELECT
-        id, ticker, date, signal, price, alerted,
+        id, ticker, date, signal, 'MOMENTUM', price, alerted,
         NULL, NULL, NULL, NULL, NULL
       FROM signals;
       DROP TABLE signals;
@@ -138,20 +151,54 @@ export function migrateSchema(db: SqliteConnection): void {
       PRAGMA foreign_keys = ON;
     `);
   } else {
+    if (!sigCols.has("signal_type")) {
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        BEGIN;
+        CREATE TABLE signals_migrated (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker TEXT NOT NULL,
+          date TEXT NOT NULL,
+          signal TEXT NOT NULL,
+          signal_type TEXT NOT NULL DEFAULT 'MOMENTUM',
+          price REAL NOT NULL,
+          alerted INTEGER NOT NULL DEFAULT 0,
+          momentum_rank INTEGER,
+          universe_ranked_count INTEGER,
+          momentum_12_1_return REAL,
+          atr14 REAL,
+          initial_atr_stop REAL,
+          UNIQUE (ticker, date, signal, signal_type)
+        );
+        INSERT INTO signals_migrated (
+          id, ticker, date, signal, signal_type, price, alerted,
+          momentum_rank, universe_ranked_count, momentum_12_1_return, atr14, initial_atr_stop
+        )
+        SELECT
+          id, ticker, date, signal, 'MOMENTUM', price, alerted,
+          momentum_rank, universe_ranked_count, momentum_12_1_return, atr14, initial_atr_stop
+        FROM signals;
+        DROP TABLE signals;
+        ALTER TABLE signals_migrated RENAME TO signals;
+        COMMIT;
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+    const cols = signalColumnNames(db);
     const stmts: string[] = [];
-    if (!sigCols.has("momentum_rank")) {
+    if (!cols.has("momentum_rank")) {
       stmts.push(`ALTER TABLE signals ADD COLUMN momentum_rank INTEGER`);
     }
-    if (!sigCols.has("universe_ranked_count")) {
+    if (!cols.has("universe_ranked_count")) {
       stmts.push(`ALTER TABLE signals ADD COLUMN universe_ranked_count INTEGER`);
     }
-    if (!sigCols.has("momentum_12_1_return")) {
+    if (!cols.has("momentum_12_1_return")) {
       stmts.push(`ALTER TABLE signals ADD COLUMN momentum_12_1_return REAL`);
     }
-    if (!sigCols.has("atr14")) {
+    if (!cols.has("atr14")) {
       stmts.push(`ALTER TABLE signals ADD COLUMN atr14 REAL`);
     }
-    if (!sigCols.has("initial_atr_stop")) {
+    if (!cols.has("initial_atr_stop")) {
       stmts.push(`ALTER TABLE signals ADD COLUMN initial_atr_stop REAL`);
     }
     for (const sql of stmts) {
@@ -170,6 +217,29 @@ export function migrateSchema(db: SqliteConnection): void {
   if (btCols.size > 0 && !btCols.has("expectancy")) {
     db.exec(`ALTER TABLE backtest_runs ADD COLUMN expectancy REAL NOT NULL DEFAULT 0`);
   }
+
+  const posCols = new Set(
+    (db.prepare(`PRAGMA table_info(positions)`).all() as Array<{ name: string }>).map((r) => r.name),
+  );
+  if (posCols.size > 0) {
+    if (!posCols.has("highest_close_since_entry")) {
+      db.exec(`ALTER TABLE positions ADD COLUMN highest_close_since_entry REAL`);
+    }
+    if (!posCols.has("current_stop_loss")) {
+      db.exec(`ALTER TABLE positions ADD COLUMN current_stop_loss REAL`);
+    }
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fundamentals_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker TEXT NOT NULL,
+      as_of_date TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+      UNIQUE (ticker, as_of_date)
+    );
+  `);
 }
 
 export function initSchema(db: SqliteConnection): void {
