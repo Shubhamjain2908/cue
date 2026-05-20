@@ -1,0 +1,8 @@
+{
+  "universe_name": "Nasdaq 100",
+  "as_of_date": "2026-05-20",
+  "total_ticker_count": 101,
+  "index_company_count": 100,
+  "notes": "101 trade lines in nasdaq100.json (GOOG and GOOGL are separate Nasdaq-100 constituents). QQQ is not in that file; ingest/screen add it at runtime.",
+  "system_additions": ["QQQ"]
+}
