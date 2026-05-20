@@ -102,6 +102,27 @@ Open and closed book from BUY signals.
 
 ---
 
+### Applied Schema Migrations Ledger
+
+#### Migration 003: Portfolio Tracking Upgrade
+* `positions` table expanded to include trailing stop metrics: `highest_close_since_entry` (REAL) and `current_stop_loss` (REAL).
+* `signals` composite unique key constraint relaxed from `UNIQUE(ticker, date)` to `UNIQUE(ticker, date, signal, signal_type)` to safely allow cross-strategy segregation.
+
+#### Migration 004: Historical Trade Ledger (`backtest_trades`)
+Stores granular point-in-time historical execution strings generated during simulator sessions.
+* `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
+* `run_id` (TEXT NOT NULL REFERENCES backtest_runs(rowid))
+* `ticker` (TEXT NOT NULL)
+* `entry_date` (TEXT NOT NULL)
+* `entry_price` (REAL NOT NULL)
+* `exit_date` (TEXT)
+* `exit_price` (REAL)
+* `pnl_pct` (REAL)
+* `exit_reason` (TEXT CHECK(exit_reason IN ('TRAILING_STOP','INITIAL_STOP','TIME_EXIT','MANUAL')))
+* `created_at` (TEXT DEFAULT CURRENT_TIMESTAMP)
+
+---
+
 ## Backtesting
 
 ### `backtest_runs`
