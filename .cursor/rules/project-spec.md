@@ -1,215 +1,260 @@
-## Cue — State of the Union Architecture Document
-*Session Migration Handoff · May 2026 · End of Phase 3 Build Sprint*
+# Cue — Project specification (engineering)
+
+*Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 3 behaviour (scheduler, ET constants, `llm-smoke`, registry split).*
+
+**Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`spec/cue-db-schema.md`** (SQL snippets + read patterns + deferred items), **`.cursor/rules/db-schema.md`** (short table aligned to applied `src/db/migrations/*.sql`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
 ---
 
-## 1. Core Stack & Philosophy
+## 1. What Cue is
 
-**Runtime:** Node.js 22+, TypeScript strict ESM, `tsx` for execution.
-**DB:** SQLite via `better-sqlite3`. No ORM. Raw prepared statements only.
-**HTTP:** `axios` exclusively — no `fetch`, no `got`. Stack consistency with fetcher.
-**Validation:** `zod` for all external data boundaries (LLM output, API responses).
-**Testing:** `vitest`.
-**Logging:** `winston` — structured JSON to stdout. **`pipeline`** logger for scheduled / subprocess pipeline; **`cue-cli`** logger for `src/cli.ts` subcommands.
-**Package Manager:** `pnpm`.
+Cue is a **personal US equity swing-trading signal engine** for the **Nasdaq 100**. It screens using **12-1 cross-sectional momentum**, enriches BUY candidates with **LLM** context, and delivers **Telegram** alerts plus a **static HTML** dashboard. **No automated execution** — you place orders manually (e.g. IndMoney).
 
-**Philosophy:** Minimal dependency surface. No Express, no React, no ORMs, no cron libraries. Every capability implemented with Node.js builtins or the locked stack above. Single-file HTML dashboard output. Manual execution via IndMoney app — Cue signals, human executes.
-
-**Market:** Nasdaq 100 universe. US Equities only. EOD data only — no intraday.
-**Infra Budget:** ~$10/month VPS target.
+**Relationship to Market Pulse AI:** Same operator may host both on one **Oracle Cloud** VM, but they are **separate repos**, **separate SQLite files**, and **separate PM2** apps. Market Pulse is **IST** / Indian equities; Cue is **`America/New_York`** civil calendar / US EOD.
 
 ---
 
-## 2. Strategy Engine (LOCKED — DO NOT MODIFY)
+## 2. Core stack (LOCKED)
 
-**Factor:** Jegadeesh-Titman 12-1 Cross-Sectional Momentum.
-**Formula:** `(close[today-21] - close[today-252]) / close[today-252]`
-**Universe:** Nasdaq 100 (currently 7-ticker dev subset during build).
-**Regime Filter:** QQQ > SMA(200). If false → suppress all new BUY signals. SELL/stop evaluation continues regardless.
-**Rebalance:** Weekly, Friday EOD (`REBALANCE_DAY_OF_WEEK = 5`).
-**Entry:** Top 3 tickers by momentum rank (`topN = 3`).
+| Concern | Choice |
+|---|---|
+| Runtime | Node.js **22+**, TypeScript **strict ESM**, **`tsx`** |
+| Database | **SQLite** via `better-sqlite3`; no ORM; prepared statements in `src/db/queries.ts` |
+| HTTP | **`axios` only** (no `fetch` / `got`) |
+| Validation | **`zod`** at env, API, and LLM JSON boundaries |
+| Logging | **`winston`** JSON to stdout — services: **`cue-cli`**, **`pipeline`**, **`scheduler`** |
+| Tests | **vitest** |
+| Package manager | **pnpm** (see `packageManager` in `package.json`) |
+| Process manager (VPS) | **PM2** — `deploy/ecosystem.config.cjs` runs `tsx` on **`src/cli.ts`** (see §8) |
 
-**ATR Trailing Stop (Close-based):**
-- Period: ATR(14)
-- Base multiplier: `4.0x` ATR
-- Tight multiplier: `1.5x` ATR — triggered when unrealized profit ≥ 25%
-- Golden Rule: stop never moves down
+**Philosophy:** Small dependency surface — no Express, no React, no ORMs, no required cron library (scheduler uses `setInterval`). Single-file dashboard output under `dist/`.
 
-**Failsafe:** `MAX_HOLD_DAYS = 40`.
+**Market:** Nasdaq 100 + **QQQ** for regime. **EOD only** — no intraday.
 
-**Validated Backtest Benchmarks (Phase 1 Gate — LOCKED):**
+**Infra:** Oracle Cloud Always Free–class VM is the design target (~**$10/mo** budget narrative in arch doc).
+
+---
+
+## 3. Strategy engine (LOCKED — do not modify without re-gating backtests)
+
+### 3.1 Factor
+
+**Jegadeesh–Titman 12-1 cross-sectional momentum**
+
+```
+momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
+```
+
+- **Universe:** tickers from `data/universe/nasdaq100.json` (plus **QQQ** for regime / data).
+- **Entry:** top **3** names by momentum rank on rebalance.
+- **Rebalance cadence:** **Friday** EOD in ET civil calendar (`REBALANCE_DAY_OF_WEEK = 5` in `daily-workflow.ts`).
+- **Regime filter:** **QQQ close > SMA(200)**. If false → **suppress new BUYs**; SELL / stop paths still run.
+
+### 3.2 ATR trailing stop (close-based)
+
+- **Period:** ATR(14)
+- **Base multiplier:** **4.0×** ATR  
+- **Tight multiplier:** **1.5×** ATR when unrealized profit **≥ 25%**
+- **Golden rule:** stop **never** moves down (`new_stop = MAX(candidate, current_stop_loss)` in application logic).
+
+**Failsafe:** **`MAX_HOLD_DAYS`** (env, default **40**).
+
+**Exit reasons (conceptual):** trailing stop, initial stop, time exit, manual — see screener / stop CLI.
+
+### 3.3 Validated backtest benchmarks (Phase 1 gate — LOCKED)
 
 | Metric | Result | Gate |
 |---|---|---|
 | CAGR | 21.39% | > 12% |
-| Max Drawdown | 11.54% | < 20% |
-| Sharpe Ratio | 1.162 | > 1.0 |
+| Max drawdown | 11.54% | < 20% |
+| Sharpe | 1.162 | > 1.0 |
 | Expectancy | +4.78% | > 0 |
 
-*Test window: 2023-01-01 → 2025-12-31. Do not accept engine modifications that degrade these.*
+*Window: 2023-01-01 → 2025-12-31. Do not merge engine changes that fail these gates.*
 
 ---
 
-## 3. Pipeline Architecture
+## 4. Pipeline architecture
 
-### Unified CLI (`src/cli.ts`)
+### 4.1 Unified CLI
 
-All operational entry points go through **`pnpm run cue <subcommand>`** (Commander). Examples: `cue ingest`, `cue screen`, `cue enrich`, `cue brief`, `cue execute-stops`, `cue run-all`, `cue schedule`, `cue doctor`, `cue db:migrate`. Use `pnpm run cue --help` and `pnpm run cue <cmd> --help` for flags.
+All operations: **`pnpm run cue -- <subcommand>`**. Help: **`pnpm run cue -- --help`**. Full matrix: **`README.md`**.
 
-### Run Modes (`src/agents/daily-workflow.ts`)
+### 4.2 Run modes (registry vs scheduler)
 
-| Mode | Trigger | Steps (subprocesses = `pnpm run cue -- …`) |
+The **architecture v1** doc describes modes as `fetch → screen → …`. In **this repo**, the **ingest** step is `cue ingest`, and delivery is **`cue brief`** (dashboard + Telegram). Two orchestration layers exist:
+
+| Mechanism | Source | When used | Steps (subprocess = `pnpm run cue -- …`) |
+|---|---|---|---|
+| **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: Friday → **`rebalance`**: ingest → screen → enrich → brief; else **`stop`**: ingest → screen → brief. |
+| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **ET window 16:05–16:15**, **`America/New_York`**, once per ET calendar day, **`isRunning`** lock. **Friday:** ingest → enrich-fundamentals → screen → enrich → brief (mode **`rebalance`** for `forwardArgs`). **Mon–Thu:** ingest → execute-stops → brief (mode **`stop`**). **Sat/Sun:** no chain. |
+
+`pnpmRunArgs` / `resolvedForwardArgs` add **`--force-rebalance`** to **screen** when pipeline mode is `rebalance`, and **`--mode`** to **brief**.
+
+### 4.3 Step type (`PipelineStep`)
+
+```ts
+// src/agents/daily-workflow.ts — conceptual shape
+interface PipelineStep {
+  name: string;
+  cueArgs: string[];       // argv after `pnpm run cue --`
+  critical: boolean;
+  runOn: "rebalance" | "stop" | "both";
+  forwardArgs?: string[]; // e.g. ["--mode"] → ["--mode", "<mode>"]
+}
+```
+
+**Criticality (today):** **ingest** + **screen** = critical; **enrich** = non-critical; **brief** = non-critical (dashboard/alerts should not hard-block each other).
+
+### 4.4 Scheduler tick sequence (`scheduler.ts`)
+
+1. Resolve ET civil **date** / **time** via `Intl.DateTimeFormat` using **`CUE_LOCALE`** + **`CUE_TIME_ZONE`** from `src/config/cue-timezone.ts`.
+2. If outside **16:05–16:15** ET → return.
+3. If **`lastRunDate`** already recorded success for this ET **YYYY-MM-DD** → return.
+4. If **weekend** (NY weekday 0 or 6) → return (debug log).
+5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines).
+6. Else run **`runPipelineWithSteps`** for Friday vs Mon–Thu lists; on exit code **0**, set **`lastRunDate`**.
+
+**Startup / shutdown:** readonly DB **`SELECT 1`** for health; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **close** DB, **`process.exit(0)`**.
+
+### 4.5 Alert / brief mode gating (Phase 3 behaviour)
+
+`src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**. **BUY** alerting is gated for **rebalance**-style runs; **stop** runs should not spam BUY Telegram noise (see dispatcher + `brief` forwarding). Invalid/missing mode should fail loudly in those code paths.
+
+---
+
+## 5. Module map (canonical)
+
+| Concern | Path | CLI / entry |
 |---|---|---|
-| `rebalance` | Friday EOD (America/New_York) or `--force-rebalance` | ingest → screen → enrich → brief |
-| `stop` | Mon–Thu | ingest → screen → brief |
-
-`brief` builds `dist/dashboard.html` and runs Telegram dispatch (`--mode rebalance|stop` forwarded).
-
-### Step registry (`PIPELINE_STEPS` in `daily-workflow.ts`)
-
-Each step is a `PipelineStep`: `name`, `cueArgs` (argv after `pnpm run cue --`), `critical`, `runOn`, optional `forwardArgs` (e.g. `--mode` → `--mode <resolved>`).
-
-**Criticality (current):** `ingest` + `screen` critical; `enrich` non-critical; `brief` non-critical (alerts must not block dashboard delivery).
-
-### Module map (canonical paths)
-
-| Concern | Path | CLI |
-|---|---|---|
-| CLI router | `src/cli.ts` + `src/cli/cue-logger.ts` + `src/cli/doctor.ts` | `pnpm run cue …` |
-| ET locale / zone | `src/config/cue-timezone.ts` | `CUE_LOCALE`, `CUE_TIME_ZONE` (scheduling + ingest date alignment) |
-| Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` / `pnpm run ingest` |
-| Fundamentals (Phase 4) | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
+| CLI | `src/cli.ts`, `src/cli/cue-logger.ts`, `src/cli/doctor.ts`, `src/cli/llm-smoke.ts` | `pnpm run cue -- …` |
+| ET constants | `src/config/cue-timezone.ts` | `CUE_LOCALE`, `CUE_TIME_ZONE` |
+| Env | `src/config/index.ts` | `getConfig()` |
+| Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
+| Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` |
-| LLM enrich | `src/agents/thesis-generator.ts` + `src/llm/enricher.ts` | `cue enrich` |
-| Alerts + dashboard | `src/briefing/telegram-dispatcher.ts`, `src/briefing/dashboard.ts` | `cue brief`, `cue brief:alert`, `cue brief:dashboard` |
-| Pipeline / registry | `src/agents/daily-workflow.ts` | `cue pipeline --now`, `cue run-all` |
-| Scheduler daemon | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` (no `--now`) |
+| LLM | `src/llm/provider.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
+| Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` |
+| Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
+| Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
+| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` |
+| DB | `src/db/migrations/*.sql`, `migrate.ts`, `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
-### Scheduler (daemon mode)
+---
 
-`cue schedule` (or `cue pipeline` without `--now`) runs **`src/agents/scheduler.ts`**: a 60s `setInterval` polling loop. On each tick:
+## 6. Data layer
 
-1. Compute current ET civil time via `Intl.DateTimeFormat` with locale `en-US` and IANA zone `America/New_York` (shared constants in `src/config/cue-timezone.ts`).
-2. Check execution window: `16:05–16:15 ET`.
-3. Idempotency guard: `lastRunDate` (`YYYY-MM-DD` ET) — skip if already ran successfully today.
-4. **Concurrency:** `isRunning` lock — if a prior tick’s pipeline is still executing, skip and log a warning (no overlapping subprocess chains).
-5. **Routing:** Friday → rebalance path (`ingest → enrich-fundamentals → screen → enrich → brief`); Mon–Thu → stop maintenance (`ingest → execute-stops → brief`). Sat/Sun: no dispatch.
+### 6.1 Prices — Massive.com
 
-**Startup:** opens a readonly `better-sqlite3` handle, `SELECT 1`, logs `scheduler_health` JSON, keeps the handle for the process lifetime.
+- **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — per-ticker aggs; **~400 calendar days** lookback (under vendor bar caps).
+- **Cache guard:** disk cache + **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants).
+- **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
-**Graceful shutdown:** `SIGINT` / `SIGTERM` clear the poll timer, **close** the parent readonly DB handle, then `process.exit(0)`.
+**Rate limit risk (from arch v1):** full **100** tickers × daily = many REST calls. **Grouped daily** endpoint migration is still a **scaling** task before aggressive automation (see §12).
+
+### 6.2 Enrichment context — Yahoo
+
+- **`yahoo-finance2`** via `src/llm/yahooContext.ts`; JSON under **`CACHE_DIR`**.
+
+### 6.3 LLM providers
+
+- **`src/llm/provider.ts`**: **`anthropic` | `openai` | `google` | `vertex`** (Vertex uses `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`).
+- **Contract:** `LLMProvider.complete(messages, maxTokens)`; structured output = **parse JSON + Zod** (`tryParseModelJson`, schemas in `types.ts` / enricher).
+- **Smoke:** `cue llm-smoke` → `src/cli/llm-smoke.ts`.
 
 ---
 
-## 4. Data Layer
+## 7. Schema & migrations
 
-### Ingest (`src/ingestors/massive-price-ingestor.ts`)
-
-- **Source:** Massive.com REST API (`POLYGON_API_KEY` env var — legacy name retained).
-- **Range:** ~400 calendar days lookback from range end. Guarded under Massive aggregate limits.
-- **Cache guard:** Disk OHLCV cache + `MAX(date) FROM daily_prices` vs expected last trading session.
-- **Known data lag:** Massive.com posts EOD data with ~1–2 day lag. `asOf` in the screen reflects last available bar.
-
-### Migrations (`src/db/migrations/`)
-
-- **DDL:** Numbered `*.sql` files only; ledger table `_migrations` records applied ids.
-- **Runner:** `src/db/migrations/migrate.ts`; **`src/db/schema.ts`** re-exports `initSchema` / `migrateTracked` for app entry and `pnpm run db:init`.
-
-### LLM enrichment (`src/llm/` + `src/agents/thesis-generator.ts`)
-
-- **Context source:** `yahoo-finance2` via `src/llm/yahooContext.ts` — news, earnings calendar, sector, market cap (JSON cache under `CACHE_DIR`).
-- **Providers:** `src/llm/provider.ts` + env `LLM_PROVIDER` (`anthropic` \| `openai` \| `google` \| `vertex`).
-- **Hallucination guard:** Zod schemas on model output; bounded prompts.
+- **Applied DDL:** `src/db/migrations/001_initial_schema.sql`, `002_create_fundamental_cache.sql`; ledger **`_migrations`**.
+- **Includes today’s repo:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`** (arch “S1/S2” **implemented** here; `spec/cue-db-schema.md` may still describe an older deployed snapshot — trust **`src/db/migrations`** first).
+- **`fundamentals_cache`:** table exists; CLI still primarily writes **disk** cache — DB upsert wiring is a follow-up.
+- **Extended SQL / read patterns / deferred `backtest_trades`:** **`spec/cue-db-schema.md`**.
 
 ---
 
-## 5. Key SQLite Tables (`db/cue.db`)
+## 8. Deployment
 
-- **`daily_prices`** — `(ticker, date)` UNIQUE. Massive.com OHLCV bars.
-- **`signals`** — BUY/SELL signals. BUY rows denormalized with momentum context: `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return`, `atr14`, `initial_atr_stop`, `alerted` flag.
-- **`enrichments`** — Per-signal LLM output: `sentiment`, `rationale`, `earnings_date`, `sector`, `confidence`.
-- **`positions`** — Live position tracker: `entry_date`, `entry_price`, `exit_date`, `highest_close_since_entry`, `current_stop_loss`.
-- **`fundamentals_cache`** — Phase 4 placeholder table for persisted fundamentals blobs (`ticker`, `as_of_date`); population TBD.
-- **`_migrations`** — Applied SQL migration ids.
-
-*Schema source files live under `src/db/migrations/`.*
+- **VM:** Oracle Cloud (e.g. `VM.Standard.E2.1.Micro`, Ubuntu) — same *class* of host as arch doc; **independent** PM2 process from Market Pulse.
+- **Repo layout on server:** e.g. `/opt/cue`; secrets **`chmod 600`** `.env`; PM2 **`env_file`**.
+- **Process:** `deploy/ecosystem.config.cjs` uses **`node_modules/.bin/tsx`** with args **`src/cli.ts pipeline`** (no `--now` → **scheduler**). Prefer **`src/cli.ts schedule`** in args for clarity.
+- **Logs:** PM2 `out_file` / `error_file` under `logs/` (see ecosystem).
 
 ---
 
-## 6. Environment Variables
+## 9. Guardrails
 
-| Variable | Description |
+Hard rules: **`.cursor/rules/cue-guardrails.md`** (*v1.1+ — enforcement paths match this repo*). Topics: QQQ SMA200 gate, momentum formula lock, ATR golden rule, pipeline criticality, **scheduler `isRunning` + `lastRunDate`**, LLM Zod validation, ingest DB currency guard, Telegram `--mode` behaviour.
+
+## 10. Environment variables
+
+See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
+
+| Variable | Role |
 |---|---|
-| `POLYGON_API_KEY` | Massive.com REST API key |
-| `LLM_PROVIDER` | `anthropic` \| `openai` \| `google` (default: `anthropic`) |
-| `ANTHROPIC_API_KEY` | Required if provider = anthropic |
-| `OPENAI_API_KEY` | Required if provider = openai |
-| `GOOGLE_AI_API_KEY` | Required if provider = google |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot credentials |
-| `TELEGRAM_CHAT_ID` | Telegram target chat |
+| `POLYGON_API_KEY` | Massive REST |
+| `DB_PATH`, `CACHE_DIR`, `UNIVERSE` | Storage / universe label |
+| `LLM_PROVIDER`, provider keys, `VERTEX_*`, `LLM_MAX_TOKENS` | LLM |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alerts |
+| `LOG_LEVEL` | Winston |
+| Position / RSI / ATR params | `MAX_POSITIONS`, `POSITION_SIZE_USD`, `STOP_LOSS_PCT`, `MAX_HOLD_DAYS`, `SMA_PERIOD`, etc. |
 
 ---
 
-## 7. Completed Phases
+## 11. Phase history
 
 | Phase | Deliverable | Status |
 |---|---|---|
-| 1 — Core Engine | 12-1 Ranker + ATR stops + backtest validation | ✅ LOCKED |
-| 2 — AI & Alerts | LLM enrichment + Telegram alerts | ✅ LOCKED |
-| 3 — Dashboard | Static HTML dashboard + pipeline orchestrator | ✅ Functionally complete — VPS deployment pending |
+| 1 — Core engine | 12-1 ranker + ATR + backtest gate | ✅ LOCKED |
+| 2 — AI & alerts | LLM enrich + Telegram | ✅ LOCKED |
+| 3 — Dashboard + pipeline | HTML dashboard + **`daily-workflow`** registry + **`cue brief`** | ✅ Complete |
+| 3+ — Ops hardening (this repo) | **`scheduler.ts`** ET window, Fri vs Mon–Thu routes, **`isRunning`**, **`cue-timezone`**, **`llm-smoke`**, README / rules | ✅ Shipped here |
 
 ---
 
-## 8. Known Issues & Status
+## 12. Known issues & tracker
 
-| # | Severity | Issue | Status |
+| ID | Severity | Issue | Status |
 |---|---|---|---|
-| 1 | LOW | `rankedUniverse=0` logged on stop runs (misleading — ranking intentionally skipped) | Open — cosmetic fix pending |
-| 2 | FIXED | `--force-rebalance` not propagating from pipeline to screen subprocess | ✅ Fixed via `forwardArgs` in step registry |
-| 3 | FIXED | Fetcher cache guard checked request recency, not DB currency — stale data on Mondays | ✅ Fixed via `MAX(date)` vs `expectedLastTradingDate` |
-| 4 | FIXED | Massive.com 499-bar cap truncating recent closes — range was 5yr, now 400 days | ✅ Fixed |
-| 5 | FIXED | BUY Telegram noise on stop runs | ✅ `brief` forwards `--mode`; dispatcher suppresses BUY sends when `mode=stop` |
-| 6 | DATA | Massive.com 1–2 day EOD data lag — `asOf` trails real date | Accepted limitation — not fixable in code |
-| 7 | DATA | `GOOGL BUY 2026-05-19 alerted=1` was sent prematurely by a stop run | Needs manual DB reset: `UPDATE signals SET alerted=0 WHERE ticker='GOOGL' AND signal_date='2026-05-19'` |
+| S4 | **HIGH** | Massive **free-tier / call count**: per-ticker daily fetch × full universe may hit limits — migrate to **grouped daily** endpoint (arch §6.1) | Open — scaling |
+| S5 | LOW | `rankedUniverse=0` log on stop runs (misleading) | Open — cosmetic |
+| S6 | LOW | No `backtest_trades` table — run-level stats only | Deferred (see `spec/cue-db-schema.md`) |
+| — | DATA | Massive EOD **lag** 1–2d | Accepted |
+| — | FIXED (repo) | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs` |
+| — | FIXED (repo) | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard |
+| — | FIXED (repo) | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher |
+| — | FIXED (arch S3) | Scheduler overlap | ✅ **`isRunning`** in `scheduler.ts` |
+| — | FIXED (arch S1/S2) | Positions columns + signals uniqueness | ✅ **`001_initial_schema.sql`** |
 
 ---
 
-## 9. Immediate Next Steps (Phase 3 Completion)
+## 13. Phase 4+ engineering backlog (from arch §11, reconciled)
 
-### 9.1 — Follow-ups
-
-- **Fundamentals cache:** wire `cue enrich-fundamentals` output into `fundamentals_cache` rows (migration + queries).
-- **Systemd:** replace ad-hoc PM2 notes with `cue.service` if moving off PM2 (see §9.2).
-
-### 9.2 — TODO: VPS Deployment (Phase 3 Gate)
-- Write `cue.service` systemd unit file
-- `EnvironmentFile` for secrets (not inline env vars)
-- `Restart=on-failure`, `RestartSec=30`
-- Logs via `journald` (stdout → systemd)
-- `systemctl enable cue` for boot persistence
-- Target OS: **confirm in next session**
-
-### 9.3 — TODO: Winston File Transport (optional but recommended)
-- Add rotating file output: `logs/cue.log`
-- 14-day retention
-- Independent paper trail from journald
-
-### 9.4 — COSMETIC: Fix misleading `rankedUniverse=0` log on stop runs
+| Task | Notes |
+|---|---|
+| **Grouped Massive fetch** | Reduce REST calls for 100 names / day |
+| **Wire `fundamentals_cache`** | From `enrich-fundamentals` into SQLite |
+| **Cosmetic logs** | `rankedUniverse=0` on intentional skip |
+| **`backtest_trades`** | Per-trade audit (Phase 5 spec) |
+| **Quality-GARP** (research) | Arch doc: backtest before any new production screener |
+| **systemd unit** | Optional alternative to PM2 (`cue.service`, `EnvironmentFile=`) |
+| **Winston file transport** | Optional rotating `logs/cue.log` |
 
 ---
 
-## 10. Documents to Attach in Next Session
+## 14. Document index
 
-**Required:**
-- `db-schema.md` — exported SQLite schema (all tables, columns, constraints, indexes)
-
-**Recommended:**
-- This document (`state-of-union.md`)
-
-**Retire after next session:**
-- `Cue_Spec_v1.4.md` and `session_handoff.md` are now **superseded** by this document. They contain outdated parameter references (`topN=5`, `ATR 2.0x`, `15%` trigger) that conflict with locked values. **Do not attach them in the next session** — they will create contradictions. This SoU doc is the single source of truth going forward. If a formal spec is needed for external audiences, generate a clean `Cue_Spec_v2.0.md` from this document.
+| Document | Role |
+|---|---|
+| `spec/cue-architecture-v1.md` | **Frozen** narrative SoU + Phase 4 plan wording — **do not edit in Cursor tasks unless the user explicitly asks** |
+| `spec/cue-db-schema.md` | Deep schema narrative, example queries, deferred migrations |
+| `.cursor/rules/db-schema.md` | Short agent summary tied to **applied** migrations |
+| `.cursor/rules/cue-guardrails.md` | Hard constraints (**paths aligned to this repo** in v1.1) |
+| `README.md` | Operator-facing commands + quickstart |
+| `.cursor/rules/project-spec.md` | **This file** — repo-accurate engineering spec |
 
 ---
 
-*End of State of the Union · Next session begins at §9.1*
+*End of project-spec — prefer `src/db/migrations` and `src/agents/*.ts` over prose when in doubt.*

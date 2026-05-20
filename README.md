@@ -1,167 +1,246 @@
-# Cue — US equity signal pipeline
+# Cue
 
-Nasdaq 100 momentum system: SQLite + Massive EOD ingest, live momentum screen (ATR trailing stops), LLM enrichment, Telegram alerts, and a static HTML dashboard. Strategy math and backtest gates are documented in `.cursor/rules/project-spec.md`.
+A **personal US-equity signal and briefing pipeline** for the **Nasdaq 100** (plus QQQ as regime context). It ingests end-of-day prices, ranks momentum, applies a QQQ regime gate and ATR-style trailing stops, optionally enriches new BUY candidates with an LLM, and delivers a **static HTML dashboard** plus **Telegram** alerts.
 
-## Requirements
+**Not an auto-trader** — Cue does not place orders. You review signals and execute trades yourself (for example via a broker app). The system is built as **small, testable TypeScript modules** plus a **SQLite** ledger so you can re-run any stage in isolation.
 
-- Node.js 22+
-- [pnpm](https://pnpm.io/) 9+ (lockfile targets **pnpm 10** via `packageManager`; use `corepack enable` if needed)
-- `better-sqlite3` **v11** ships a wider set of **prebuilt** binaries (same major as other internal projects); if install still compiles from source, you need a working Apple / LLVM toolchain (see [Troubleshooting](#troubleshooting-native-sqlite-build)).
+> **Status:** Core engine, LLM enrichment, dashboard, Telegram, and **unattended scheduler** are in place. EOD data comes from **Massive.com** (Polygon-compatible key in env). Scheduling and all “market day” logic use **`America/New_York`** civil time with locale **`en-US`** (see `src/config/cue-timezone.ts`). Phase 4 **fundamentals** path: Yahoo context is cached on disk; `fundamentals_cache` exists for future persistence.
 
-## Setup
+---
 
-1. Install dependencies:
+## Why this exists
 
-   ```bash
-   pnpm install
-   ```
+Retail tools often optimize for either raw charts or a black-box screener. Cue sits in the middle: **repeatable rules** (momentum, regime, stops) plus **optional LLM context** (news, sector, earnings proximity) so you get a short, structured view before the US cash session — without paying for a bundled terminal you do not need.
 
-   If `better-sqlite3` fails to compile on macOS, use **install JS first, then rebuild native** (see [Troubleshooting: native SQLite build](#troubleshooting-native-sqlite-build) below):
+**What it does on a cadence you control:**
 
-   ```bash
-   pnpm install --ignore-scripts
-   # then follow the macOS SDK / CXXFLAGS steps and run:
-   pnpm run rebuild:native
-   ```
+- Pulls **EOD OHLCV** for the configured universe and stores it in SQLite.
+- **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
+- On **Friday rebalance** path: fundamentals prefetch (cache), full screen with `--force-rebalance`, LLM enrich for pending BUYs, then brief.
+- On **Mon–Thu stop** path: price refresh, **execute-stops** maintenance, then brief (no full rebalance screen).
+- Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
-2. Copy environment template and adjust values (see `src/config/index.ts` / `.env.example` for required keys):
+Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/project-spec.md`**. Table-by-table schema notes: **`.cursor/rules/db-schema.md`**.
 
-   ```bash
-   cp .env.example .env
-   ```
+---
 
-3. Initialize the database (applies all pending SQL migrations in `src/db/migrations/`):
+## Architecture
 
-   ```bash
-   pnpm run db:init
-   ```
+Stages write to **SQLite** (`better-sqlite3`) so you can debug or backtest without re-hitting vendors.
 
-   To re-run migrations on an existing file (prints applied/skipped ids):
+```mermaid
+flowchart LR
+  subgraph ManualOrCron["Operator / systemd / PM2"]
+    CLI["pnpm run cue …"]
+  end
+  CLI --> Ingest["ingest\nMassive EOD"]
+  Ingest --> DB[("SQLite\ndaily_prices, signals,\npositions, enrichments")]
+  DB --> Screen["screen\nmomentum + regime"]
+  Screen --> DB
+  DB --> Fund["enrich-fundamentals\nYahoo → cache"]
+  Fund --> Disk[("disk cache\nCACHE_DIR")]
+  DB --> Stops["execute-stops\nMon–Thu scheduler"]
+  Stops --> DB
+  DB --> LLM["enrich\nLLM + Yahoo context"]
+  LLM --> DB
+  DB --> Brief["brief\ndashboard + Telegram"]
+  Brief --> Out["dist/*.html\nTelegram API"]
+  Sched["scheduler.ts\n60s poll, ET window"] -.->|"subprocess chain"| CLI
+```
 
-   ```bash
-   pnpm run db:migrate
-   ```
+**Two orchestration paths:**
 
-4. Run tests:
+| Path | Entry | Behaviour |
+|------|--------|-----------|
+| **Registry pipeline** | `cue run-all`, `cue pipeline --now` | `daily-workflow.ts`: `detectRunMode()` from ET weekday + `PIPELINE_STEPS` — ingest → screen → enrich (Fri only) → brief. |
+| **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | `scheduler.ts`: **16:05–16:15 ET** window, once per ET day, **`isRunning`** lock; **Friday** runs ingest → enrich-fundamentals → screen → enrich → brief; **Mon–Thu** runs ingest → execute-stops → brief; **Sat/Sun** idle. |
 
-   ```bash
-   pnpm test
-   ```
+**LLM:** `src/llm/provider.ts` chooses **Anthropic**, **OpenAI**, **Google AI**, or **Vertex AI** from `LLM_PROVIDER`. The runtime contract is `LLMProvider.complete(messages, maxTokens)`; structured outputs are validated with **Zod** after parsing JSON from the model.
 
-5. Optional: typecheck and lint:
+---
 
-   ```bash
-   pnpm run typecheck
-   pnpm run lint
-   ```
+## Tech stack
 
-## CLI (`pnpm run cue`)
+| Layer | Choice |
+|-------|--------|
+| Runtime | Node.js **22**+, TypeScript **strict**, **ESM** |
+| Package manager | **pnpm** 10 (`packageManager` in `package.json`) |
+| DB | **SQLite** via `better-sqlite3` (migrations under `src/db/migrations/`) |
+| CLI | **commander** (`src/cli.ts`) |
+| HTTP | **axios** (Massive, LLM vendor APIs) |
+| Validation | **zod** (env, APIs, LLM JSON) |
+| Logging | **winston** (`cue-cli`, `pipeline`, `scheduler` services) |
+| Tests | **vitest** |
 
-Entry point: `tsx src/cli.ts` (script name **`cue`**). Granular subcommands for diagnostics and automation:
+---
 
-| Command | Purpose |
-|---------|---------|
-| `pnpm run cue --help` | List all subcommands |
-| `pnpm run cue db:migrate` | Apply numbered `*.sql` under `src/db/migrations/` (`_migrations` ledger) |
-| `pnpm run cue ingest` | Massive / Polygon EOD OHLCV (`--ticker` optional) |
-| `pnpm run cue enrich-fundamentals` | Yahoo context → disk cache (Phase 4; `--ticker` / `--limit` / `--force`) |
-| `pnpm run cue screen` | Live momentum screen (`--ticker` probe, `--force-rebalance`) |
-| `pnpm run cue enrich` | LLM enrich pending BUYs |
-| `pnpm run cue brief` | Dashboard HTML + Telegram (`--mode`, `--skip-*`, `--open`) |
-| `pnpm run cue execute-stops` | Stop-day path only (stops / max-hold, no rebalance BUYs) |
-| `pnpm run cue run-all` | One-shot full pipeline (same step order as scheduler) |
-| `pnpm run cue schedule` | Long-running ET window scheduler (16:05–16:15) |
-| `pnpm run cue doctor` | Config + DB probe + env key presence (no secrets printed) |
-| `pnpm run cue pipeline` | Legacy: `--now` = one-shot; no flag = same as `schedule` |
+## Quickstart
 
-Shortcuts in `package.json` include `ingest`, `screen`, `pipeline`, `pipeline:now`, `schedule`, `run-all`, `doctor`, `execute-stops`, `enrich-fundamentals`, etc.
+```bash
+pnpm install
+cp .env.example .env   # fill POLYGON_API_KEY, TELEGRAM_*, LLM keys, etc.
 
-## Database migrations
+# Create DB parent dir + apply migrations (see package.json shortcuts)
+pnpm run db:init       # or: pnpm run db:migrate
 
-- **Source of truth:** `src/db/migrations/*.sql` (lexicographic order).
-- **Runner:** `src/db/migrations/migrate.ts` (creates `_migrations`, runs each file once).
-- **Public entry:** `src/db/schema.ts` exports `initSchema`, `migrateTracked`, `runDbInitFromConfig`.
-- See `src/db/migrations/README.md` for naming conventions.
+pnpm run cue -- doctor    # config + DB probe (no secrets printed)
+pnpm test
+pnpm run typecheck && pnpm run lint
+```
 
-## Architecture reference
+**Verify LLM wiring before a long run:**
 
-Authoritative high-level architecture, pipeline registry, and locked strategy parameters: **`.cursor/rules/project-spec.md`**. (Optionally keep a personal copy under `spec/` — that directory is gitignored.)
+```bash
+pnpm llm-smoke
+# → three steps: plain text, small JSON, mini thesis JSON (timings printed)
+```
+
+**One-shot full registry pipeline (subprocess chain):**
+
+```bash
+pnpm run-all
+# same step set as `cue pipeline --now` / daily-workflow registry
+```
+
+**Long-running scheduler (VPS / systemd):**
+
+```bash
+pnpm schedule
+# 60s polling, fires inside 16:05–16:15 America/New_York when ET weekday matches
+```
+
+---
+
+## CLI reference
+
+All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -- --help`**). The repo also defines **pnpm script shortcuts** where helpful.
+
+### Core
+
+| Command | Description |
+|---------|-------------|
+| `pnpm run cue -- --help` | List subcommands (sorted) |
+| `pnpm run cue -- db:migrate` | Apply pending `src/db/migrations/*.sql` (ledger `_migrations`) |
+| `pnpm run cue -- doctor` | Diagnostics: config shape, DB file, required env keys (no secret values) |
+
+### Data & screen
+
+| Command | Description |
+|---------|-------------|
+| `pnpm run cue -- ingest` | Massive EOD OHLCV for universe (+ QQQ). Options: `--ticker SYM`, `--force` (reserved) |
+| `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache (`--ticker`, `--limit`, `--force`, `--date` reserved) |
+| `pnpm run cue -- screen` | Momentum screener / ranking. `--ticker`, `--force-rebalance` |
+| `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--dry-run` reserved |
+
+### LLM & brief
+
+| Command | Description |
+|---------|-------------|
+| `pnpm run cue -- enrich` | LLM enrichment for pending BUY signals (`thesis-generator`) |
+| `pnpm run cue -- llm-smoke` | Live smoke: text + JSON + mini thesis (`pnpm llm-smoke`) |
+| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
+| `pnpm run cue -- brief:dashboard` | Write `dist/dashboard.html` only (`pnpm dashboard`, `pnpm dashboard:open`) |
+| `pnpm run cue -- brief:alert` | Telegram only (internal; expects `--mode` in argv) |
+
+### Orchestration
+
+| Command | Description |
+|---------|-------------|
+| `pnpm run cue -- run-all` | One-shot **registry** pipeline via subprocesses (`pnpm run-all`) |
+| `pnpm run cue -- pipeline --now` | Same as `run-all` (explicit one-shot) |
+| `pnpm run cue -- pipeline` | **No `--now`:** same daemon as **`pnpm run cue -- schedule`** |
+| `pnpm run cue -- schedule` | Scheduler daemon (`pnpm schedule`) |
+
+### Other scripts (`package.json`)
+
+| Script | Maps to |
+|--------|---------|
+| `pnpm cue` | `tsx src/cli.ts` (pass args after `--`) |
+| `pnpm db:init` | `tsx src/db/schema.ts` (init + migrate from config) |
+| `pnpm db:migrate` | `pnpm run cue -- db:migrate` |
+| `pnpm backtest` | `tsx src/backtest/runner.ts` |
+| `pnpm ingest` / `pnpm fetch` | `pnpm run cue -- ingest` |
+| `pnpm screen` | `pnpm run cue -- screen` |
+| `pnpm enrich` | `pnpm run cue -- enrich` |
+| `pnpm brief` | `pnpm run cue -- brief` |
+| `pnpm pipeline` / `pnpm pipeline:now` | `pnpm run cue -- pipeline` / `pnpm run cue -- pipeline --now` |
+| `pnpm rebuild:native` | `pnpm rebuild better-sqlite3` |
+
+---
+
+## Configuration
+
+1. **`.env`** — validated at startup by `src/config/index.ts` (`zod`). See **`.env.example`** for variables.
+2. **`DB_PATH`** — default `./db/cue.db`.
+3. **`CACHE_DIR`** — Yahoo / ingest caches (default `./data/cache`).
+4. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google` \| `vertex` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
+
+Strategy thresholds (`MAX_POSITIONS`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see `project-spec.md` for **locked** momentum / ATR / regime rules.
+
+---
+
+## Timezone
+
+All **calendar day** and **scheduler window** logic for the US equity pipeline uses:
+
+- **`CUE_TIME_ZONE`** = `America/New_York`
+- **`CUE_LOCALE`** = `en-US`
+
+Defined in **`src/config/cue-timezone.ts`** and used from ingest date helpers, `daily-workflow.ts`, and CLI copy where relevant.
+
+---
+
+## Deployment notes
+
+- **PM2:** `deploy/ecosystem.config.cjs` runs `tsx` on `src/cli.ts pipeline` (no `--now` → same scheduler as **`cue schedule`**). Prefer `args: 'src/cli.ts schedule'` if you want the explicit subcommand in logs.
+- **systemd:** run `cue schedule` (or `cue pipeline`) as a `Type=simple` long-lived service; send `SIGTERM` for clean shutdown (scheduler closes its readonly DB handle).
+
+---
+
+## Repo layout (high level)
+
+```
+cue/
+  src/
+    agents/           thesis-generator, daily-workflow (registry), scheduler.ts (daemon)
+    analysers/        momentum-screener (screen, execute-stops CLI)
+    briefing/         dashboard HTML, Telegram dispatcher
+    cli/              doctor, llm-smoke helpers
+    config/           env (zod), cue-timezone.ts
+    db/               migrations/, queries.ts, provider.ts, schema.ts
+    enrichers/        momentum types / math used by screener
+    ingestors/        Massive price ingest, enrich-fundamentals CLI
+    llm/              provider adapters, enricher, prompt, yahooContext
+    backtest/         historical runner (separate tsx entry)
+  deploy/             PM2 ecosystem example
+  tests/              vitest
+```
+
+---
+
+## Development
+
+```bash
+pnpm test              # vitest run
+pnpm test:watch
+pnpm run typecheck     # tsc --noEmit
+pnpm run lint          # eslint
+```
+
+Conventions: strict TypeScript, ESM **`import`/`export`**, no ORM (prepared SQL in `queries.ts`), env only through **`getConfig()`**.
+
+---
 
 ## Troubleshooting: native SQLite build
 
-Symptom: **`fatal error: 'climits' file not found`** while building **`better-sqlite3`**. Cue pins **`better-sqlite3` v11** (like other repos here) so **`prebuild-install` usually downloads a binary** for Node 22 on macOS and you never hit this. If you still see it, the prebuild was missing for your exact ABI and **node-gyp** is compiling from source.
+If **`better-sqlite3`** fails to compile (e.g. **`'climits' file not found`** on macOS), see the detailed **SDK / `CXX` single-path** instructions in the previous README section — the fix is **`pnpm install --ignore-scripts`**, set **`SDKROOT`** + **`CXXFLAGS`**, then **`pnpm run rebuild:native`**.
 
-That compile must see the macOS SDK (**`-isysroot`**). Also, **`CXX` must be a single path** (no spaces); see step 2 below.
+---
 
-### Why `CXX="xcrun -sdk macosx clang++"` often still fails
+## Disclaimer
 
-`node-gyp` drives **GNU make**. **`CXX` must be a single executable path** (no spaces). A multi-word `CXX` is split or mishandled, so the C++ compile can run **without** the SDK flags you intended.
+> This software is for **personal research and education** only. It is **not** investment advice. The authors are not responsible for trading losses. US market data may lag vendor publication; always verify prices and filings with your broker and official sources.
 
-### Fix (recommended order)
+---
 
-1. Install all JavaScript dependencies **without** running lifecycle scripts (so `tsx`, `vitest`, etc. are present even when native build fails):
-
-   ```bash
-   rm -rf node_modules
-   pnpm install --ignore-scripts
-   ```
-
-2. In the **same terminal**, set a **single-word** compiler and pass the SDK via **flags**:
-
-   ```bash
-   export SDKROOT="$(xcrun --show-sdk-path)"
-   export CC="$(command -v clang)"
-   export CXX="$(command -v clang++)"
-   export CXXFLAGS="-isysroot $SDKROOT -stdlib=libc++"
-   export LDFLAGS="-isysroot $SDKROOT"
-   pnpm run rebuild:native
-   ```
-
-   If `command -v clang++` points at a non-Apple toolchain, use the Command Line Tools binaries explicitly (keep the same `SDKROOT`, `CXXFLAGS`, and `LDFLAGS`):
-
-   ```bash
-   export CC="/Library/Developer/CommandLineTools/usr/bin/clang"
-   export CXX="/Library/Developer/CommandLineTools/usr/bin/clang++"
-   export CXXFLAGS="-isysroot $SDKROOT -stdlib=libc++"
-   export LDFLAGS="-isysroot $SDKROOT"
-   ```
-
-   Then run `pnpm run rebuild:native`.
-
-3. Then run `pnpm run db:init` and `pnpm test` as usual.
-
-To make native installs reliable, you can add the same `export` block (step 2) to `~/.zshrc` **before** `pnpm install` without `--ignore-scripts`, or always use step 1 + 2 when setting up a new machine.
-
-### If `xcodebuild -license accept` failed
-
-That command only applies when the active developer directory is **full Xcode** (`/Applications/Xcode.app/...`). If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, you are on **CLT-only**; you do **not** need `xcodebuild -license` for this project.
-
-### If headers are still missing
-
-1. Update CLT: **System Settings → General → Software Update**, or:
-
-   ```bash
-   softwareupdate --list
-   ```
-
-2. Ensure the developer path is sensible:
-
-   ```bash
-   xcode-select -p
-   sudo xcode-select -s /Library/Developer/CommandLineTools   # CLT only
-   # or, if you use full Xcode:
-   # sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-   ```
-
-3. Confirm the toolchain sees C++ headers:
-
-   ```bash
-   xcrun -sdk macosx clang++ -v -E -x c++ /dev/null -o /dev/null
-   ```
-
-   You should see `-isysroot .../SDKs/MacOSX.sdk` and an include path under `.../include/c++/v1`.
-
-## Notes
-
-- Default DB path is `./db/cue.db` (override with `DB_PATH`).
-- PM2 / VPS: see `deploy/ecosystem.config.cjs` (`tsx src/cli.ts pipeline` or use `cue schedule` after aligning process manager args).
+*License: not specified in this repository; confirm with the maintainer.*
