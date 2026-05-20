@@ -8,6 +8,7 @@ import winston from "winston";
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
+import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
 import {
   loadUniverseTickers,
   tryLoadUniverseMeta,
@@ -146,42 +147,13 @@ function rangeEndYmd(): string {
   return formatEtYmd(new Date());
 }
 
-const ymdArgRegex = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Validates `YYYY-MM-DD` and that the calendar date exists (e.g. not 2026-02-31). */
-function parseExplicitSessionDate(raw: string): string {
-  const trimmed = raw.trim();
-  if (!ymdArgRegex.test(trimmed)) {
-    throw new Error(
-      `Invalid --date "${raw}": expected YYYY-MM-DD (example: 2026-05-19)`,
-    );
-  }
-  const [ys, ms, ds] = trimmed.split("-");
-  const y = Number(ys);
-  const m = Number(ms);
-  const d = Number(ds);
-  const civil = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  if (
-    civil.getUTCFullYear() !== y ||
-    civil.getUTCMonth() + 1 !== m ||
-    civil.getUTCDate() !== d
-  ) {
-    throw new Error(`Invalid --date "${raw}": not a valid calendar day`);
-  }
-  return trimmed;
-}
-
 function parseFetchArgs(argv: string[]): {
   ticker?: string;
   force: boolean;
   explicitSessionDate?: string;
 } {
   const force = argv.includes("--force");
-  const dateIdx = argv.indexOf("--date");
-  let explicitSessionDate: string | undefined;
-  if (dateIdx !== -1 && argv[dateIdx + 1] !== undefined && argv[dateIdx + 1]!.length > 0) {
-    explicitSessionDate = parseExplicitSessionDate(String(argv[dateIdx + 1]));
-  }
+  const explicitSessionDate = parseOptionalYmdFromArgv(argv, "--date");
 
   const idx = argv.indexOf("--ticker");
   if (idx !== -1 && argv[idx + 1] !== undefined && argv[idx + 1]!.length > 0) {

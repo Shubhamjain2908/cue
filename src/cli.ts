@@ -158,14 +158,21 @@ const screen = program
   .command("screen")
   .description("Momentum screener: live ranking / exits (or --ticker for BUY/HOLD probe)")
   .option("--ticker <symbol>", "print BUY/HOLD for one ticker")
+  .option(
+    "--date <ymd>",
+    "as-of session date YYYY-MM-DD (default: latest QQQ date in daily_prices)",
+  )
   .option("--force-rebalance", "treat as rebalance Friday-style screen", false);
 
 screen.action(
   wrap("screen", async () => {
-    const o = screen.opts<{ ticker?: string; forceRebalance: boolean }>();
+    const o = screen.opts<{ ticker?: string; forceRebalance: boolean; date?: string }>();
     const tail: string[] = [];
     if (o.ticker !== undefined && o.ticker.length > 0) {
       tail.push("--ticker", o.ticker.toUpperCase());
+    }
+    if (o.date !== undefined && o.date.length > 0) {
+      tail.push("--date", o.date);
     }
     if (o.forceRebalance) {
       tail.push("--force-rebalance");
@@ -247,16 +254,26 @@ program
     }),
   );
 
-program
+const executeStops = program
   .command("execute-stops")
   .description("Evaluate trailing stops / max-hold for OPEN positions (stop-day path only)")
   .option("--dry-run", "reserved: no DB writes", false)
-  .action(
-    wrap("execute-stops", async () => {
-      const { runExecuteStopsCli } = await import("./analysers/momentum-screener.js");
-      runExecuteStopsCli();
-    }),
+  .option(
+    "--date <ymd>",
+    "as-of session date YYYY-MM-DD (default: latest QQQ date in daily_prices)",
   );
+
+executeStops.action(
+  wrap("execute-stops", async () => {
+    const o = executeStops.opts<{ dryRun: boolean; date?: string }>();
+    const tail: string[] = [];
+    if (o.date !== undefined && o.date.length > 0) {
+      tail.push("--date", o.date);
+    }
+    const { runExecuteStopsCli } = await import("./analysers/momentum-screener.js");
+    runExecuteStopsCli(tail);
+  }),
+);
 
 program
   .command("run-all")
