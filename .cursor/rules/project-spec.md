@@ -76,23 +76,29 @@ Each step is a `PipelineStep`: `name`, `cueArgs` (argv after `pnpm run cue --`),
 | Concern | Path | CLI |
 |---|---|---|
 | CLI router | `src/cli.ts` + `src/cli/cue-logger.ts` + `src/cli/doctor.ts` | `pnpm run cue …` |
+| ET locale / zone | `src/config/cue-timezone.ts` | `CUE_LOCALE`, `CUE_TIME_ZONE` (scheduling + ingest date alignment) |
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` / `pnpm run ingest` |
 | Fundamentals (Phase 4) | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` |
 | LLM enrich | `src/agents/thesis-generator.ts` + `src/llm/enricher.ts` | `cue enrich` |
 | Alerts + dashboard | `src/briefing/telegram-dispatcher.ts`, `src/briefing/dashboard.ts` | `cue brief`, `cue brief:alert`, `cue brief:dashboard` |
-| Pipeline / scheduler | `src/agents/daily-workflow.ts` | `cue pipeline`, `cue pipeline --now`, `cue schedule`, `cue run-all` |
+| Pipeline / registry | `src/agents/daily-workflow.ts` | `cue pipeline --now`, `cue run-all` |
+| Scheduler daemon | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` (no `--now`) |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
 ### Scheduler (daemon mode)
 
-`cue schedule` (or `cue pipeline` without `--now`) starts a `setInterval` polling loop (60s tick). On each tick:
-1. Compute current ET time via `Intl.DateTimeFormat` (no moment/luxon).
-2. Check execution window: `16:05–16:15 ET`.
-3. Idempotency guard: `lastRunDate: string` (YYYY-MM-DD) — skip if already ran today.
-4. Dispatch `runPipeline(mode)` when window + date conditions met.
+`cue schedule` (or `cue pipeline` without `--now`) runs **`src/agents/scheduler.ts`**: a 60s `setInterval` polling loop. On each tick:
 
-**Graceful shutdown:** `SIGINT`/`SIGTERM` handlers call `process.exit(0)`.
+1. Compute current ET civil time via `Intl.DateTimeFormat` with locale `en-US` and IANA zone `America/New_York` (shared constants in `src/config/cue-timezone.ts`).
+2. Check execution window: `16:05–16:15 ET`.
+3. Idempotency guard: `lastRunDate` (`YYYY-MM-DD` ET) — skip if already ran successfully today.
+4. **Concurrency:** `isRunning` lock — if a prior tick’s pipeline is still executing, skip and log a warning (no overlapping subprocess chains).
+5. **Routing:** Friday → rebalance path (`ingest → enrich-fundamentals → screen → enrich → brief`); Mon–Thu → stop maintenance (`ingest → execute-stops → brief`). Sat/Sun: no dispatch.
+
+**Startup:** opens a readonly `better-sqlite3` handle, `SELECT 1`, logs `scheduler_health` JSON, keeps the handle for the process lifetime.
+
+**Graceful shutdown:** `SIGINT` / `SIGTERM` clear the poll timer, **close** the parent readonly DB handle, then `process.exit(0)`.
 
 ---
 

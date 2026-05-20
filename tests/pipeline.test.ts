@@ -6,11 +6,14 @@ import {
   detectRunMode,
   formatEtYmd,
   getEtMinutesSinceMidnight,
+  getNyCalendarWeekday,
   isWithinExecutionWindow,
   pnpmRunArgs,
   REBALANCE_DAY_OF_WEEK,
   runPipeline,
+  runPipelineWithSteps,
   stepsForMode,
+  type PipelineStep,
   weekdayUtcForNyCalendarDate,
 } from "../src/agents/daily-workflow.js";
 
@@ -119,6 +122,55 @@ describe("pnpmRunArgs", () => {
       "--mode",
       "rebalance",
     ]);
+  });
+});
+
+describe("getNyCalendarWeekday", () => {
+  it("agrees with weekdayUtcForNyCalendarDate for ET civil dates", () => {
+    const now = new Date("2026-01-09T16:10:00-05:00");
+    expect(getNyCalendarWeekday(now)).toBe(
+      weekdayUtcForNyCalendarDate(2026, 1, 9),
+    );
+  });
+
+  it("maps Sunday in ET", () => {
+    expect(getNyCalendarWeekday(new Date("2026-01-04T16:10:00-05:00"))).toBe(0);
+  });
+});
+
+describe("runPipelineWithSteps", () => {
+  const schedulerFridayLike: PipelineStep[] = [
+    { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+    { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
+    { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
+    { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "both" },
+    {
+      name: "brief",
+      cueArgs: ["brief"],
+      critical: false,
+      runOn: "both",
+      forwardArgs: ["--mode"],
+    },
+  ];
+
+  it("runs scheduler Friday order with rebalance screen flags", () => {
+    const calls: string[][] = [];
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
+      calls.push(args !== undefined ? [...args] : []);
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
+    }) as unknown as typeof spawnSync;
+
+    runPipelineWithSteps(schedulerFridayLike, "rebalance", { spawn });
+    const scripts = calls.map((a) => a[3]).filter((s): s is string => s !== undefined);
+    expect(scripts).toEqual([
+      "ingest",
+      "enrich-fundamentals",
+      "screen",
+      "enrich",
+      "brief",
+    ]);
+    const screenCall = calls.find((a) => a[3] === "screen");
+    expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
   });
 });
 

@@ -25,9 +25,7 @@ module.exports = {
     {
       name: 'cue',
       cwd: root,
-      // tsx executes pipeline.ts directly — no build step required.
-      // pipeline.ts runs a setInterval scheduler loop (per §3); this process
-      // is long-lived and should never exit cleanly under normal operation.
+      // tsx runs the CLI. Prefer `src/cli.ts schedule` (scheduler.ts); `pipeline` without --now is equivalent.
       script: 'node_modules/.bin/tsx',
       args: 'src/cli.ts pipeline',
       interpreter: 'none', // tsx is the interpreter — don't wrap with node
