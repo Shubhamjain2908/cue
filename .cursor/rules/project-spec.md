@@ -218,17 +218,17 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 ## 12. Known issues & tracker
 
-| ID | Severity | Issue | Status |
-|---|---|---|---|
-| S4 | **HIGH** | Massive **free-tier / call count** | ✅ **Mitigated:** `cue ingest` uses **grouped daily** (one REST call / run); follow-ups: optional multi-day backfill, vendor paging if ever needed |
-| S5 | LOW | `rankedUniverse=0` log on stop runs (misleading) | Open — cosmetic |
-| S6 | LOW | No `backtest_trades` table — run-level stats only | Deferred (see `spec/cue-db-schema.md`) |
-| — | DATA | Massive EOD **lag** 1–2d | Accepted |
-| — | FIXED (repo) | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs` |
-| — | FIXED (repo) | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard |
-| — | FIXED (repo) | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher |
-| — | FIXED (arch S3) | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts` |
-| — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline) |
+| ID | Severity           | Issue | Status                                                                                                                                            |
+|---|--------------------|---|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| S4 | FIXED              | Massive **free-tier / call count** | ✅ **Mitigated:** `cue ingest` uses **grouped daily** (one REST call / run); follow-ups: optional multi-day backfill, vendor paging if ever needed |
+| S5 | FIXED              | `rankedUniverse=0` log on stop runs (misleading) | ✅ Open — cosmetic                                                                                                                                 |
+| S6 | LOW                | No `backtest_trades` table — run-level stats only | Open — Phase 5 (schema ready, writer not wired)                                                                                                            |
+| — | DATA               | Massive EOD **lag** 1–2d | Accepted                                                                                                                                          |
+| — | FIXED (repo)       | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs`                                                                                                                   |
+| — | FIXED (repo)       | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard                                                                                                                               |
+| — | FIXED (repo)       | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher                                                                                                                      |
+| — | FIXED (arch S3)    | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts`                                                                                             |
+| — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
 
 ---
 
@@ -236,12 +236,9 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Task | Notes |
 |---|---|
-| **Grouped Massive fetch** | ✅ Shipped: `massive-price-ingestor.ts` grouped daily + universe mask + quorum |
 | **Full NDX universe + `_meta.json`** | ✅ Shipped: `data/universe/_meta.json`, `src/universe/load-universe.ts` (no cache) |
-| **Wire `fundamentals_cache`** | From `enrich-fundamentals` into SQLite |
-| **Cosmetic logs** | `rankedUniverse=0` on intentional skip |
 | **`backtest_trades`** | Per-trade audit (Phase 5 spec) |
-| **Quality-GARP** (research) | Arch doc: backtest before any new production screener |
+| **Quality-GARP** (research) | research only, new backtest required before any code |
 | **systemd unit** | Optional alternative to PM2 (`cue.service`, `EnvironmentFile=`) |
 | **Winston file transport** | Optional rotating `logs/cue.log` |
 
