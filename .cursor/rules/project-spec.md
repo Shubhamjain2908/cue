@@ -87,7 +87,7 @@ The **architecture v1** doc describes modes as `fetch → screen → …`. In **
 | Mechanism | Source | When used | Steps (subprocess = `pnpm run cue -- …`) |
 |---|---|---|---|
 | **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: Friday → **`rebalance`**: ingest → screen → enrich → brief; else **`stop`**: ingest → screen → brief. |
-| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **ET window 16:05–16:15**, **`America/New_York`**, once per ET calendar day, **`isRunning`** lock. **Friday:** ingest → enrich-fundamentals → screen → enrich → brief (mode **`rebalance`** for `forwardArgs`). **Mon–Thu:** ingest → execute-stops → brief (mode **`stop`**). **Sat/Sun:** no chain. |
+| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **ET window 16:05–16:15**, **`America/New_York`**, once per ET calendar day, **`isRunning`** + **`LOCK_PATH`** PID lock. **Friday:** ingest → enrich-fundamentals → screen → enrich → brief (mode **`rebalance`** for `forwardArgs`). **Mon–Thu:** ingest → execute-stops → brief (mode **`stop`**). **Sat/Sun:** no chain. |
 
 `pnpmRunArgs` / `resolvedForwardArgs` add **`--force-rebalance`** to **screen** when pipeline mode is `rebalance`, and **`--mode`** to **brief**.
 
@@ -112,10 +112,11 @@ interface PipelineStep {
 2. If outside **16:05–16:15** ET → return.
 3. If **`lastRunDate`** already recorded success for this ET **YYYY-MM-DD** → return.
 4. If **weekend** (NY weekday 0 or 6) → return (debug log).
-5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines).
-6. Else run **`runPipelineWithSteps`** for Friday vs Mon–Thu lists; on exit code **0**, set **`lastRunDate`**.
+5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines in one process).
+6. If **`LOCK_PATH`** is held by a **live** PID (`process.kill(pid, 0)`) → warn and return; else acquire PID lock (unlink stale file if PID is dead).
+7. Else run **`runPipelineWithSteps`** for Friday vs Mon–Thu lists; on exit code **0**, set **`lastRunDate`**; always clear **`isRunning`** and release **`LOCK_PATH`** in a `finally` block.
 
-**Startup / shutdown:** readonly DB **`SELECT 1`** for health; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **close** DB, **`process.exit(0)`**.
+**Startup / shutdown:** readonly DB **`SELECT 1`** for health; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 
 ### 4.5 Alert / brief mode gating (Phase 3 behaviour)
 
@@ -186,7 +187,7 @@ interface PipelineStep {
 
 ## 9. Guardrails
 
-Hard rules: **`.cursor/rules/cue-guardrails.md`** (*v1.1+ — enforcement paths match this repo*). Topics: QQQ SMA200 gate, momentum formula lock, ATR golden rule, pipeline criticality, **scheduler `isRunning` + `lastRunDate`**, LLM Zod validation, ingest DB currency guard, Telegram `--mode` behaviour.
+Hard rules: **`.cursor/rules/cue-guardrails.md`** (*v1.1+ — enforcement paths match this repo*). Topics: QQQ SMA200 gate, momentum formula lock, ATR golden rule, pipeline criticality, **scheduler `isRunning` + `LOCK_PATH` + `lastRunDate`**, LLM Zod validation, ingest DB currency guard, Telegram `--mode` behaviour.
 
 ## 10. Environment variables
 
@@ -195,7 +196,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | Variable | Role |
 |---|---|
 | `POLYGON_API_KEY` | Massive REST |
-| `DB_PATH`, `CACHE_DIR`, `UNIVERSE` | Storage / universe label |
+| `DB_PATH`, `LOCK_PATH`, `CACHE_DIR`, `UNIVERSE` | Storage / universe label / scheduler PID lock |
 | `LLM_PROVIDER`, provider keys, `VERTEX_*`, `LLM_MAX_TOKENS` | LLM |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alerts |
 | `LOG_LEVEL` | Winston |
@@ -210,7 +211,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 1 — Core engine | 12-1 ranker + ATR + backtest gate | ✅ LOCKED |
 | 2 — AI & alerts | LLM enrich + Telegram | ✅ LOCKED |
 | 3 — Dashboard + pipeline | HTML dashboard + **`daily-workflow`** registry + **`cue brief`** | ✅ Complete |
-| 3+ — Ops hardening (this repo) | **`scheduler.ts`** ET window, Fri vs Mon–Thu routes, **`isRunning`**, **`cue-timezone`**, **`llm-smoke`**, README / rules | ✅ Shipped here |
+| 3+ — Ops hardening (this repo) | **`scheduler.ts`** ET window, Fri vs Mon–Thu routes, **`isRunning`**, **`LOCK_PATH`**, **`cue-timezone`**, **`llm-smoke`**, README / rules | ✅ Shipped here |
 
 ---
 
@@ -225,7 +226,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | — | FIXED (repo) | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs` |
 | — | FIXED (repo) | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard |
 | — | FIXED (repo) | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher |
-| — | FIXED (arch S3) | Scheduler overlap | ✅ **`isRunning`** in `scheduler.ts` |
+| — | FIXED (arch S3) | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts` |
 | — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline) |
 
 ---
