@@ -2,6 +2,11 @@ import Database from "better-sqlite3";
 
 import { getConfig } from "../config/index.js";
 import { resolveDbPath } from "../db/provider.js";
+import {
+  loadUniverseTickers,
+  tryLoadUniverseMeta,
+  universeMetaMatchesTickerCount,
+} from "../universe/load-universe.js";
 import { cueLogger } from "./cue-logger.js";
 
 /** Env keys that must be non-empty for normal operation (values never printed). */
@@ -35,10 +40,16 @@ export function runDoctorCli(): void {
     envPresent[k] = v !== undefined && String(v).trim().length > 0;
   }
 
+  const tickers = loadUniverseTickers();
+  const meta = tryLoadUniverseMeta();
   const summary = {
     dbPath: resolved,
     dbReadonlyProbe: "ok",
     universe: config.UNIVERSE,
+    universeTickerCount: tickers.length,
+    universeMetaAsOf: meta?.as_of_date ?? null,
+    universeMetaCountMatch:
+      meta === null ? null : universeMetaMatchesTickerCount(meta, tickers.length),
     llmProvider: config.LLM_PROVIDER,
     envPresent,
     node: process.version,
