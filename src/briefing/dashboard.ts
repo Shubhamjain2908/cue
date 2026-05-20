@@ -1,3 +1,7 @@
+/**
+ * Briefing dashboard CLI: writes `dist/dashboard.html`.
+ * Open-position trailing-stop metrics (Task 4.4) are compiled in `./template.ts`.
+ */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
