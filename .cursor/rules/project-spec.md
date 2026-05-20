@@ -149,11 +149,11 @@ interface PipelineStep {
 ### 6.1 Prices — Massive.com
 
 - **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
-- **Client:** `src/ingestors/massive-price-ingestor.ts` — per-ticker aggs; **~400 calendar days** lookback (under vendor bar caps).
-- **Cache guard:** disk cache + **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants).
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default latest weekday on/before “now” in **`America/New_York`**, or **`--date YYYY-MM-DD`**; universe from `data/universe/nasdaq100.json` + **QQQ**; **`--force`** refetches that session.
+- **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
-**Rate limit risk (from arch v1):** full **100** tickers × daily = many REST calls. **Grouped daily** endpoint migration is still a **scaling** task before aggressive automation (see §12).
+**Historical depth:** prior **~400-day** per-ticker backfill is no longer performed by `cue ingest`; long lookbacks require rows already present in `daily_prices` (e.g. from earlier installs or a separate backfill).
 
 ### 6.2 Enrichment context — Yahoo
 
@@ -219,7 +219,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | ID | Severity | Issue | Status |
 |---|---|---|---|
-| S4 | **HIGH** | Massive **free-tier / call count**: per-ticker daily fetch × full universe may hit limits — migrate to **grouped daily** endpoint (arch §6.1) | Open — scaling |
+| S4 | **HIGH** | Massive **free-tier / call count** | ✅ **Mitigated:** `cue ingest` uses **grouped daily** (one REST call / run); follow-ups: optional multi-day backfill, vendor paging if ever needed |
 | S5 | LOW | `rankedUniverse=0` log on stop runs (misleading) | Open — cosmetic |
 | S6 | LOW | No `backtest_trades` table — run-level stats only | Deferred (see `spec/cue-db-schema.md`) |
 | — | DATA | Massive EOD **lag** 1–2d | Accepted |
@@ -235,7 +235,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Task | Notes |
 |---|---|
-| **Grouped Massive fetch** | Reduce REST calls for 100 names / day |
+| **Grouped Massive fetch** | ✅ Shipped: `massive-price-ingestor.ts` grouped daily + universe mask + quorum |
 | **Wire `fundamentals_cache`** | From `enrich-fundamentals` into SQLite |
 | **Cosmetic logs** | `rankedUniverse=0` on intentional skip |
 | **`backtest_trades`** | Per-trade audit (Phase 5 spec) |

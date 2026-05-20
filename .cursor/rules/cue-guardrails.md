@@ -28,7 +28,7 @@ not be bypassed without an explicit gate override (documented in
 |---|---|---|
 | **No hallucinated financials** | LLM prompt is bounded; Yahoo DTO + signal row only. | `src/llm/prompt.ts`, `src/llm/enricher.ts` |
 | **Zod output validation** | All LLM enrichment JSON validated before `enrichments` write; retry path in enricher. | `src/llm/enricher.ts`, `src/llm/types.ts` |
-| **Fetcher cache guard** | DB currency: `MAX(date) FROM daily_prices` vs expected last session — not “time since last HTTP request”. | `src/ingestors/massive-price-ingestor.ts` |
+| **Fetcher currency guard** | Per ticker: `MAX(date)` in `daily_prices` vs expected last ET session — not “time since last HTTP request”. `--force` bypasses. | `src/ingestors/massive-price-ingestor.ts` |
 | **Data lag accepted** | Massive EOD may lag 1–2 sessions. | Operational assumption |
 | **Yahoo context TTL** | Cache policy in Yahoo bundle fetch. | `src/llm/yahooContext.ts` |
 
