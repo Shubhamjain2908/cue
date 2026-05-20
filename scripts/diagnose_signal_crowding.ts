@@ -10,18 +10,13 @@
  * Reads from the same SQLite DB and config as the main backtest.
  */
 
-import fs from "node:fs";
-import path from "node:path";
-
 import Database from "better-sqlite3";
-import { z } from "zod";
 
 import { getConfig } from "../src/config/index.js";
 import { initSchema } from "../src/db/schema.js";
 import { generateSignal } from "../src/enrichers/momentum-technical.js";
 import type { SignalThresholds } from "../src/enrichers/momentum-types.js";
-
-const universeSchema = z.object({ tickers: z.array(z.string().min(1)) });
+import { loadUniverseTickers } from "../src/universe/load-universe.js";
 
 interface DailyBar {
     ticker: string;
@@ -42,14 +37,6 @@ function parseArgs(): { from: string; to: string } {
         if (argv[i] === "--to"   && argv[i + 1]) to   = argv[++i]!;
     }
     return { from, to };
-}
-
-function loadTickers(): string[] {
-    const { UNIVERSE } = getConfig();
-    const raw = fs.readFileSync(
-        path.join(process.cwd(), "data", "universe", `${UNIVERSE}.json`), "utf8"
-    );
-    return universeSchema.parse(JSON.parse(raw)).tickers.map(t => t.toUpperCase());
 }
 
 function addDays(iso: string, n: number): string {
@@ -75,7 +62,7 @@ function main() {
     const db = new Database(config.DB_PATH);
     initSchema(db);
 
-    const tickers = loadTickers();
+    const tickers = loadUniverseTickers();
     const tickersForHydrate = [...new Set([...tickers, "QQQ"])].sort((a, b) =>
         a.localeCompare(b),
     );
