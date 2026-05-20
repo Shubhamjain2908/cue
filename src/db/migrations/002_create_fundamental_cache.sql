@@ -1,4 +1,4 @@
--- Phase 4.0: fundamentals_cache (positions/signals extensions applied programmatically in migrator.ts).
+-- Phase 4+: fundamentals cache (ledger id = filename without .sql).
 CREATE TABLE IF NOT EXISTS fundamentals_cache (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ticker TEXT NOT NULL,
