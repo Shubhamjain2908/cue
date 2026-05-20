@@ -49,11 +49,7 @@ const GARP_MAX_CONCURRENT = 3;
 
 const DEFAULT_EPS_HISTORY = "data/fundamentals/eps_history_20260520.json";
 
-type StrategyExitReason =
-  | "TRAILING_STOP"
-  | "MAX_HOLD"
-  | "REBALANCE_DROP"
-  | "FORCED_CLOSE";
+type StrategyExitReason = "TRAILING_STOP" | "MAX_HOLD" | "FORCED_CLOSE";
 
 interface DailyBar {
   ticker: string;
@@ -470,8 +466,6 @@ function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitR
       return "gapOrStop";
     case "MAX_HOLD":
       return "maxHoldDays";
-    case "REBALANCE_DROP":
-      return "standardTrendBreak";
     case "FORCED_CLOSE":
       return "standardTakeProfit";
   }
@@ -668,13 +662,6 @@ export function runQualityGarpBacktest(
 
       if (regimeOk) {
         const picks = computePegSurvivors(db, universe, date, byTicker, epsHistory, warn);
-        const pickSet = new Set(picks.map((p) => p.ticker));
-
-        for (const [ticker] of [...positions.entries()]) {
-          if (!pickSet.has(ticker) && !pendingExitReason.has(ticker)) {
-            pendingExitReason.set(ticker, "REBALANCE_DROP");
-          }
-        }
 
         for (const p of picks) {
           if (positions.size >= GARP_MAX_CONCURRENT) {
