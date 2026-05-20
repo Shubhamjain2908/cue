@@ -51,7 +51,7 @@ not be bypassed without an explicit gate override (documented in
 | **Critical step abort** | Non-zero exit on critical step aborts chain. | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
 | **Non-critical continuation** | enrich / brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window. | `src/agents/scheduler.ts` (`lastRunDate`) |
-| **Concurrency lock** | **`isRunning`** prevents overlapping subprocess pipelines if a tick exceeds poll interval. | `src/agents/scheduler.ts` |
+| **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
 | **Mode / flag orthogonality** | `--force-rebalance` vs calendar Friday; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
 
 ---

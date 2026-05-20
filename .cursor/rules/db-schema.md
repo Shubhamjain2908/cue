@@ -16,7 +16,7 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `id` | TEXT PK | Migration stem, e.g. `001_initial_schema` |
 | `applied_at` | TEXT | Timestamp when applied |
 
-Created by `migrate.ts` if missing. Not modified by app business logic.
+Created by `src/db/migrate.ts` (runner in `migrations/migrate.ts`) if missing. Not modified by app business logic.
 
 ---
 
@@ -117,7 +117,7 @@ Aggregated metrics for a labeled historical run (written by `src/backtest/runner
 
 ## Indexes
 
-Migrations **001** / **002** do not declare secondary indexes beyond PK/UNIQUE constraints. Add indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
+Migrations **001** / **002** / **003** do not declare secondary indexes beyond PK/UNIQUE constraints. Add indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
 
 ---
 

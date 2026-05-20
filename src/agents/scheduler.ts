@@ -1,3 +1,5 @@
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { clearInterval, setInterval } from "node:timers";
 
 import winston from "winston";
@@ -77,6 +79,119 @@ let pollTimer: ReturnType<typeof setInterval> | undefined;
 /** Parent-held readonly handle for clean shutdown (subprocess `cue` steps open their own DBs). */
 let heldDb: CueDatabase | undefined;
 
+/** `process.kill(pid, 0)` liveness probe; EPERM means a process exists but we cannot signal it. */
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = err instanceof Error && "code" in err ? (err as NodeJS.ErrnoException).code : undefined;
+    if (code === "ESRCH") {
+      return false;
+    }
+    if (code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
+function readPidFromLockFile(lockPath: string): number | null {
+  try {
+    const raw = readFileSync(lockPath, "utf8").trim().split(/\s+/)[0] ?? "";
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** If a lock file exists but the PID is gone, remove it (PM2 crash / SIGKILL mid-run). */
+function clearStaleSchedulerLockIfDead(lockPath: string): void {
+  if (!existsSync(lockPath)) {
+    return;
+  }
+  const pid = readPidFromLockFile(lockPath);
+  if (pid !== null && isProcessAlive(pid)) {
+    return;
+  }
+  try {
+    unlinkSync(lockPath);
+    logger.info(`scheduler_lock_cleared_stale path=${lockPath} previousPid=${pid === null ? "invalid" : pid}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`scheduler_lock_clear_stale_failed path=${lockPath} error=${msg}`);
+  }
+}
+
+/**
+ * Atomically create `LOCK_PATH` with this PID after removing a stale lock.
+ * Returns false if another live process holds the lock.
+ */
+function tryAcquireSchedulerLock(lockPath: string): boolean {
+  const dir = path.dirname(lockPath);
+  if (dir !== ".") {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  const maxAttempts = 5;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (existsSync(lockPath)) {
+      const holder = readPidFromLockFile(lockPath);
+      if (holder !== null && isProcessAlive(holder)) {
+        logger.warn(
+          `scheduler_skip_lock path=${lockPath} holderPid=${holder} reason=live_process_holds_lock`,
+        );
+        return false;
+      }
+      try {
+        unlinkSync(lockPath);
+      } catch {
+        // concurrent unlink or race; retry with O_EXCL
+      }
+    }
+
+    try {
+      const fd = openSync(lockPath, "wx");
+      try {
+        writeFileSync(fd, `${process.pid}\n`, "utf8");
+      } finally {
+        closeSync(fd);
+      }
+      return true;
+    } catch (err) {
+      const code = err instanceof Error && "code" in err ? (err as NodeJS.ErrnoException).code : undefined;
+      if (code === "EEXIST") {
+        continue;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`scheduler_lock_acquire_failed path=${lockPath} error=${msg}`);
+      return false;
+    }
+  }
+
+  logger.warn(`scheduler_skip_lock path=${lockPath} reason=max_acquire_retries`);
+  return false;
+}
+
+function releaseSchedulerLock(lockPath: string): void {
+  try {
+    if (!existsSync(lockPath)) {
+      return;
+    }
+    const holder = readPidFromLockFile(lockPath);
+    if (holder === process.pid) {
+      unlinkSync(lockPath);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`scheduler_lock_release_failed path=${lockPath} error=${msg}`);
+  }
+}
+
 function openAndLogHealth(): void {
   try {
     const cfg = getConfig();
@@ -93,6 +208,7 @@ function openAndLogHealth(): void {
         pollMs: POLL_MS,
         executionWindowEt: "16:05–16:15",
         dbPath: cfg.DB_PATH,
+        lockPath: cfg.LOCK_PATH,
       })}`,
     );
   } catch (err) {
@@ -130,6 +246,11 @@ function schedulerTick(): void {
     return;
   }
 
+  const { LOCK_PATH } = getConfig();
+  if (!tryAcquireSchedulerLock(LOCK_PATH)) {
+    return;
+  }
+
   isRunning = true;
   try {
     if (kind === "rebalance") {
@@ -147,6 +268,7 @@ function schedulerTick(): void {
     }
   } finally {
     isRunning = false;
+    releaseSchedulerLock(LOCK_PATH);
   }
 }
 
@@ -155,6 +277,13 @@ function shutdown(): void {
   if (pollTimer !== undefined) {
     clearInterval(pollTimer);
     pollTimer = undefined;
+  }
+  try {
+    if (!isRunning) {
+      releaseSchedulerLock(getConfig().LOCK_PATH);
+    }
+  } catch {
+    // config may be unavailable in extreme teardown paths
   }
   if (heldDb !== undefined) {
     heldDb.close();
@@ -169,12 +298,14 @@ function shutdown(): void {
  */
 export function runScheduleDaemonCli(): void {
   openAndLogHealth();
+  const cfg = getConfig();
+  clearStaleSchedulerLockIfDead(cfg.LOCK_PATH);
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
   logger.info(
-    `scheduler_started pollMs=${POLL_MS} windowEt=16:05-16:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE}`,
+    `scheduler_started pollMs=${POLL_MS} windowEt=16:05-16:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
   );
   pollTimer = setInterval(schedulerTick, POLL_MS);
   schedulerTick();

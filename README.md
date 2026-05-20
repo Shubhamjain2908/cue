@@ -172,8 +172,9 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 
 1. **`.env`** — validated at startup by `src/config/index.ts` (`zod`). See **`.env.example`** for variables.
 2. **`DB_PATH`** — default `./db/cue.db`.
-3. **`CACHE_DIR`** — Yahoo / ingest caches (default `./data/cache`).
-4. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google` \| `vertex` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
+3. **`LOCK_PATH`** — cross-process scheduler PID lockfile (default `./db/cue.lock`; cleared when holder PID is dead).
+4. **`CACHE_DIR`** — Yahoo / ingest caches (default `./data/cache`).
+5. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google` \| `vertex` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
 
 Strategy thresholds (`MAX_POSITIONS`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see `project-spec.md` for **locked** momentum / ATR / regime rules.
 

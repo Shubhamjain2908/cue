@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS signals (
   momentum_12_1_return REAL,
   atr14 REAL,
   initial_atr_stop REAL,
-  UNIQUE (ticker, date, signal, signal_type)
+  UNIQUE (ticker, date)
 );
 
 CREATE TABLE IF NOT EXISTS enrichments (

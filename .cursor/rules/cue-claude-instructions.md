@@ -60,7 +60,7 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 ## Current implementation state (post–Phase 3 in this repo)
 
 - **Registry pipeline:** **`src/agents/daily-workflow.ts`** — `PIPELINE_STEPS`, `pnpm run cue -- run-all` / **`pipeline --now`**.
-- **Scheduler daemon:** **`src/agents/scheduler.ts`** — `pnpm run cue -- schedule` or **`pipeline`** without `--now`; **16:05–16:15 ET**, **`isRunning`** lock, **`lastRunDate`** idempotency; **Fri** vs **Mon–Thu** step lists differ from registry `run-all` (see **`project-spec` §4**).
+- **Scheduler daemon:** **`src/agents/scheduler.ts`** — `pnpm run cue -- schedule` or **`pipeline`** without `--now`; **16:05–16:15 ET**, **`isRunning`** + **`LOCK_PATH`** PID lock, **`lastRunDate`** idempotency; **Fri** vs **Mon–Thu** step lists differ from registry `run-all` (see **`project-spec` §4**).
 - **ET constants:** **`src/config/cue-timezone.ts`** (`CUE_LOCALE`, `CUE_TIME_ZONE`) — use for all civil-date / window logic.
 - **LLM smoke:** **`pnpm run cue -- llm-smoke`** → **`src/cli/llm-smoke.ts`**.
 - **Schema on disk:** **`src/db/migrations/001_initial_schema.sql`**, **`002_create_fundamental_cache.sql`** — includes **`positions`** stop columns and **`signals`** `UNIQUE (ticker, date, signal, signal_type)` (arch S1/S2 class fixes **landed here**).
@@ -70,7 +70,7 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 | Arch task | Status in tree (verify in `project-spec` §12) |
 |---|---|
 | 4.0 Schema (stops + signal uniqueness) | **Applied** in migration `001` (confirm vs `spec/cue-db-schema.md` if stale). |
-| 4.1 Scheduler concurrency | **Implemented** — `isRunning` in **`scheduler.ts`**. |
+| 4.1 Scheduler concurrency | **Implemented** — `isRunning` + **`LOCK_PATH`** PID file in **`scheduler.ts`**. |
 | 4.2 Grouped Massive fetch | **Open** — primary rate-limit fix. |
 | 4.3 Full universe daily | **Open** — blocked on **4.2** / quotas. |
 | 4.4 Dashboard stop / high-since-entry | **Partial** — depends on DB + `briefing` queries; confirm against migrations. |
