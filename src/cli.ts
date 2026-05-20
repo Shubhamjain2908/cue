@@ -81,7 +81,7 @@ const ingest = program
   .command("ingest")
   .description("Ingest Nasdaq 100 EOD OHLCV via Massive (Massive.com / Polygon key)")
   .option("--ticker <symbol>", "fetch a single ticker only")
-  .option("--force", "reserved for future forced refetch", false);
+  .option("--force", "refetch latest session even if daily_prices already has that session", false);
 
 ingest.action(
   wrap("ingest", async () => {
