@@ -10,6 +10,7 @@ import { Command } from "commander";
 import Database from "better-sqlite3";
 
 import { getConfig } from "./config/index.js";
+import { CUE_TIME_ZONE } from "./config/cue-timezone.js";
 import { cueLogger } from "./cli/cue-logger.js";
 import { runDoctorCli } from "./cli/doctor.js";
 import { initSchema } from "./db/schema.js";
@@ -226,10 +227,12 @@ program
 
 program
   .command("schedule")
-  .description("Start long-running scheduler (America/New_York 16:05–16:15 window)")
+  .description(
+    `Start scheduler daemon (${CUE_TIME_ZONE} 16:05–16:15 window; Fri rebalance vs Mon–Thu stops)`,
+  )
   .action(
     wrap("schedule", async () => {
-      const { runScheduleDaemonCli } = await import("./agents/daily-workflow.js");
+      const { runScheduleDaemonCli } = await import("./agents/scheduler.js");
       runScheduleDaemonCli();
     }),
   );
@@ -241,12 +244,17 @@ program
 
 program
   .command("pipeline")
-  .description("Legacy: use `cue schedule` or `cue run-all`; --now runs pipeline once and exits")
+  .description("Legacy: use `cue schedule` or `cue run-all`; --now runs registry pipeline once and exits")
   .allowUnknownOption(true)
   .action(
     wrap("pipeline", async () => {
-      const { runDailyWorkflowCli } = await import("./agents/daily-workflow.js");
-      runDailyWorkflowCli();
+      if (process.argv.includes("--now")) {
+        const { runDailyWorkflowCli } = await import("./agents/daily-workflow.js");
+        runDailyWorkflowCli();
+      } else {
+        const { runScheduleDaemonCli } = await import("./agents/scheduler.js");
+        runScheduleDaemonCli();
+      }
     }),
   );
 
