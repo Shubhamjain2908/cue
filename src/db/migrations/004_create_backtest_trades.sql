@@ -1,8 +1,8 @@
 BEGIN TRANSACTION;
 
-CREATE TABLE backtest_trades (
+CREATE TABLE IF NOT EXISTS backtest_trades (
     id          INTEGER PRIMARY KEY,
-    run_id      TEXT NOT NULL REFERENCES backtest_runs(rowid),
+    run_id      INTEGER NOT NULL REFERENCES backtest_runs(id),
     ticker      TEXT NOT NULL,
     entry_date  TEXT NOT NULL,
     entry_price REAL NOT NULL,
