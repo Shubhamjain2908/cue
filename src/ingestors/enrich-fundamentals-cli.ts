@@ -1,5 +1,7 @@
 import { fetchYahooEnrichmentDto } from "../llm/yahooContext.js";
 import { cueLogger } from "../cli/cue-logger.js";
+import { getExchangeDateString } from "../config/cue-timezone.js";
+import { upsertFundamentalsCache } from "../db/queries.js";
 import { loadUniverseTickers } from "../universe/load-universe.js";
 
 export interface EnrichFundamentalsOpts {
@@ -11,20 +13,36 @@ export interface EnrichFundamentalsOpts {
   readonly date?: string;
 }
 
+function persistFundamentalsCacheLedger(ticker: string, asOfDate: string, yahooBundle: unknown): void {
+  const serializedPayload = JSON.stringify(yahooBundle);
+  try {
+    upsertFundamentalsCache(ticker, asOfDate, serializedPayload);
+    cueLogger.debug("fundamentals_cache persisted successfully", { ticker, asOfDate });
+  } catch (error) {
+    cueLogger.error("Non-critical error writing fundamentals to database ledger", {
+      ticker,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /**
- * Phase 4 placeholder: pull Yahoo `quoteSummary` / search-backed bundles into disk cache.
- * `fundamentals_cache` table wiring can follow in a later migration.
+ * Pull Yahoo `quoteSummary` / search-backed bundles into disk cache (`CACHE_DIR/yahoo/…`),
+ * then best-effort upsert into SQLite `fundamentals_cache` (non-critical; failures are logged only).
  */
 export async function runEnrichFundamentalsCli(opts: EnrichFundamentalsOpts): Promise<void> {
   if (opts.date !== undefined && opts.date.length > 0) {
     cueLogger.warn(`enrich_fundamentals_date_ignored date=${opts.date} (not implemented)`);
   }
 
+  const asOfDate = getExchangeDateString();
+
   if (opts.ticker !== undefined && opts.ticker.trim().length > 0) {
     const t = opts.ticker.trim().toUpperCase();
     cueLogger.info(`enrich_fundamentals_ticker ticker=${t}`);
     const dto = await fetchYahooEnrichmentDto(t);
     console.log(JSON.stringify({ ticker: t, yahoo: dto }, null, 2));
+    persistFundamentalsCacheLedger(t, asOfDate, { ticker: t, yahoo: dto });
     cueLogger.info("enrich_fundamentals_done single_ticker");
     return;
   }
@@ -38,6 +56,7 @@ export async function runEnrichFundamentalsCli(opts: EnrichFundamentalsOpts): Pr
   for (const t of tickers.slice(0, n)) {
     const dto = await fetchYahooEnrichmentDto(t);
     cueLogger.info(`enrich_fundamentals_row ticker=${t} sector=${dto.sector ?? "n/a"}`);
+    persistFundamentalsCacheLedger(t, asOfDate, { ticker: t, yahoo: dto });
     await new Promise((r) => setTimeout(r, 200));
   }
   cueLogger.info("enrich_fundamentals_done batch");
