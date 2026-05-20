@@ -1,7 +1,11 @@
+import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import type { DashboardPayload } from "./queries.js";
 
 export function renderHtml(payload: DashboardPayload): string {
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  const atrTighten = DEFAULT_RANKING_CONFIG.atrTightenThresholdPct;
+  const atrMultBase = DEFAULT_RANKING_CONFIG.atrMultiplierBase;
+  const atrMultTight = DEFAULT_RANKING_CONFIG.atrMultiplierTight;
 
   return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -24,6 +28,7 @@ export function renderHtml(payload: DashboardPayload): string {
     .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
     .badge-green { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid var(--green); }
     .badge-red   { background: rgba(248,81,73,.15);  color: var(--red);   border: 1px solid var(--red); }
+    .badge-amber { background: rgba(210,153,34,.15); color: var(--amber); border: 1px solid var(--amber); }
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
     .card-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
@@ -40,6 +45,7 @@ export function renderHtml(payload: DashboardPayload): string {
     canvas { max-height: 200px; }
     .ticker { font-weight: 700; color: var(--accent); }
     .stop { color: var(--red); }
+    tr.regime-tight td { background: rgba(210,153,34,.12); }
   </style>
 </head>
 <body>
@@ -54,8 +60,9 @@ export function renderHtml(payload: DashboardPayload): string {
   <div class="card">
     <table id="positions-table">
       <thead><tr>
-        <th>Ticker</th><th>Entry Date</th><th>Entry Price</th>
-        <th>Trailing Stop</th><th>High Since Entry</th>
+        <th>Ticker</th><th>Entry Date</th><th>Entry Price</th><th>Current Close</th>
+        <th>High Since Entry</th>
+        <th>Stop (dist %)</th><th>ATR regime</th>
         <th>Days Held</th><th>Momentum Rank</th><th>12-1 Return</th>
       </tr></thead>
       <tbody id="positions-body"></tbody>
@@ -85,6 +92,9 @@ export function renderHtml(payload: DashboardPayload): string {
 
   <script>
     const d = window.__CUE__;
+    const ATR_TIGHTEN_PCT = ${atrTighten};
+    const ATR_MULT_BASE = ${atrMultBase};
+    const ATR_MULT_TIGHT = ${atrMultTight};
 
     // Meta
     document.getElementById('meta').innerHTML =
@@ -109,20 +119,32 @@ export function renderHtml(payload: DashboardPayload): string {
     // Positions table
     const pBody = document.getElementById('positions-body');
     if (d.open_positions.length === 0) {
-      pBody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center">No open positions</td></tr>';
+      pBody.innerHTML = '<tr><td colspan="10" style="color:var(--muted);text-align:center">No open positions</td></tr>';
     } else {
-      pBody.innerHTML = d.open_positions.map(p =>
-        '<tr>' +
-        '<td class="ticker">' + p.ticker + '</td>' +
-        '<td>' + p.entry_date + '</td>' +
-        '<td>$' + p.entry_price.toFixed(2) + '</td>' +
-        '<td class="stop">$' + p.current_stop_loss.toFixed(2) + '</td>' +
-        '<td>$' + p.highest_close_since_entry.toFixed(2) + '</td>' +
-        '<td>' + p.days_held + '</td>' +
-        '<td>' + (p.momentum_rank == null ? '—' : ('#' + p.momentum_rank)) + '</td>' +
-        '<td>' + (p.momentum_12_1_return == null ? '—' : ((p.momentum_12_1_return * 100).toFixed(1) + '%')) + '</td>' +
-        '</tr>'
-      ).join('');
+      pBody.innerHTML = d.open_positions.map(p => {
+        const unrealizedPct = ((p.current_close - p.entry_price) / p.entry_price) * 100;
+        const distStopPct = ((p.current_stop_loss - p.current_close) / p.current_close) * 100;
+        const tight = unrealizedPct >= ATR_TIGHTEN_PCT;
+        const rowClass = tight ? 'regime-tight' : 'regime-base';
+        const stopLabel = tight
+          ? ('Tight (' + ATR_MULT_TIGHT + '× ATR)')
+          : ('Base (' + ATR_MULT_BASE + '× ATR)');
+        return (
+          '<tr class="' + rowClass + '">' +
+          '<td class="ticker">' + p.ticker + '</td>' +
+          '<td>' + p.entry_date + '</td>' +
+          '<td>$' + p.entry_price.toFixed(2) + '</td>' +
+          '<td>$' + p.current_close.toFixed(2) + '</td>' +
+          '<td>$' + p.highest_close_since_entry.toFixed(2) + '</td>' +
+          '<td class="stop">$' + p.current_stop_loss.toFixed(2) +
+            ' <span style="color:var(--muted);font-weight:500">(' + distStopPct.toFixed(2) + '%)</span></td>' +
+          '<td><span class="badge ' + (tight ? 'badge-amber' : 'badge-green') + '">' + stopLabel + '</span></td>' +
+          '<td>' + p.days_held + '</td>' +
+          '<td>' + (p.momentum_rank == null ? '—' : ('#' + p.momentum_rank)) + '</td>' +
+          '<td>' + (p.momentum_12_1_return == null ? '—' : ((p.momentum_12_1_return * 100).toFixed(1) + '%')) + '</td>' +
+          '</tr>'
+        );
+      }).join('');
     }
 
     // Signals table
