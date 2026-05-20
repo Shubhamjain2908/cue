@@ -1,0 +1,2574 @@
+{
+    "AAPL": {
+        "2025-09-30": {
+            "netIncome": 112010000000,
+            "totalEquity": 73733000000,
+            "totalDebt": 98657000000
+        },
+        "2024-09-30": {
+            "netIncome": 93736000000,
+            "totalEquity": 56950000000,
+            "totalDebt": 106629000000
+        },
+        "2023-09-30": {
+            "netIncome": 96995000000,
+            "totalEquity": 62146000000,
+            "totalDebt": 111088000000
+        },
+        "2022-09-30": {
+            "netIncome": 99803000000,
+            "totalEquity": 50672000000,
+            "totalDebt": 132480000000
+        },
+        "2021-09-30": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "AMAT": {
+        "2025-10-31": {
+            "netIncome": 6998000000,
+            "totalEquity": 20415000000,
+            "totalDebt": 7050000000
+        },
+        "2024-10-31": {
+            "netIncome": 7177000000,
+            "totalEquity": 19001000000,
+            "totalDebt": 6606000000
+        },
+        "2023-10-31": {
+            "netIncome": 6856000000,
+            "totalEquity": 16349000000,
+            "totalDebt": 5999000000
+        },
+        "2022-10-31": {
+            "netIncome": 6525000000,
+            "totalEquity": 12194000000,
+            "totalDebt": 5829000000
+        },
+        "2021-10-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "AMGN": {
+        "2025-12-31": {
+            "netIncome": 7711000000,
+            "totalEquity": 8658000000,
+            "totalDebt": 54604000000
+        },
+        "2024-12-31": {
+            "netIncome": 4090000000,
+            "totalEquity": 5877000000,
+            "totalDebt": 60099000000
+        },
+        "2023-12-31": {
+            "netIncome": 6717000000,
+            "totalEquity": 6232000000,
+            "totalDebt": 64613000000
+        },
+        "2022-12-31": {
+            "netIncome": 6552000000,
+            "totalEquity": 3661000000,
+            "totalDebt": 38945000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CMCSA": {
+        "2025-12-31": {
+            "netIncome": 19998000000,
+            "totalEquity": 96903000000,
+            "totalDebt": 98937000000
+        },
+        "2024-12-31": {
+            "netIncome": 16192000000,
+            "totalEquity": 85560000000,
+            "totalDebt": 99093000000
+        },
+        "2023-12-31": {
+            "netIncome": 15388000000,
+            "totalEquity": 82703000000,
+            "totalDebt": 97090000000
+        },
+        "2022-12-31": {
+            "netIncome": 5370000000,
+            "totalEquity": 80943000000,
+            "totalDebt": 99983000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "INTC": {
+        "2025-12-31": {
+            "netIncome": -267000000,
+            "totalEquity": 114281000000,
+            "totalDebt": 46585000000
+        },
+        "2024-12-31": {
+            "netIncome": -18756000000,
+            "totalEquity": 99270000000,
+            "totalDebt": 50011000000
+        },
+        "2023-12-31": {
+            "netIncome": 1689000000,
+            "totalEquity": 105590000000,
+            "totalDebt": 49266000000
+        },
+        "2022-12-31": {
+            "netIncome": 8014000000,
+            "totalEquity": 101423000000,
+            "totalDebt": 42007000000
+        }
+    },
+    "KLAC": {
+        "2025-06-30": {
+            "netIncome": 4061643000,
+            "totalEquity": 4692453000,
+            "totalDebt": 6088282000
+        },
+        "2024-06-30": {
+            "netIncome": 2761896000,
+            "totalEquity": 3368328000,
+            "totalDebt": 6819643000
+        },
+        "2023-06-30": {
+            "netIncome": 3387277000,
+            "totalEquity": 2919753000,
+            "totalDebt": 6063132000
+        },
+        "2022-06-30": {
+            "netIncome": 3321807000,
+            "totalEquity": 1401351000,
+            "totalDebt": 6774305000
+        },
+        "2021-06-30": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "PCAR": {
+        "2025-12-31": {
+            "netIncome": 2375800000,
+            "totalEquity": 19264000000,
+            "totalDebt": 15636300000
+        },
+        "2024-12-31": {
+            "netIncome": 4162000000,
+            "totalEquity": 17506900000,
+            "totalDebt": 15895000000
+        },
+        "2023-12-31": {
+            "netIncome": 4600800000,
+            "totalEquity": 15878800000,
+            "totalDebt": 14234500000
+        },
+        "2022-12-31": {
+            "netIncome": 3011600000,
+            "totalEquity": 13167100000,
+            "totalDebt": 11471600000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CTAS": {
+        "2025-05-31": {
+            "netIncome": 1812281000,
+            "totalEquity": 4684481000,
+            "totalDebt": 2654481000
+        },
+        "2024-05-31": {
+            "netIncome": 1571592000,
+            "totalEquity": 4316372000,
+            "totalDebt": 2668080000
+        },
+        "2023-05-31": {
+            "netIncome": 1348010000,
+            "totalEquity": 3863986000,
+            "totalDebt": 2668393000
+        },
+        "2022-05-31": {
+            "netIncome": 1235757000,
+            "totalEquity": 3308196000,
+            "totalDebt": 2968442000
+        },
+        "2021-05-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "PAYX": {
+        "2025-05-31": {
+            "netIncome": 1657300000,
+            "totalEquity": 4128000000,
+            "totalDebt": 5022300000
+        },
+        "2024-05-31": {
+            "netIncome": 1690400000,
+            "totalEquity": 3801000000,
+            "totalDebt": 866300000
+        },
+        "2023-05-31": {
+            "netIncome": 1557300000,
+            "totalEquity": 3493200000,
+            "totalDebt": 865700000
+        },
+        "2022-05-31": {
+            "netIncome": 1392800000,
+            "totalEquity": 3085200000,
+            "totalDebt": 881200000
+        }
+    },
+    "LRCX": {
+        "2025-06-30": {
+            "netIncome": 5358217000,
+            "totalEquity": 9861619000,
+            "totalDebt": 4484505000
+        },
+        "2024-06-30": {
+            "netIncome": 3827772000,
+            "totalEquity": 8539454000,
+            "totalDebt": 4983334000
+        },
+        "2023-06-30": {
+            "netIncome": 4510931000,
+            "totalEquity": 8210172000,
+            "totalDebt": 5011541000
+        },
+        "2022-06-30": {
+            "netIncome": 4605286000,
+            "totalEquity": 6278366000,
+            "totalDebt": 5005830000
+        }
+    },
+    "ADSK": {
+        "2026-01-31": {
+            "netIncome": 1124000000,
+            "totalEquity": 3045000000,
+            "totalDebt": 2734000000
+        },
+        "2025-01-31": {
+            "netIncome": 1112000000,
+            "totalEquity": 2621000000,
+            "totalDebt": 2559000000
+        },
+        "2024-01-31": {
+            "netIncome": 906000000,
+            "totalEquity": 1855000000,
+            "totalDebt": 2626000000
+        },
+        "2023-01-31": {
+            "netIncome": 823000000,
+            "totalEquity": 1145000000,
+            "totalDebt": 2666000000
+        },
+        "2022-01-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ROST": {
+        "2026-01-31": {
+            "netIncome": 2145044000,
+            "totalEquity": 6187443000,
+            "totalDebt": 5212338000
+        },
+        "2025-01-31": {
+            "netIncome": 2090730000,
+            "totalEquity": 5509195000,
+            "totalDebt": 5682429000
+        },
+        "2024-01-31": {
+            "netIncome": 1874520000,
+            "totalEquity": 4871326000,
+            "totalDebt": 5747704000
+        },
+        "2023-01-31": {
+            "netIncome": 1512041000,
+            "totalEquity": 4288583000,
+            "totalDebt": 5706447000
+        }
+    },
+    "MNST": {
+        "2025-12-31": {
+            "netIncome": 1905432000,
+            "totalEquity": 8254108000,
+            "totalDebt": null
+        },
+        "2024-12-31": {
+            "netIncome": 1509048000,
+            "totalEquity": 5957718000,
+            "totalDebt": 373951000
+        },
+        "2023-12-31": {
+            "netIncome": 1630988000,
+            "totalEquity": 8228744000,
+            "totalDebt": null
+        },
+        "2022-12-31": {
+            "netIncome": 1191624000,
+            "totalEquity": 7025041000,
+            "totalDebt": null
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "MSFT": {
+        "2025-06-30": {
+            "netIncome": 101832000000,
+            "totalEquity": 343479000000,
+            "totalDebt": 60588000000
+        },
+        "2024-06-30": {
+            "netIncome": 88136000000,
+            "totalEquity": 268477000000,
+            "totalDebt": 67127000000
+        },
+        "2023-06-30": {
+            "netIncome": 72361000000,
+            "totalEquity": 206223000000,
+            "totalDebt": 59965000000
+        },
+        "2022-06-30": {
+            "netIncome": 72738000000,
+            "totalEquity": 166542000000,
+            "totalDebt": 61270000000
+        }
+    },
+    "ADBE": {
+        "2025-11-30": {
+            "netIncome": 7130000000,
+            "totalEquity": 11623000000,
+            "totalDebt": 6648000000
+        },
+        "2024-11-30": {
+            "netIncome": 5560000000,
+            "totalEquity": 14105000000,
+            "totalDebt": 6056000000
+        },
+        "2023-11-30": {
+            "netIncome": 5428000000,
+            "totalEquity": 16518000000,
+            "totalDebt": 4080000000
+        },
+        "2022-11-30": {
+            "netIncome": 4756000000,
+            "totalEquity": 14051000000,
+            "totalDebt": 4633000000
+        }
+    },
+    "FAST": {
+        "2025-12-31": {
+            "netIncome": 1258400000,
+            "totalEquity": 3943600000,
+            "totalDebt": 441900000
+        },
+        "2024-12-31": {
+            "netIncome": 1150600000,
+            "totalEquity": 3616300000,
+            "totalDebt": 485400000
+        },
+        "2023-12-31": {
+            "netIncome": 1155000000,
+            "totalEquity": 3348800000,
+            "totalDebt": 535000000
+        },
+        "2022-12-31": {
+            "netIncome": 1086900000,
+            "totalEquity": 3163200000,
+            "totalDebt": 802100000
+        }
+    },
+    "EA": {
+        "2026-03-31": {
+            "netIncome": 887000000,
+            "totalEquity": 6764000000,
+            "totalDebt": 1548000000
+        },
+        "2025-03-31": {
+            "netIncome": 1121000000,
+            "totalEquity": 6386000000,
+            "totalDebt": 1951000000
+        },
+        "2024-03-31": {
+            "netIncome": 1273000000,
+            "totalEquity": 7513000000,
+            "totalDebt": 1948000000
+        },
+        "2023-03-31": {
+            "netIncome": 802000000,
+            "totalEquity": 7293000000,
+            "totalDebt": 1946000000
+        }
+    },
+    "CSCO": {
+        "2025-07-31": {
+            "netIncome": 10180000000,
+            "totalEquity": 46843000000,
+            "totalDebt": 28093000000
+        },
+        "2024-07-31": {
+            "netIncome": 10320000000,
+            "totalEquity": 45457000000,
+            "totalDebt": 30973000000
+        },
+        "2023-07-31": {
+            "netIncome": 12613000000,
+            "totalEquity": 44353000000,
+            "totalDebt": 8391000000
+        },
+        "2022-07-31": {
+            "netIncome": 11812000000,
+            "totalEquity": 39773000000,
+            "totalDebt": 9515000000
+        }
+    },
+    "REGN": {
+        "2025-12-31": {
+            "netIncome": 4504900000,
+            "totalEquity": 31256900000,
+            "totalDebt": 2705900000
+        },
+        "2024-12-31": {
+            "netIncome": 4412600000,
+            "totalEquity": 29353600000,
+            "totalDebt": 2704400000
+        },
+        "2023-12-31": {
+            "netIncome": 3953600000,
+            "totalEquity": 25973100000,
+            "totalDebt": 2702900000
+        },
+        "2022-12-31": {
+            "netIncome": 4338400000,
+            "totalEquity": 22664000000,
+            "totalDebt": 2701400000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "IDXX": {
+        "2025-12-31": {
+            "netIncome": 1059464000,
+            "totalEquity": 1605383000,
+            "totalDebt": 976062000
+        },
+        "2024-12-31": {
+            "netIncome": 887867000,
+            "totalEquity": 1595313000,
+            "totalDebt": 986948000
+        },
+        "2023-12-31": {
+            "netIncome": 845042000,
+            "totalEquity": 1484530000,
+            "totalDebt": 1067353000
+        },
+        "2022-12-31": {
+            "netIncome": 679089000,
+            "totalEquity": 608737000,
+            "totalDebt": 1470033000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "VRTX": {
+        "2025-12-31": {
+            "netIncome": 3953200000,
+            "totalEquity": 18665800000,
+            "totalDebt": 2030500000
+        },
+        "2024-12-31": {
+            "netIncome": -535600000,
+            "totalEquity": 16409600000,
+            "totalDebt": 1744300000
+        },
+        "2023-12-31": {
+            "netIncome": 3619600000,
+            "totalEquity": 17580400000,
+            "totalDebt": 808400000
+        },
+        "2022-12-31": {
+            "netIncome": 3322000000,
+            "totalEquity": 13912700000,
+            "totalDebt": 899700000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ODFL": {
+        "2025-12-31": {
+            "netIncome": 1023703000,
+            "totalEquity": 4311057000,
+            "totalDebt": 39995000
+        },
+        "2024-12-31": {
+            "netIncome": 1186073000,
+            "totalEquity": 4244588000,
+            "totalDebt": 59987000
+        },
+        "2023-12-31": {
+            "netIncome": 1239502000,
+            "totalEquity": 4257811000,
+            "totalDebt": 79977000
+        },
+        "2022-12-31": {
+            "netIncome": 1377159000,
+            "totalEquity": 3652917000,
+            "totalDebt": 99963000
+        }
+    },
+    "QCOM": {
+        "2025-09-30": {
+            "netIncome": 5541000000,
+            "totalEquity": 21206000000,
+            "totalDebt": 14811000000
+        },
+        "2024-09-30": {
+            "netIncome": 10142000000,
+            "totalEquity": 26274000000,
+            "totalDebt": 14634000000
+        },
+        "2023-09-30": {
+            "netIncome": 7232000000,
+            "totalEquity": 21581000000,
+            "totalDebt": 15398000000
+        },
+        "2022-09-30": {
+            "netIncome": 12936000000,
+            "totalEquity": 18013000000,
+            "totalDebt": 15482000000
+        },
+        "2021-09-30": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "GILD": {
+        "2025-12-31": {
+            "netIncome": 8510000000,
+            "totalEquity": 22702000000,
+            "totalDebt": 24936000000
+        },
+        "2024-12-31": {
+            "netIncome": 480000000,
+            "totalEquity": 19330000000,
+            "totalDebt": 26711000000
+        },
+        "2023-12-31": {
+            "netIncome": 5665000000,
+            "totalEquity": 22833000000,
+            "totalDebt": 24987000000
+        },
+        "2022-12-31": {
+            "netIncome": 4592000000,
+            "totalEquity": 21240000000,
+            "totalDebt": 25230000000
+        }
+    },
+    "SNPS": {
+        "2025-10-31": {
+            "netIncome": 1332220000,
+            "totalEquity": 28327602000,
+            "totalDebt": 14293418000
+        },
+        "2024-10-31": {
+            "netIncome": 2263380000,
+            "totalEquity": 8990702000,
+            "totalDebt": 684457000
+        },
+        "2023-10-31": {
+            "netIncome": 1229888000,
+            "totalEquity": 6147308000,
+            "totalDebt": 677596000
+        },
+        "2022-10-31": {
+            "netIncome": 984594000,
+            "totalEquity": 5515725000,
+            "totalDebt": 656371000
+        }
+    },
+    "SBUX": {
+        "2025-09-30": {
+            "netIncome": 1856400000,
+            "totalEquity": -8096600000,
+            "totalDebt": 26611500000
+        },
+        "2024-09-30": {
+            "netIncome": 3760900000,
+            "totalEquity": -7448900000,
+            "totalDebt": 25803100000
+        },
+        "2023-09-30": {
+            "netIncome": 4124500000,
+            "totalEquity": -7994800000,
+            "totalDebt": 24599800000
+        },
+        "2022-09-30": {
+            "netIncome": 3281600000,
+            "totalEquity": -8706600000,
+            "totalDebt": 23804800000
+        },
+        "2021-09-30": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "INTU": {
+        "2025-07-31": {
+            "netIncome": 3869000000,
+            "totalEquity": 19710000000,
+            "totalDebt": 6639000000
+        },
+        "2024-07-31": {
+            "netIncome": 2963000000,
+            "totalEquity": 18436000000,
+            "totalDebt": 6567000000
+        },
+        "2023-07-31": {
+            "netIncome": 2384000000,
+            "totalEquity": 17269000000,
+            "totalDebt": 6689000000
+        },
+        "2022-07-31": {
+            "netIncome": 2066000000,
+            "totalEquity": 16441000000,
+            "totalDebt": 7540000000
+        },
+        "2021-07-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "MCHP": {
+        "2026-03-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        },
+        "2025-03-31": {
+            "netIncome": -500000,
+            "totalEquity": 7078300000,
+            "totalDebt": 5666100000
+        },
+        "2024-03-31": {
+            "netIncome": 1906900000,
+            "totalEquity": 6657800000,
+            "totalDebt": 6032400000
+        },
+        "2023-03-31": {
+            "netIncome": 2237700000,
+            "totalEquity": 6513600000,
+            "totalDebt": 6471400000
+        },
+        "2022-03-31": {
+            "netIncome": 1285500000,
+            "totalEquity": 5894800000,
+            "totalDebt": 7721200000
+        }
+    },
+    "ORLY": {
+        "2025-12-31": {
+            "netIncome": 2538209000,
+            "totalEquity": -763352000,
+            "totalDebt": 8491499000
+        },
+        "2024-12-31": {
+            "netIncome": 2386680000,
+            "totalEquity": -1370961000,
+            "totalDebt": 7920850000
+        },
+        "2023-12-31": {
+            "netIncome": 2346581000,
+            "totalEquity": -1739278000,
+            "totalDebt": 7841005000
+        },
+        "2022-12-31": {
+            "netIncome": 2172650000,
+            "totalEquity": -1060752000,
+            "totalDebt": 6545030000
+        }
+    },
+    "COST": {
+        "2025-08-31": {
+            "netIncome": 8099000000,
+            "totalEquity": 29164000000,
+            "totalDebt": 8173000000
+        },
+        "2024-08-31": {
+            "netIncome": 7367000000,
+            "totalEquity": 23622000000,
+            "totalDebt": 8169000000
+        },
+        "2023-08-31": {
+            "netIncome": 6292000000,
+            "totalEquity": 25058000000,
+            "totalDebt": 8884000000
+        },
+        "2022-08-31": {
+            "netIncome": 5844000000,
+            "totalEquity": 20642000000,
+            "totalDebt": 9039000000
+        },
+        "2021-08-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CPRT": {
+        "2025-07-31": {
+            "netIncome": 1552449000,
+            "totalEquity": 9187033000,
+            "totalDebt": 103739000
+        },
+        "2024-07-31": {
+            "netIncome": 1363020000,
+            "totalEquity": 7524011000,
+            "totalDebt": 118733000
+        },
+        "2023-07-31": {
+            "netIncome": 1237741000,
+            "totalEquity": 5987440000,
+            "totalDebt": 120453000
+        },
+        "2022-07-31": {
+            "netIncome": 1090130000,
+            "totalEquity": 4625599000,
+            "totalDebt": 119473000
+        },
+        "2021-07-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ASML": {
+        "2025-12-31": {
+            "netIncome": 9609400000,
+            "totalEquity": 19612200000,
+            "totalDebt": 4390900000
+        },
+        "2024-12-31": {
+            "netIncome": 7571600000,
+            "totalEquity": 18476800000,
+            "totalDebt": 4687600000
+        },
+        "2023-12-31": {
+            "netIncome": 7839000000,
+            "totalEquity": 13452400000,
+            "totalDebt": 4631600000
+        },
+        "2022-12-31": {
+            "netIncome": 5624200000,
+            "totalEquity": 8810800000,
+            "totalDebt": 4260400000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "TTWO": {
+        "2025-03-31": {
+            "netIncome": -4478900000,
+            "totalEquity": 2137700000,
+            "totalDebt": 4105900000
+        },
+        "2024-03-31": {
+            "netIncome": -3744200000,
+            "totalEquity": 5667900000,
+            "totalDebt": 3534000000
+        },
+        "2023-03-31": {
+            "netIncome": -1124700000,
+            "totalEquity": 9042500000,
+            "totalDebt": 3487000000
+        },
+        "2022-03-31": {
+            "netIncome": 418000000,
+            "totalEquity": 3809700000,
+            "totalDebt": 250200000
+        }
+    },
+    "AMZN": {
+        "2025-12-31": {
+            "netIncome": 77670000000,
+            "totalEquity": 411065000000,
+            "totalDebt": 152987000000
+        },
+        "2024-12-31": {
+            "netIncome": 59248000000,
+            "totalEquity": 285970000000,
+            "totalDebt": 130900000000
+        },
+        "2023-12-31": {
+            "netIncome": 30425000000,
+            "totalEquity": 201875000000,
+            "totalDebt": 135611000000
+        },
+        "2022-12-31": {
+            "netIncome": -2722000000,
+            "totalEquity": 146043000000,
+            "totalDebt": 140118000000
+        }
+    },
+    "MSTR": {
+        "2025-12-31": {
+            "netIncome": -3848152000,
+            "totalEquity": 51042972000,
+            "totalDebt": 8236290000
+        },
+        "2024-12-31": {
+            "netIncome": -1166661000,
+            "totalEquity": 18229984000,
+            "totalDebt": 7248078000
+        },
+        "2023-12-31": {
+            "netIncome": 429121000,
+            "totalEquity": 2164972000,
+            "totalDebt": 2243677000
+        },
+        "2022-12-31": {
+            "netIncome": -1469797000,
+            "totalEquity": -383120000,
+            "totalDebt": 2446358000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CTSH": {
+        "2025-12-31": {
+            "netIncome": 2230000000,
+            "totalEquity": 15015000000,
+            "totalDebt": 1152000000
+        },
+        "2024-12-31": {
+            "netIncome": 2240000000,
+            "totalEquity": 14408000000,
+            "totalDebt": 1480000000
+        },
+        "2023-12-31": {
+            "netIncome": 2126000000,
+            "totalEquity": 13227000000,
+            "totalDebt": 1315000000
+        },
+        "2022-12-31": {
+            "netIncome": 2290000000,
+            "totalEquity": 12309000000,
+            "totalDebt": 1534000000
+        }
+    },
+    "NVDA": {
+        "2026-01-31": {
+            "netIncome": 120067000000,
+            "totalEquity": 157293000000,
+            "totalDebt": 11040000000
+        },
+        "2025-01-31": {
+            "netIncome": 72880000000,
+            "totalEquity": 79327000000,
+            "totalDebt": 9982000000
+        },
+        "2024-01-31": {
+            "netIncome": 29760000000,
+            "totalEquity": 42978000000,
+            "totalDebt": 11056000000
+        },
+        "2023-01-31": {
+            "netIncome": 4368000000,
+            "totalEquity": 22101000000,
+            "totalDebt": 12031000000
+        },
+        "2022-01-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "BKNG": {
+        "2025-12-31": {
+            "netIncome": 5404000000,
+            "totalEquity": -5578000000,
+            "totalDebt": 19293000000
+        },
+        "2024-12-31": {
+            "netIncome": 5882000000,
+            "totalEquity": -4020000000,
+            "totalDebt": 17081000000
+        },
+        "2023-12-31": {
+            "netIncome": 4289000000,
+            "totalEquity": -2744000000,
+            "totalDebt": 14783000000
+        },
+        "2022-12-31": {
+            "netIncome": 3058000000,
+            "totalEquity": 2782000000,
+            "totalDebt": 13037000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "INSM": {
+        "2025-12-31": {
+            "netIncome": -1276775000,
+            "totalEquity": 738976000,
+            "totalDebt": 586671000
+        },
+        "2024-12-31": {
+            "netIncome": -913772000,
+            "totalEquity": 285379000,
+            "totalDebt": 1148877000
+        },
+        "2023-12-31": {
+            "netIncome": -749567000,
+            "totalEquity": -331923000,
+            "totalDebt": 1203994000
+        },
+        "2022-12-31": {
+            "netIncome": -481534000,
+            "totalEquity": 87951000,
+            "totalDebt": 1177865000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ISRG": {
+        "2025-12-31": {
+            "netIncome": 2856000000,
+            "totalEquity": 17824000000,
+            "totalDebt": null
+        },
+        "2024-12-31": {
+            "netIncome": 2322600000,
+            "totalEquity": 16433700000,
+            "totalDebt": null
+        },
+        "2023-12-31": {
+            "netIncome": 1798000000,
+            "totalEquity": 13307600000,
+            "totalDebt": null
+        },
+        "2022-12-31": {
+            "netIncome": 1322300000,
+            "totalEquity": 11041900000,
+            "totalDebt": null
+        }
+    },
+    "MRVL": {
+        "2026-01-31": {
+            "netIncome": 2670100000,
+            "totalEquity": 14308400000,
+            "totalDebt": 4790300000
+        },
+        "2025-01-31": {
+            "netIncome": -885000000,
+            "totalEquity": 13427000000,
+            "totalDebt": 4343100000
+        },
+        "2024-01-31": {
+            "netIncome": -933400000,
+            "totalEquity": 14831400000,
+            "totalDebt": 4401300000
+        },
+        "2023-01-31": {
+            "netIncome": -163500000,
+            "totalEquity": 15637200000,
+            "totalDebt": 4737500000
+        },
+        "2022-01-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ADI": {
+        "2025-10-31": {
+            "netIncome": 2267342000,
+            "totalEquity": 33815755000,
+            "totalDebt": 8664610000
+        },
+        "2024-10-31": {
+            "netIncome": 1635273000,
+            "totalEquity": 35176317000,
+            "totalDebt": 7649817000
+        },
+        "2023-10-31": {
+            "netIncome": 3314579000,
+            "totalEquity": 35565122000,
+            "totalDebt": 7013478000
+        },
+        "2022-10-31": {
+            "netIncome": 2748561000,
+            "totalEquity": 36465323000,
+            "totalDebt": 6602253000
+        },
+        "2021-10-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "AEP": {
+        "2025-12-31": {
+            "netIncome": 3580000000,
+            "totalEquity": 31138000000,
+            "totalDebt": 49508000000
+        },
+        "2024-12-31": {
+            "netIncome": 2967000000,
+            "totalEquity": 26944000000,
+            "totalDebt": 45763000000
+        },
+        "2023-12-31": {
+            "netIncome": 2208000000,
+            "totalEquity": 25246700000,
+            "totalDebt": 43608500000
+        },
+        "2022-12-31": {
+            "netIncome": 2307200000,
+            "totalEquity": 23893400000,
+            "totalDebt": 41579300000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "AMD": {
+        "2025-12-31": {
+            "netIncome": 4335000000,
+            "totalEquity": 62999000000,
+            "totalDebt": 3847000000
+        },
+        "2024-12-31": {
+            "netIncome": 1641000000,
+            "totalEquity": 57568000000,
+            "totalDebt": 2212000000
+        },
+        "2023-12-31": {
+            "netIncome": 854000000,
+            "totalEquity": 55892000000,
+            "totalDebt": 3003000000
+        },
+        "2022-12-31": {
+            "netIncome": 1320000000,
+            "totalEquity": 54750000000,
+            "totalDebt": 2863000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ADP": {
+        "2025-06-30": {
+            "netIncome": 4079700000,
+            "totalEquity": 6188000000,
+            "totalDebt": 9065400000
+        },
+        "2024-06-30": {
+            "netIncome": 3752000000,
+            "totalEquity": 4547600000,
+            "totalDebt": 3319900000
+        },
+        "2023-06-30": {
+            "netIncome": 3412000000,
+            "totalEquity": 3509100000,
+            "totalDebt": 3338900000
+        },
+        "2022-06-30": {
+            "netIncome": 2948900000,
+            "totalEquity": 3225300000,
+            "totalDebt": 3358000000
+        }
+    },
+    "CDNS": {
+        "2025-12-31": {
+            "netIncome": 1108888000,
+            "totalEquity": 5474181000,
+            "totalDebt": 2616439000
+        },
+        "2024-12-31": {
+            "netIncome": 1055484000,
+            "totalEquity": 4673578000,
+            "totalDebt": 2585076000
+        },
+        "2023-12-31": {
+            "netIncome": 1041144000,
+            "totalEquity": 3404271000,
+            "totalDebt": 764414000
+        },
+        "2022-12-31": {
+            "netIncome": 848952000,
+            "totalEquity": 2745113000,
+            "totalDebt": 887415000
+        }
+    },
+    "CSX": {
+        "2025-12-31": {
+            "netIncome": 2889000000,
+            "totalEquity": 13155000000,
+            "totalDebt": 19352000000
+        },
+        "2024-12-31": {
+            "netIncome": 3470000000,
+            "totalEquity": 12502000000,
+            "totalDebt": 18989000000
+        },
+        "2023-12-31": {
+            "netIncome": 3668000000,
+            "totalEquity": 11980000000,
+            "totalDebt": 19024000000
+        },
+        "2022-12-31": {
+            "netIncome": 4114000000,
+            "totalEquity": 12615000000,
+            "totalDebt": 18535000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "HON": {
+        "2025-12-31": {
+            "netIncome": 4729000000,
+            "totalEquity": 13904000000,
+            "totalDebt": 35563000000
+        },
+        "2024-12-31": {
+            "netIncome": 5705000000,
+            "totalEquity": 18619000000,
+            "totalDebt": 32077000000
+        },
+        "2023-12-31": {
+            "netIncome": 5658000000,
+            "totalEquity": 15856000000,
+            "totalDebt": 21536000000
+        },
+        "2022-12-31": {
+            "netIncome": 4966000000,
+            "totalEquity": 16697000000,
+            "totalDebt": 20537000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "MAR": {
+        "2025-12-31": {
+            "netIncome": 2601000000,
+            "totalEquity": -3771000000,
+            "totalDebt": 17083000000
+        },
+        "2024-12-31": {
+            "netIncome": 2375000000,
+            "totalEquity": -2992000000,
+            "totalDebt": 15241000000
+        },
+        "2023-12-31": {
+            "netIncome": 3083000000,
+            "totalEquity": -682000000,
+            "totalDebt": 12760000000
+        },
+        "2022-12-31": {
+            "netIncome": 2358000000,
+            "totalEquity": 568000000,
+            "totalDebt": 11098000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "MU": {
+        "2025-08-31": {
+            "netIncome": 8539000000,
+            "totalEquity": 54165000000,
+            "totalDebt": 15278000000
+        },
+        "2024-08-31": {
+            "netIncome": 778000000,
+            "totalEquity": 45131000000,
+            "totalDebt": 14007000000
+        },
+        "2023-08-31": {
+            "netIncome": -5833000000,
+            "totalEquity": 44120000000,
+            "totalDebt": 13933000000
+        },
+        "2022-08-31": {
+            "netIncome": 8687000000,
+            "totalEquity": 49907000000,
+            "totalDebt": 7516000000
+        },
+        "2021-08-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "XEL": {
+        "2025-12-31": {
+            "netIncome": 2018000000,
+            "totalEquity": 23609000000,
+            "totalDebt": 34781000000
+        },
+        "2024-12-31": {
+            "netIncome": 1936000000,
+            "totalEquity": 19522000000,
+            "totalDebt": 30208000000
+        },
+        "2023-12-31": {
+            "netIncome": 1771000000,
+            "totalEquity": 17616000000,
+            "totalDebt": 27514000000
+        },
+        "2022-12-31": {
+            "netIncome": 1736000000,
+            "totalEquity": 16675000000,
+            "totalDebt": 26032000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "EXC": {
+        "2025-12-31": {
+            "netIncome": 2768000000,
+            "totalEquity": 28798000000,
+            "totalDebt": 50080000000
+        },
+        "2024-12-31": {
+            "netIncome": 2460000000,
+            "totalEquity": 26921000000,
+            "totalDebt": 46649000000
+        },
+        "2023-12-31": {
+            "netIncome": 2328000000,
+            "totalEquity": 25755000000,
+            "totalDebt": 44008000000
+        },
+        "2022-12-31": {
+            "netIncome": 2170000000,
+            "totalEquity": 24744000000,
+            "totalDebt": 40050000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "PEP": {
+        "2025-12-31": {
+            "netIncome": 8240000000,
+            "totalEquity": 20406000000,
+            "totalDebt": 49901000000
+        },
+        "2024-12-31": {
+            "netIncome": 9578000000,
+            "totalEquity": 18041000000,
+            "totalDebt": 44948000000
+        },
+        "2023-12-31": {
+            "netIncome": 9074000000,
+            "totalEquity": 18503000000,
+            "totalDebt": 44661000000
+        },
+        "2022-12-31": {
+            "netIncome": 8910000000,
+            "totalEquity": 17149000000,
+            "totalDebt": 39554000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ROP": {
+        "2025-12-31": {
+            "netIncome": 1536300000,
+            "totalEquity": 19881500000,
+            "totalDebt": 9349300000
+        },
+        "2024-12-31": {
+            "netIncome": 1549300000,
+            "totalEquity": 18867600000,
+            "totalDebt": 7669200000
+        },
+        "2023-12-31": {
+            "netIncome": 1384200000,
+            "totalEquity": 17444800000,
+            "totalDebt": 6373400000
+        },
+        "2022-12-31": {
+            "netIncome": 4544700000,
+            "totalEquity": 16037800000,
+            "totalDebt": 6708100000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "TXN": {
+        "2025-12-31": {
+            "netIncome": 5001000000,
+            "totalEquity": 16273000000,
+            "totalDebt": 14048000000
+        },
+        "2024-12-31": {
+            "netIncome": 4799000000,
+            "totalEquity": 16903000000,
+            "totalDebt": 13596000000
+        },
+        "2023-12-31": {
+            "netIncome": 6510000000,
+            "totalEquity": 16897000000,
+            "totalDebt": 11223000000
+        },
+        "2022-12-31": {
+            "netIncome": 8749000000,
+            "totalEquity": 14577000000,
+            "totalDebt": 8735000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "WDC": {
+        "2025-06-30": {
+            "netIncome": 1861000000,
+            "totalEquity": 5540000000,
+            "totalDebt": 4711000000
+        },
+        "2024-06-30": {
+            "netIncome": -798000000,
+            "totalEquity": 11047000000,
+            "totalDebt": 7434000000
+        },
+        "2023-06-30": {
+            "netIncome": -1684000000,
+            "totalEquity": 11840000000,
+            "totalDebt": 7070000000
+        },
+        "2022-06-30": {
+            "netIncome": 1546000000,
+            "totalEquity": 12221000000,
+            "totalDebt": 7022000000
+        }
+    },
+    "WMT": {
+        "2026-01-31": {
+            "netIncome": 21893000000,
+            "totalEquity": 99617000000,
+            "totalDebt": 67095000000
+        },
+        "2025-01-31": {
+            "netIncome": 19436000000,
+            "totalEquity": 91013000000,
+            "totalDebt": 60114000000
+        },
+        "2024-01-31": {
+            "netIncome": 15511000000,
+            "totalEquity": 83861000000,
+            "totalDebt": 61321000000
+        },
+        "2023-01-31": {
+            "netIncome": 11680000000,
+            "totalEquity": 76693000000,
+            "totalDebt": 58923000000
+        },
+        "2022-01-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "AXON": {
+        "2025-12-31": {
+            "netIncome": 124656000,
+            "totalEquity": 3242658000,
+            "totalDebt": 1909664000
+        },
+        "2024-12-31": {
+            "netIncome": 377034000,
+            "totalEquity": 2327665000,
+            "totalDebt": 721672000
+        },
+        "2023-12-31": {
+            "netIncome": 175783000,
+            "totalEquity": 1615765000,
+            "totalDebt": 710663000
+        },
+        "2022-12-31": {
+            "netIncome": 146930000,
+            "totalEquity": 1268491000,
+            "totalDebt": 711110000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "MDLZ": {
+        "2025-12-31": {
+            "netIncome": 2451000000,
+            "totalEquity": 25838000000,
+            "totalDebt": 21804000000
+        },
+        "2024-12-31": {
+            "netIncome": 4611000000,
+            "totalEquity": 26932000000,
+            "totalDebt": 18372000000
+        },
+        "2023-12-31": {
+            "netIncome": 4959000000,
+            "totalEquity": 28332000000,
+            "totalDebt": 19945000000
+        },
+        "2022-12-31": {
+            "netIncome": 2717000000,
+            "totalEquity": 26883000000,
+            "totalDebt": 23447000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "NFLX": {
+        "2025-12-31": {
+            "netIncome": 10981201000,
+            "totalEquity": 26615488000,
+            "totalDebt": 14462836000
+        },
+        "2024-12-31": {
+            "netIncome": 8711631000,
+            "totalEquity": 24743567000,
+            "totalDebt": 15582804000
+        },
+        "2023-12-31": {
+            "netIncome": 5407990000,
+            "totalEquity": 20588313000,
+            "totalDebt": 14543261000
+        },
+        "2022-12-31": {
+            "netIncome": 4491924000,
+            "totalEquity": 20777401000,
+            "totalDebt": 14353076000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "STX": {
+        "2025-06-30": {
+            "netIncome": 1469000000,
+            "totalEquity": -453000000,
+            "totalDebt": 4995000000
+        },
+        "2024-06-30": {
+            "netIncome": 335000000,
+            "totalEquity": -1491000000,
+            "totalDebt": 5674000000
+        },
+        "2023-06-30": {
+            "netIncome": -529000000,
+            "totalEquity": -1199000000,
+            "totalDebt": 5451000000
+        },
+        "2022-06-30": {
+            "netIncome": 1649000000,
+            "totalEquity": 109000000,
+            "totalDebt": 5696000000
+        },
+        "2021-06-30": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ALNY": {
+        "2025-12-31": {
+            "netIncome": 313747000,
+            "totalEquity": 789176000,
+            "totalDebt": 1278389000
+        },
+        "2024-12-31": {
+            "netIncome": -278157000,
+            "totalEquity": 67088000,
+            "totalDebt": 1296048000
+        },
+        "2023-12-31": {
+            "netIncome": -440242000,
+            "totalEquity": -220644000,
+            "totalDebt": 1305387000
+        },
+        "2022-12-31": {
+            "netIncome": -1131156000,
+            "totalEquity": -158223000,
+            "totalDebt": 1320248000
+        }
+    },
+    "GOOGL": {
+        "2025-12-31": {
+            "netIncome": 132170000000,
+            "totalEquity": 415265000000,
+            "totalDebt": 59291000000
+        },
+        "2024-12-31": {
+            "netIncome": 100118000000,
+            "totalEquity": 325084000000,
+            "totalDebt": 22574000000
+        },
+        "2023-12-31": {
+            "netIncome": 73795000000,
+            "totalEquity": 283379000000,
+            "totalDebt": 27121000000
+        },
+        "2022-12-31": {
+            "netIncome": 59972000000,
+            "totalEquity": 256144000000,
+            "totalDebt": 29679000000
+        }
+    },
+    "MPWR": {
+        "2025-12-31": {
+            "netIncome": 621483000,
+            "totalEquity": 3531497000,
+            "totalDebt": 19972000
+        },
+        "2024-12-31": {
+            "netIncome": 1592058000,
+            "totalEquity": 2951125000,
+            "totalDebt": 12974000
+        },
+        "2023-12-31": {
+            "netIncome": 427374000,
+            "totalEquity": 2049939000,
+            "totalDebt": 5565000
+        },
+        "2022-12-31": {
+            "netIncome": 437672000,
+            "totalEquity": 1668602000,
+            "totalDebt": 1664000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "DXCM": {
+        "2025-12-31": {
+            "netIncome": 836300000,
+            "totalEquity": 2746000000,
+            "totalDebt": 1389700000
+        },
+        "2024-12-31": {
+            "netIncome": 576200000,
+            "totalEquity": 2102600000,
+            "totalDebt": 2587400000
+        },
+        "2023-12-31": {
+            "netIncome": 541500000,
+            "totalEquity": 2068600000,
+            "totalDebt": 2594000000
+        },
+        "2022-12-31": {
+            "netIncome": 341200000,
+            "totalEquity": 2131800000,
+            "totalDebt": 2145000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "TMUS": {
+        "2025-12-31": {
+            "netIncome": 10992000000,
+            "totalEquity": 59203000000,
+            "totalDebt": 122269000000
+        },
+        "2024-12-31": {
+            "netIncome": 11339000000,
+            "totalEquity": 61741000000,
+            "totalDebt": 113944000000
+        },
+        "2023-12-31": {
+            "netIncome": 8317000000,
+            "totalEquity": 64715000000,
+            "totalDebt": 113086000000
+        },
+        "2022-12-31": {
+            "netIncome": 2590000000,
+            "totalEquity": 69656000000,
+            "totalDebt": 111792000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "MELI": {
+        "2025-12-31": {
+            "netIncome": 1997000000,
+            "totalEquity": 6748000000,
+            "totalDebt": 11392000000
+        },
+        "2024-12-31": {
+            "netIncome": 1911000000,
+            "totalEquity": 4351000000,
+            "totalDebt": 6850000000
+        },
+        "2023-12-31": {
+            "netIncome": 987000000,
+            "totalEquity": 3071000000,
+            "totalDebt": 5333000000
+        },
+        "2022-12-31": {
+            "netIncome": 482000000,
+            "totalEquity": 1827000000,
+            "totalDebt": 5414000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "KDP": {
+        "2025-12-31": {
+            "netIncome": 2079000000,
+            "totalEquity": 25516000000,
+            "totalDebt": 16141000000
+        },
+        "2024-12-31": {
+            "netIncome": 1441000000,
+            "totalEquity": 24243000000,
+            "totalDebt": 15554000000
+        },
+        "2023-12-31": {
+            "netIncome": 2181000000,
+            "totalEquity": 25676000000,
+            "totalDebt": 14824000000
+        },
+        "2022-12-31": {
+            "netIncome": 1436000000,
+            "totalEquity": 25126000000,
+            "totalDebt": 13583000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "AVGO": {
+        "2025-10-31": {
+            "netIncome": 23126000000,
+            "totalEquity": 81292000000,
+            "totalDebt": 65136000000
+        },
+        "2024-10-31": {
+            "netIncome": 5895000000,
+            "totalEquity": 67678000000,
+            "totalDebt": 67566000000
+        },
+        "2023-10-31": {
+            "netIncome": 14082000000,
+            "totalEquity": 23988000000,
+            "totalDebt": 39229000000
+        },
+        "2022-10-31": {
+            "netIncome": 11495000000,
+            "totalEquity": 22709000000,
+            "totalDebt": 39515000000
+        },
+        "2021-10-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "VRSK": {
+        "2025-12-31": {
+            "netIncome": 908300000,
+            "totalEquity": 309000000,
+            "totalDebt": 4900400000
+        },
+        "2024-12-31": {
+            "netIncome": 957500000,
+            "totalEquity": 100100000,
+            "totalDebt": 3245800000
+        },
+        "2023-12-31": {
+            "netIncome": 614400000,
+            "totalEquity": 310000000,
+            "totalDebt": 3095400000
+        },
+        "2022-12-31": {
+            "netIncome": 954300000,
+            "totalEquity": 1749300000,
+            "totalDebt": 3955500000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "FTNT": {
+        "2025-12-31": {
+            "netIncome": 1853400000,
+            "totalEquity": 1237500000,
+            "totalDebt": 996300000
+        },
+        "2024-12-31": {
+            "netIncome": 1745200000,
+            "totalEquity": 1493800000,
+            "totalDebt": 994300000
+        },
+        "2023-12-31": {
+            "netIncome": 1147800000,
+            "totalEquity": -463400000,
+            "totalDebt": 992300000
+        },
+        "2022-12-31": {
+            "netIncome": 857300000,
+            "totalEquity": -281600000,
+            "totalDebt": 990400000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CHTR": {
+        "2025-12-31": {
+            "netIncome": 4987000000,
+            "totalEquity": 16054000000,
+            "totalDebt": 97121000000
+        },
+        "2024-12-31": {
+            "netIncome": 5083000000,
+            "totalEquity": 15587000000,
+            "totalDebt": 95763000000
+        },
+        "2023-12-31": {
+            "netIncome": 4557000000,
+            "totalEquity": 11086000000,
+            "totalDebt": 98202000000
+        },
+        "2022-12-31": {
+            "netIncome": 5055000000,
+            "totalEquity": 9119000000,
+            "totalDebt": 97603000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "TSLA": {
+        "2025-12-31": {
+            "netIncome": 3794000000,
+            "totalEquity": 82137000000,
+            "totalDebt": 14719000000
+        },
+        "2024-12-31": {
+            "netIncome": 7130000000,
+            "totalEquity": 72913000000,
+            "totalDebt": 13623000000
+        },
+        "2023-12-31": {
+            "netIncome": 14999000000,
+            "totalEquity": 62634000000,
+            "totalDebt": 9573000000
+        },
+        "2022-12-31": {
+            "netIncome": 12583000000,
+            "totalEquity": 44704000000,
+            "totalDebt": 5748000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "NXPI": {
+        "2025-12-31": {
+            "netIncome": 2021000000,
+            "totalEquity": 10056000000,
+            "totalDebt": 12222000000
+        },
+        "2024-12-31": {
+            "netIncome": 2510000000,
+            "totalEquity": 9183000000,
+            "totalDebt": 10854000000
+        },
+        "2023-12-31": {
+            "netIncome": 2797000000,
+            "totalEquity": 8644000000,
+            "totalDebt": 11175000000
+        },
+        "2022-12-31": {
+            "netIncome": 2787000000,
+            "totalEquity": 7449000000,
+            "totalDebt": 11165000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "FANG": {
+        "2025-12-31": {
+            "netIncome": 1664000000,
+            "totalEquity": 36972000000,
+            "totalDebt": 14879000000
+        },
+        "2024-12-31": {
+            "netIncome": 3338000000,
+            "totalEquity": 37736000000,
+            "totalDebt": 13329000000
+        },
+        "2023-12-31": {
+            "netIncome": 3143000000,
+            "totalEquity": 16625000000,
+            "totalDebt": 6801000000
+        },
+        "2022-12-31": {
+            "netIncome": 4386000000,
+            "totalEquity": 15009000000,
+            "totalDebt": 6379000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "META": {
+        "2025-12-31": {
+            "netIncome": 60458000000,
+            "totalEquity": 217243000000,
+            "totalDebt": 83897000000
+        },
+        "2024-12-31": {
+            "netIncome": 62360000000,
+            "totalEquity": 182637000000,
+            "totalDebt": 49060000000
+        },
+        "2023-12-31": {
+            "netIncome": 39098000000,
+            "totalEquity": 153168000000,
+            "totalDebt": 37234000000
+        },
+        "2022-12-31": {
+            "netIncome": 23200000000,
+            "totalEquity": 125713000000,
+            "totalDebt": 26591000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "PANW": {
+        "2025-07-31": {
+            "netIncome": 1133900000,
+            "totalEquity": 7824400000,
+            "totalDebt": 338200000
+        },
+        "2024-07-31": {
+            "netIncome": 2577600000,
+            "totalEquity": 5169700000,
+            "totalDebt": 1344400000
+        },
+        "2023-07-31": {
+            "netIncome": 439700000,
+            "totalEquity": 1748400000,
+            "totalDebt": 2270700000
+        },
+        "2022-07-31": {
+            "netIncome": -267000000,
+            "totalEquity": 210000000,
+            "totalDebt": 3952900000
+        },
+        "2021-07-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "WDAY": {
+        "2026-01-31": {
+            "netIncome": 693000000,
+            "totalEquity": 7805000000,
+            "totalDebt": 3821000000
+        },
+        "2025-01-31": {
+            "netIncome": 526000000,
+            "totalEquity": 9034000000,
+            "totalDebt": 3362000000
+        },
+        "2024-01-31": {
+            "netIncome": 1381000000,
+            "totalEquity": 8082000000,
+            "totalDebt": 3296000000
+        },
+        "2023-01-31": {
+            "netIncome": -367000000,
+            "totalEquity": 5585000000,
+            "totalDebt": 3249000000
+        }
+    },
+    "GOOG": {
+        "2025-12-31": {
+            "netIncome": 132170000000,
+            "totalEquity": 415265000000,
+            "totalDebt": 59291000000
+        },
+        "2024-12-31": {
+            "netIncome": 100118000000,
+            "totalEquity": 325084000000,
+            "totalDebt": 22574000000
+        },
+        "2023-12-31": {
+            "netIncome": 73795000000,
+            "totalEquity": 283379000000,
+            "totalDebt": 27121000000
+        },
+        "2022-12-31": {
+            "netIncome": 59972000000,
+            "totalEquity": 256144000000,
+            "totalDebt": 29679000000
+        }
+    },
+    "PYPL": {
+        "2025-12-31": {
+            "netIncome": 5233000000,
+            "totalEquity": 20256000000,
+            "totalDebt": 9987000000
+        },
+        "2024-12-31": {
+            "netIncome": 4147000000,
+            "totalEquity": 20417000000,
+            "totalDebt": 9879000000
+        },
+        "2023-12-31": {
+            "netIncome": 4246000000,
+            "totalEquity": 21051000000,
+            "totalDebt": 9676000000
+        },
+        "2022-12-31": {
+            "netIncome": 2419000000,
+            "totalEquity": 20274000000,
+            "totalDebt": 10417000000
+        }
+    },
+    "SHOP": {
+        "2025-12-31": {
+            "netIncome": 1231000000,
+            "totalEquity": 13473000000,
+            "totalDebt": 188000000
+        },
+        "2024-12-31": {
+            "netIncome": 2019000000,
+            "totalEquity": 11558000000,
+            "totalDebt": 1126000000
+        },
+        "2023-12-31": {
+            "netIncome": 132000000,
+            "totalEquity": 9066000000,
+            "totalDebt": 1150000000
+        },
+        "2022-12-31": {
+            "netIncome": -3460000000,
+            "totalEquity": 8239000000,
+            "totalDebt": 1396000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "KHC": {
+        "2025-12-31": {
+            "netIncome": -5846000000,
+            "totalEquity": 41664000000,
+            "totalDebt": 21219000000
+        },
+        "2024-12-31": {
+            "netIncome": 2744000000,
+            "totalEquity": 49185000000,
+            "totalDebt": 19869000000
+        },
+        "2023-12-31": {
+            "netIncome": 2855000000,
+            "totalEquity": 49526000000,
+            "totalDebt": 20032000000
+        },
+        "2022-12-31": {
+            "netIncome": 2363000000,
+            "totalEquity": 48678000000,
+            "totalDebt": 20070000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "LITE": {
+        "2025-06-30": {
+            "netIncome": 25900000,
+            "totalEquity": 1134700000,
+            "totalDebt": 2608200000
+        },
+        "2024-06-30": {
+            "netIncome": -546500000,
+            "totalEquity": 957300000,
+            "totalDebt": 2559600000
+        },
+        "2023-06-30": {
+            "netIncome": -131600000,
+            "totalEquity": 1355800000,
+            "totalDebt": 2873700000
+        },
+        "2022-06-30": {
+            "netIncome": 198900000,
+            "totalEquity": 1875000000,
+            "totalDebt": 1936000000
+        },
+        "2021-06-30": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CCEP": {
+        "2025-12-31": {
+            "netIncome": 1942000000,
+            "totalEquity": 7835000000,
+            "totalDebt": 10694000000
+        },
+        "2024-12-31": {
+            "netIncome": 1418000000,
+            "totalEquity": 8489000000,
+            "totalDebt": 11331000000
+        },
+        "2023-12-31": {
+            "netIncome": 1669000000,
+            "totalEquity": 7976000000,
+            "totalDebt": 11396000000
+        },
+        "2022-12-31": {
+            "netIncome": 1508000000,
+            "totalEquity": 7447000000,
+            "totalDebt": 11907000000
+        }
+    },
+    "BKR": {
+        "2025-12-31": {
+            "netIncome": 2588000000,
+            "totalEquity": 18834000000,
+            "totalDebt": 6087000000
+        },
+        "2024-12-31": {
+            "netIncome": 2979000000,
+            "totalEquity": 16895000000,
+            "totalDebt": 6023000000
+        },
+        "2023-12-31": {
+            "netIncome": 1943000000,
+            "totalEquity": 15368000000,
+            "totalDebt": 6021000000
+        },
+        "2022-12-31": {
+            "netIncome": -601000000,
+            "totalEquity": 14394000000,
+            "totalDebt": 6658000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ZS": {
+        "2025-07-31": {
+            "netIncome": -41478000,
+            "totalEquity": 1799273000,
+            "totalDebt": 1796576000
+        },
+        "2024-07-31": {
+            "netIncome": -57706000,
+            "totalEquity": 1274102000,
+            "totalDebt": 1237965000
+        },
+        "2023-07-31": {
+            "netIncome": -202335000,
+            "totalEquity": 725112000,
+            "totalDebt": 1210545000
+        },
+        "2022-07-31": {
+            "netIncome": -390278000,
+            "totalEquity": 573300000,
+            "totalDebt": 1045722000
+        },
+        "2021-07-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "PDD": {
+        "2025-12-31": {
+            "netIncome": 97842539000,
+            "totalEquity": 413385156000,
+            "totalDebt": 5378795000
+        },
+        "2024-12-31": {
+            "netIncome": 112434512000,
+            "totalEquity": 313313124000,
+            "totalDebt": 10607140000
+        },
+        "2023-12-31": {
+            "netIncome": 60026544000,
+            "totalEquity": 187241607000,
+            "totalDebt": 10165901000
+        },
+        "2022-12-31": {
+            "netIncome": 31538062000,
+            "totalEquity": 117770911000,
+            "totalDebt": 16934324000
+        }
+    },
+    "CRWD": {
+        "2026-01-31": {
+            "netIncome": -162502000,
+            "totalEquity": 4428390000,
+            "totalDebt": 820077000
+        },
+        "2025-01-31": {
+            "netIncome": -15241000,
+            "totalEquity": 3279494000,
+            "totalDebt": 788901000
+        },
+        "2024-01-31": {
+            "netIncome": 72181000,
+            "totalEquity": 2303950000,
+            "totalDebt": 792874000
+        },
+        "2023-01-31": {
+            "netIncome": -183245000,
+            "totalEquity": 1463641000,
+            "totalDebt": 783618000
+        },
+        "2022-01-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "DDOG": {
+        "2025-12-31": {
+            "netIncome": 107741000,
+            "totalEquity": 3732206000,
+            "totalDebt": 1279005000
+        },
+        "2024-12-31": {
+            "netIncome": 183746000,
+            "totalEquity": 2714363000,
+            "totalDebt": 1842180000
+        },
+        "2023-12-31": {
+            "netIncome": 48568000,
+            "totalEquity": 2025354000,
+            "totalDebt": 902337000
+        },
+        "2022-12-31": {
+            "netIncome": -50160000,
+            "totalEquity": 1410505000,
+            "totalDebt": 837521000
+        }
+    },
+    "PLTR": {
+        "2025-12-31": {
+            "netIncome": 1625033000,
+            "totalEquity": 7387268000,
+            "totalDebt": 229338000
+        },
+        "2024-12-31": {
+            "netIncome": 462190000,
+            "totalEquity": 5003275000,
+            "totalDebt": 239219000
+        },
+        "2023-12-31": {
+            "netIncome": 209825000,
+            "totalEquity": 3475561000,
+            "totalDebt": 229392000
+        },
+        "2022-12-31": {
+            "netIncome": -373705000,
+            "totalEquity": 2565326000,
+            "totalDebt": 249404000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ABNB": {
+        "2025-12-31": {
+            "netIncome": 2511000000,
+            "totalEquity": 8199000000,
+            "totalDebt": 2067000000
+        },
+        "2024-12-31": {
+            "netIncome": 2648000000,
+            "totalEquity": 8412000000,
+            "totalDebt": 2058000000
+        },
+        "2023-12-31": {
+            "netIncome": 4792000000,
+            "totalEquity": 8165000000,
+            "totalDebt": 2304000000
+        },
+        "2022-12-31": {
+            "netIncome": 1893000000,
+            "totalEquity": 5560000000,
+            "totalDebt": 2341000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "DASH": {
+        "2025-12-31": {
+            "netIncome": 935000000,
+            "totalEquity": 10033000000,
+            "totalDebt": 3290000000
+        },
+        "2024-12-31": {
+            "netIncome": 123000000,
+            "totalEquity": 7803000000,
+            "totalDebt": 536000000
+        },
+        "2023-12-31": {
+            "netIncome": -558000000,
+            "totalEquity": 6806000000,
+            "totalDebt": 522000000
+        },
+        "2022-12-31": {
+            "netIncome": -1365000000,
+            "totalEquity": 6754000000,
+            "totalDebt": 511000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "APP": {
+        "2025-12-31": {
+            "netIncome": 3333764000,
+            "totalEquity": 2134671000,
+            "totalDebt": 3544741000
+        },
+        "2024-12-31": {
+            "netIncome": 1579790000,
+            "totalEquity": 1089818000,
+            "totalDebt": 3554610000
+        },
+        "2023-12-31": {
+            "netIncome": 357211000,
+            "totalEquity": 1256329000,
+            "totalDebt": 3177416000
+        },
+        "2022-12-31": {
+            "netIncome": -192746000,
+            "totalEquity": 1902677000,
+            "totalDebt": 3280209000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "CEG": {
+        "2025-12-31": {
+            "netIncome": 2319000000,
+            "totalEquity": 14517000000,
+            "totalDebt": 8992000000
+        },
+        "2024-12-31": {
+            "netIncome": 3749000000,
+            "totalEquity": 13166000000,
+            "totalDebt": 8412000000
+        },
+        "2023-12-31": {
+            "netIncome": 1623000000,
+            "totalEquity": 10925000000,
+            "totalDebt": 9261000000
+        },
+        "2022-12-31": {
+            "netIncome": -160000000,
+            "totalEquity": 11018000000,
+            "totalDebt": 5768000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "WBD": {
+        "2025-12-31": {
+            "netIncome": 727000000,
+            "totalEquity": 35919000000,
+            "totalDebt": 32567000000
+        },
+        "2024-12-31": {
+            "netIncome": -11311000000,
+            "totalEquity": 34037000000,
+            "totalDebt": 39505000000
+        },
+        "2023-12-31": {
+            "netIncome": -3126000000,
+            "totalEquity": 45226000000,
+            "totalDebt": 43669000000
+        },
+        "2022-12-31": {
+            "netIncome": -7371000000,
+            "totalEquity": 47095000000,
+            "totalDebt": 48999000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "GEHC": {
+        "2025-12-31": {
+            "netIncome": 2084000000,
+            "totalEquity": 10379000000,
+            "totalDebt": 10463000000
+        },
+        "2024-12-31": {
+            "netIncome": 1993000000,
+            "totalEquity": 8446000000,
+            "totalDebt": 9376000000
+        },
+        "2023-12-31": {
+            "netIncome": 1568000000,
+            "totalEquity": 7133000000,
+            "totalDebt": 9863000000
+        },
+        "2022-12-31": {
+            "netIncome": 1916000000,
+            "totalEquity": 9357000000,
+            "totalDebt": 8635000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "LIN": {
+        "2025-12-31": {
+            "netIncome": 6898000000,
+            "totalEquity": 38245000000,
+            "totalDebt": 28069000000
+        },
+        "2024-12-31": {
+            "netIncome": 6565000000,
+            "totalEquity": 38092000000,
+            "totalDebt": 22609000000
+        },
+        "2023-12-31": {
+            "netIncome": 6199000000,
+            "totalEquity": 39720000000,
+            "totalDebt": 20315000000
+        },
+        "2022-12-31": {
+            "netIncome": 4147000000,
+            "totalEquity": 40028000000,
+            "totalDebt": 18791000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "ARM": {
+        "2026-03-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        },
+        "2025-03-31": {
+            "netIncome": 792000000,
+            "totalEquity": 6839000000,
+            "totalDebt": 356000000
+        },
+        "2024-03-31": {
+            "netIncome": 306000000,
+            "totalEquity": 5295000000,
+            "totalDebt": 226000000
+        },
+        "2023-03-31": {
+            "netIncome": 524000000,
+            "totalEquity": 4051000000,
+            "totalDebt": 221000000
+        },
+        "2022-03-31": {
+            "netIncome": 549000000,
+            "totalEquity": 3548000000,
+            "totalDebt": 261000000
+        }
+    },
+    "TRI": {
+        "2025-12-31": {
+            "netIncome": 1502000000,
+            "totalEquity": 11914000000,
+            "totalDebt": 2372000000
+        },
+        "2024-12-31": {
+            "netIncome": 2210000000,
+            "totalEquity": 12006000000,
+            "totalDebt": 3076000000
+        },
+        "2023-12-31": {
+            "netIncome": 2695000000,
+            "totalEquity": 11064000000,
+            "totalDebt": 3542000000
+        },
+        "2022-12-31": {
+            "netIncome": 1338000000,
+            "totalEquity": 11885000000,
+            "totalDebt": 4996000000
+        }
+    },
+    "FER": {
+        "2025-12-31": {
+            "netIncome": 888000000,
+            "totalEquity": 5908000000,
+            "totalDebt": 10732000000
+        },
+        "2024-12-31": {
+            "netIncome": 3239000000,
+            "totalEquity": 6075000000,
+            "totalDebt": 11533000000
+        },
+        "2023-12-31": {
+            "netIncome": 341000000,
+            "totalEquity": 3766000000,
+            "totalDebt": 11565000000
+        },
+        "2022-12-31": {
+            "netIncome": 188000000,
+            "totalEquity": 4113000000,
+            "totalDebt": 11837000000
+        },
+        "2021-12-31": {
+            "netIncome": null,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    },
+    "SNDK": {
+        "2025-06-30": {
+            "netIncome": -1641000000,
+            "totalEquity": 9216000000,
+            "totalDebt": 2042000000
+        },
+        "2024-06-30": {
+            "netIncome": -672000000,
+            "totalEquity": 11082000000,
+            "totalDebt": 985000000
+        },
+        "2023-06-30": {
+            "netIncome": -2143000000,
+            "totalEquity": null,
+            "totalDebt": null
+        }
+    }
+}

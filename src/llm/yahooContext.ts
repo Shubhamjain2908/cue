@@ -36,18 +36,52 @@ const cachedCalendarBundleSchema = z.object({
   nextEarningsDate: z.string().nullable(),
 });
 
+const cachedFinancialsSchema = z.object({
+  trailingPE: z.number().nullable(),
+  returnOnEquity: z.number().nullable(),
+  debtToEquity: z.number().nullable(),
+});
+
 const cachedProfileBundleSchema = z.object({
   ticker: z.string(),
   fetchedAt: z.number(),
   sector: z.string().nullable(),
   marketCap: z.number().nullable(),
+  /** Present on bundles written after fundamentals metrics were added. */
+  financials: cachedFinancialsSchema.optional(),
 });
+
+const headlineForLedgerSchema = z.object({
+  title: z.string(),
+  source: z.string().optional().default(""),
+  publishedAt: z.string().optional().default(""),
+});
+
+export const yahooFundamentalsPayloadSchema = z.object({
+  ticker: z.string(),
+  /** Exchange session calendar date `YYYY-MM-DD` (caller supplies `getExchangeDateString()`). */
+  asOf: z.string(),
+  yahoo: z.object({
+    headlines: z.array(headlineForLedgerSchema),
+    financials: cachedFinancialsSchema,
+    sector: z.string().nullable().optional(),
+    marketCap: z.number().nullable().optional(),
+    nextEarningsDate: z.string().nullable().optional(),
+  }),
+});
+
+export type YahooFundamentalsPayload = z.infer<typeof yahooFundamentalsPayloadSchema>;
 
 export type YahooEnrichmentDto = {
   headlines: Array<{ title: string; source?: string; publishedAt?: string }>;
   sector: string | null;
   marketCap: number | null;
   nextEarningsDate: string | null;
+  financials: {
+    trailingPE: number | null;
+    returnOnEquity: number | null;
+    debtToEquity: number | null;
+  };
 };
 
 function resolveCacheRoot(cacheDir: string): string {
@@ -121,9 +155,62 @@ function filterHeadlinesLast7Days(
   });
 }
 
+function numOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function extractFinancialsFromQuoteSummary(qs: {
+  summaryDetail?: { trailingPE?: unknown };
+  financialData?: { returnOnEquity?: unknown; debtToEquity?: unknown };
+}): YahooEnrichmentDto["financials"] {
+  return {
+    trailingPE: numOrNull(qs.summaryDetail?.trailingPE),
+    returnOnEquity: numOrNull(qs.financialData?.returnOnEquity),
+    debtToEquity: numOrNull(qs.financialData?.debtToEquity),
+  };
+}
+
+/**
+ * Validates the ledger row shape for `fundamentals_cache.payload_json` (headlines + financials + optional overview fields).
+ */
+export function buildValidatedFundamentalsPayload(
+  ticker: string,
+  asOf: string,
+  dto: YahooEnrichmentDto,
+): YahooFundamentalsPayload {
+  return yahooFundamentalsPayloadSchema.parse({
+    ticker: sanitizeTicker(ticker),
+    asOf,
+    yahoo: {
+      headlines: dto.headlines.map((h) => ({
+        title: h.title,
+        source: h.source ?? "",
+        publishedAt: h.publishedAt ?? "",
+      })),
+      financials: dto.financials,
+      sector: dto.sector,
+      marketCap: dto.marketCap,
+      nextEarningsDate: dto.nextEarningsDate,
+    },
+  });
+}
+
+/**
+ * Full Yahoo enrichment DTO plus Zod-validated fundamentals ledger fields (`asOf`, structured `yahoo`).
+ */
+export async function fetchExtendedYahooContext(
+  ticker: string,
+  exchangeDate: string,
+  yf: YahooFinanceHandle = new YahooFinance({ suppressNotices: ["yahooSurvey"] }),
+  nowMs: number = Date.now(),
+): Promise<YahooFundamentalsPayload> {
+  const dto = await fetchYahooEnrichmentDto(ticker, yf, nowMs);
+  return buildValidatedFundamentalsPayload(ticker, exchangeDate, dto);
+}
+
 export async function fetchYahooEnrichmentDto(
   ticker: string,
-  yf: YahooFinanceHandle = new YahooFinance(),
+  yf: YahooFinanceHandle = new YahooFinance({ suppressNotices: ["yahooSurvey"] }),
   nowMs: number = Date.now(),
 ): Promise<YahooEnrichmentDto> {
   const config = getConfig();
@@ -171,26 +258,39 @@ export async function fetchYahooEnrichmentDto(
   }
 
   let profile = readJsonCache(profPath, PROFILE_TTL_MS, cachedProfileBundleSchema);
+  if (profile !== null && profile.financials === undefined) {
+    profile = null;
+  }
+
   if (profile === null) {
     const qs = await yf.quoteSummary(ticker, {
-      modules: ["assetProfile", "summaryDetail"],
+      modules: ["assetProfile", "summaryDetail", "financialData"],
     });
     const sector = qs.assetProfile?.sector ?? qs.assetProfile?.sectorDisp ?? null;
     const marketCap =
       typeof qs.summaryDetail?.marketCap === "number" ? qs.summaryDetail.marketCap : null;
+    const financials = extractFinancialsFromQuoteSummary(qs);
     profile = {
       ticker: safe,
       fetchedAt: nowMs,
       sector,
       marketCap,
+      financials,
     };
     writeJsonCache(profPath, root, profile);
   }
+
+  const financials = profile.financials ?? {
+    trailingPE: null,
+    returnOnEquity: null,
+    debtToEquity: null,
+  };
 
   return {
     headlines,
     sector: profile.sector ?? null,
     marketCap: profile.marketCap ?? null,
     nextEarningsDate,
+    financials,
   };
 }

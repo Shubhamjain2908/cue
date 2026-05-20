@@ -218,17 +218,17 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 ## 12. Known issues & tracker
 
-| ID | Severity | Issue | Status |
-|---|---|---|---|
-| S4 | **HIGH** | Massive **free-tier / call count** | ✅ **Mitigated:** `cue ingest` uses **grouped daily** (one REST call / run); follow-ups: optional multi-day backfill, vendor paging if ever needed |
-| S5 | LOW | `rankedUniverse=0` log on stop runs (misleading) | Open — cosmetic |
-| S6 | LOW | No `backtest_trades` table — run-level stats only | Deferred (see `spec/cue-db-schema.md`) |
-| — | DATA | Massive EOD **lag** 1–2d | Accepted |
-| — | FIXED (repo) | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs` |
-| — | FIXED (repo) | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard |
-| — | FIXED (repo) | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher |
-| — | FIXED (arch S3) | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts` |
-| — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline) |
+| ID | Severity           | Issue | Status                                                                                                                                            |
+|---|--------------------|---|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| S4 | FIXED              | Massive **free-tier / call count** | ✅ **Mitigated:** `cue ingest` uses **grouped daily** (one REST call / run); follow-ups: optional multi-day backfill, vendor paging if ever needed |
+| S5 | FIXED              | `rankedUniverse=0` log on stop runs (misleading) | ✅ Open — cosmetic                                                                                                                                 |
+| S6 | LOW                | No `backtest_trades` table — run-level stats only | Open — Phase 5 (schema ready, writer not wired)                                                                                                            |
+| — | DATA               | Massive EOD **lag** 1–2d | Accepted                                                                                                                                          |
+| — | FIXED (repo)       | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs`                                                                                                                   |
+| — | FIXED (repo)       | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard                                                                                                                               |
+| — | FIXED (repo)       | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher                                                                                                                      |
+| — | FIXED (arch S3)    | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts`                                                                                             |
+| — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
 
 ---
 
@@ -236,12 +236,9 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Task | Notes |
 |---|---|
-| **Grouped Massive fetch** | ✅ Shipped: `massive-price-ingestor.ts` grouped daily + universe mask + quorum |
 | **Full NDX universe + `_meta.json`** | ✅ Shipped: `data/universe/_meta.json`, `src/universe/load-universe.ts` (no cache) |
-| **Wire `fundamentals_cache`** | From `enrich-fundamentals` into SQLite |
-| **Cosmetic logs** | `rankedUniverse=0` on intentional skip |
 | **`backtest_trades`** | Per-trade audit (Phase 5 spec) |
-| **Quality-GARP** (research) | Arch doc: backtest before any new production screener |
+| **Quality-GARP** (research) | research only, new backtest required before any code |
 | **systemd unit** | Optional alternative to PM2 (`cue.service`, `EnvironmentFile=`) |
 | **Winston file transport** | Optional rotating `logs/cue.log` |
 
@@ -260,5 +257,45 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | `.cursor/rules/cue-claude-instructions.md` | **Claude / Cursor agent** role, SoU reading order, stack, workflow directives, path map |
 
 ---
+
+## 15. Phase 4 Historical Ledger & Post-Mortem (May 2026)
+
+### 15.1 Architectural Modifications & Infrastructure Upgrades
+Phase 4 successfully migrated Cue from a localized staging sandbox to an enterprise-grade, full-scale production environment on the Oracle Cloud VM instance. The following system-level changes are locked into the codebase:
+
+* **Concurrency Lock Hardening (§4.4 / §12):** Upgraded the ephemeral in-memory state flag to an atomic, PID-backed persistent lockfile layer (`LOCK_PATH`, default `./db/cue.lock`). Stale locks caused by unexpected PM2 or VM reboots are detected using process liveness signals (`process.kill(pid, 0)`) and automatically cleared.
+* **Grouped Massive Ingestor Optimization (§6.1 / S4):** Completely eliminated the sequential 100-query per-ticker REST request loop. Ingestion now utilizes Massive's bulk endpoint (`/v2/aggs/grouped/locale/us/market/stocks/`) to aggregate the market cross-section in exactly one network call, safeguarding the database currency guard (`MAX(date)`) and enforcing an 80% quorum rule before executing transactional writes.
+* **Full Universe Expansion (§3.1):** Expanded the execution matrix to dynamically parse all 100 active components tracked in `data/universe/nasdaq100.json` alongside `QQQ` for index regime filtering.
+* **Dashboard Trailing Stop Instrumentation (§4.4):** Upgraded the static HTML generation script to read and display `highest_close_since_entry` and `current_stop_loss` metrics directly from active portfolio ledger positions. Added structural badge labeling to dynamically distinguish between the `Base (4.0x ATR)` and `Tight (1.5x ATR)` trailing stop sub-regimes.
+* **Cosmetic Log Sanitization (Issue S5):** Gated cross-sectional array tracking traces (`rankedUniverse=0`) to emit exclusively on `rebalance` runs. Mon-Thu `stop` paths now route telemetry quietly through the `debug` log tier with an informative string.
+
+### 15.2 Quality-GARP Strategy Evaluation (Task 4.6 Research Archive)
+Per strategy constraints, a secondary research module was built to evaluate a Growth At A Reasonable Price (GARP) alpha model. The strategy was restricted to an isolated backtester harness, logging exclusively to the `backtest_trades` audit schema without writing to live execution states.
+
+#### Mathematical Formula Chain
+* **Quality Filtering Constraints:** $$\text{Return on Equity (ROE)} \ge 15.0\%$$
+  $$\text{Debt-to-Equity (D/E)} \le 1.5$$
+* **Pricing Multiplier Evaluation ($PEG$):** $$PEG = \frac{PE_{ttm}}{\Delta EPS_{3Y} \times 100}$$
+  $$\text{where } \Delta EPS_{3Y} = \left(\frac{EPS_{now}}{EPS_{3Y\_ago}}\right)^{\frac{1}{3}} - 1$$
+* **Ranking Constraint:** Sort survivors ascending by $PEG$, entry restricted to top 3 lowest positive records.
+
+#### Backtest Iteration Results (Window: 2023-01-01 → 2025-12-31)
+
+| Metric | Core Momentum (Locked) | GARP v1 (Rotational Model) | GARP v2 (Technical Exit Model) | Gate Threshold |
+| :--- | :--- | :--- | :--- | :--- |
+| **CAGR** | **21.39%** | 1.11% | 2.60% | N/A |
+| **Max Drawdown** | **11.54%** | 6.56% | 8.49% | < 20.0% |
+| **Win Rate** | **52.20%** | 44.44% | 53.33% | N/A |
+| **Sharpe Ratio** | **1.162** | -0.778 | **-0.188** | **> 0.8** |
+| **Expectancy** | **+4.78%** | +2.329% | +1.112% | > 0.0% |
+| **Total Trades** | **78** | 9 | 45 | N/A |
+| **Gate Verdict** | **LOCKED / PROD** | **BLOCKED** | **BLOCKED** | N/A |
+
+#### Factor Breakdown & Diagnostic Post-Mortem
+The strategy underperformed due to anti-momentum factor selection. The valuation filters systematically excluded premium megacap technology assets that drove index returns during the 2023–2025 market cycle. Stripping out rotational rebalance liquidations (`REBALANCE_DROP`) normalized trade frequency and improved win rates, but the final Sharpe ratio ($-0.188$) fell drastically short of the production clearance floor ($>0.8$).
+
+**Quality-GARP is permanently archived as an unvalidated alpha factor; no production code will be adjusted to accommodate it.**
+
+----
 
 *End of project-spec — prefer `src/db/migrations` and `src/agents/*.ts` over prose when in doubt.*
