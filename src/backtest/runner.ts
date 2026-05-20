@@ -4,13 +4,14 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
 import { getConfig } from "../config/index.js";
-import { insertBacktestRun } from "../db/queries.js";
+import type { BacktestTradeExitReasonDb } from "../db/queries.js";
+import { insertBacktestRun, insertBacktestTrade } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
 import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
 import { atr, sma } from "../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
-import type { ClosedBacktestTrade, EquityPoint } from "./types.js";
+import type { ClosedBacktestTrade, EquityPoint, RunBacktestResult } from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
@@ -18,6 +19,10 @@ import {
   BACKTEST_POSITION_USD,
 } from "./types.js";
 import { loadUniverseTickers } from "../universe/load-universe.js";
+import {
+  printQualityGarpSummary,
+  runQualityGarpBacktest,
+} from "./strategies/quality-garp.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
 
@@ -382,14 +387,6 @@ function printSummary(
   console.log("");
 }
 
-export interface RunBacktestResult {
-  equityPoints: EquityPoint[];
-  closedTrades: ClosedBacktestTrade[];
-  metrics: ReturnType<typeof computeBacktestMetrics>;
-  benchmarkCagrPct: number | null;
-  yearFraction: number;
-}
-
 function rankingConfigFromDefaults(): RankingConfig {
   return { ...DEFAULT_RANKING_CONFIG };
 }
@@ -713,68 +710,177 @@ export function runBacktest(
   return { equityPoints, closedTrades, metrics, benchmarkCagrPct, yearFraction };
 }
 
-function parseCliDates(): { from: string; to: string } {
+function parseCli(): {
+  from: string;
+  to: string;
+  strategy: "momentum" | "quality-garp";
+} {
   let from = "2021-01-01";
   let to = "2023-12-31";
+  let strategy: "momentum" | "quality-garp" = "momentum";
+  let fromExplicit = false;
+  let toExplicit = false;
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--from" && argv[i + 1]) {
       from = argv[++i]!;
+      fromExplicit = true;
     } else if (a === "--to" && argv[i + 1]) {
       to = argv[++i]!;
+      toExplicit = true;
+    } else if (a === "--strategy" && argv[i + 1]) {
+      const s = argv[++i]!;
+      if (s === "quality-garp") {
+        strategy = "quality-garp";
+      } else {
+        strategy = "momentum";
+      }
     }
   }
-  return { from, to };
+  if (strategy === "quality-garp") {
+    if (!fromExplicit) {
+      from = "2023-01-01";
+    }
+    if (!toExplicit) {
+      to = "2025-12-31";
+    }
+  }
+  return { from, to, strategy };
 }
 
 function realOrZero(x: number | null): number {
   return x === null || Number.isNaN(x) ? 0 : x;
 }
 
+function closedTradeToDbExit(reason: ClosedBacktestTrade["exitReason"]): BacktestTradeExitReasonDb {
+  switch (reason) {
+    case "gapOrStop":
+      return "TRAILING_STOP";
+    case "maxHoldDays":
+      return "TIME_EXIT";
+    case "standardTakeProfit":
+    case "standardTrendBreak":
+      return "MANUAL";
+    default:
+      return "MANUAL";
+  }
+}
+
+function backtestTradesTableExists(db: SqliteConnection): boolean {
+  const row = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'backtest_trades' LIMIT 1`)
+    .get() as { 1?: number } | undefined;
+  return row !== undefined;
+}
+
+function persistBacktestArtifacts(
+  db: SqliteConnection,
+  from: string,
+  to: string,
+  result: RunBacktestResult,
+): { runId: bigint; tradesInserted: number } {
+  const expectancyPctPerTrade = mean(
+    result.closedTrades.map((t) =>
+      t.entryFillPrice !== 0
+        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+        : 0,
+    ),
+  );
+  const runDate = new Date().toISOString().slice(0, 10);
+  const { lastInsertRowid } = insertBacktestRun(db, {
+    runDate,
+    fromDate: from,
+    toDate: to,
+    cagr: realOrZero(result.metrics.cagrPct),
+    maxDrawdown: realOrZero(result.metrics.maxDrawdownPct),
+    winRate: realOrZero(result.metrics.winRatePct),
+    sharpeRatio: realOrZero(result.metrics.sharpeRatio),
+    totalTrades: result.metrics.totalTrades,
+    benchmarkCagr: realOrZero(result.benchmarkCagrPct),
+    expectancy: realOrZero(expectancyPctPerTrade),
+  });
+
+  let tradesInserted = 0;
+  if (backtestTradesTableExists(db)) {
+    for (const t of result.closedTrades) {
+      const pnlPct =
+        t.entryFillPrice !== 0
+          ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+          : 0;
+      insertBacktestTrade(db, {
+        runRowid: lastInsertRowid,
+        ticker: t.ticker,
+        entryDate: t.entryDate,
+        entryPrice: t.entryFillPrice,
+        exitDate: t.exitDate,
+        exitPrice: t.exitFillPrice,
+        pnlPct,
+        exitReason: closedTradeToDbExit(t.exitReason),
+      });
+      tradesInserted += 1;
+    }
+  }
+
+  return { runId: lastInsertRowid, tradesInserted };
+}
+
 const isMain =
   path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
 
 if (isMain) {
-  const { from, to } = parseCliDates();
+  const { from, to, strategy } = parseCli();
   const config = getConfig();
   const db = new Database(config.DB_PATH);
   try {
     initSchema(db);
-    const result = runBacktest(db, from, to);
-    const expectancyPctPerTrade = mean(
-      result.closedTrades.map((t) =>
-        t.entryFillPrice !== 0
-          ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
-          : 0,
-      ),
-    );
-    const exitAgg = aggregateExitBuckets(result.closedTrades);
-    printSummary(from, to, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade, exitAgg);
 
-    if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
-      console.warn(
-        "Backtest: 0 round-trip trades — regime gate, ranking, or data window produced no fills.",
+    if (strategy === "quality-garp") {
+      const result = runQualityGarpBacktest(db, from, to);
+      const expectancyPctPerTrade = mean(
+        result.closedTrades.map((t) =>
+          t.entryFillPrice !== 0
+            ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+            : 0,
+        ),
+      );
+      printQualityGarpSummary(from, to, result, expectancyPctPerTrade);
+
+      if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
+        console.warn(
+          "Quality-GARP: 0 round-trip trades — regime gate, filters, or sparse fundamentals/EPS data.",
+        );
+      }
+
+      const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
+      const { runId, tradesInserted } = persistBacktestArtifacts(db, from, to, result);
+      console.log(
+        `Saved backtest run to SQLite (id=${runId.toString()}, trades=${tradesInserted}, file=${dbAbsPath}).`,
+      );
+    } else {
+      const result = runBacktest(db, from, to);
+      const expectancyPctPerTrade = mean(
+        result.closedTrades.map((t) =>
+          t.entryFillPrice !== 0
+            ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+            : 0,
+        ),
+      );
+      const exitAgg = aggregateExitBuckets(result.closedTrades);
+      printSummary(from, to, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade, exitAgg);
+
+      if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
+        console.warn(
+          "Backtest: 0 round-trip trades — regime gate, ranking, or data window produced no fills.",
+        );
+      }
+
+      const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
+      const { runId, tradesInserted } = persistBacktestArtifacts(db, from, to, result);
+      console.log(
+        `Saved backtest run to SQLite (id=${runId.toString()}, trades=${tradesInserted}, file=${dbAbsPath}). Point sqlite-cue / other tools at this path.`,
       );
     }
-
-    const runDate = new Date().toISOString().slice(0, 10);
-    const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
-    const { lastInsertRowid } = insertBacktestRun(db, {
-      runDate,
-      fromDate: from,
-      toDate: to,
-      cagr: realOrZero(result.metrics.cagrPct),
-      maxDrawdown: realOrZero(result.metrics.maxDrawdownPct),
-      winRate: realOrZero(result.metrics.winRatePct),
-      sharpeRatio: realOrZero(result.metrics.sharpeRatio),
-      totalTrades: result.metrics.totalTrades,
-      benchmarkCagr: realOrZero(result.benchmarkCagrPct),
-      expectancy: realOrZero(expectancyPctPerTrade),
-    });
-    console.log(
-      `Saved backtest run to SQLite (id=${lastInsertRowid.toString()}, file=${dbAbsPath}). Point sqlite-cue / other tools at this path.`,
-    );
   } finally {
     db.close();
   }
