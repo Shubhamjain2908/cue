@@ -14,6 +14,8 @@ const baseEnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_CHAT_ID: z.string().min(1),
   DB_PATH: z.string().default("./db/cue.db"),
+  /** Cross-process scheduler lock (PID file). Cleared when holder is dead (`process.kill(pid, 0)`). */
+  LOCK_PATH: z.string().min(1).default("./db/cue.lock"),
   CACHE_DIR: z.string().default("./data/cache"),
   UNIVERSE: z.string().default("nasdaq100"),
   MAX_POSITIONS: z.coerce.number().int().positive().default(5),
