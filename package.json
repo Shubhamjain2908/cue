@@ -37,12 +37,16 @@
     "rebuild:native": "pnpm rebuild better-sqlite3"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
+    "@google-cloud/vertexai": "^1.12.0",
+    "@google/genai": "^2.0.0",
     "axios": "^1.7.0",
     "commander": "^12.1.0",
     "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",
     "google-auth-library": "^9.15.1",
     "node-cron": "^3.0.3",
+    "openai": "^6.35.0",
     "winston": "^3.13.0",
     "yahoo-finance2": "^3.14.1",
     "zod": "^3.23.8"
