@@ -1,98 +1,201 @@
-import axios from "axios";
-import { GoogleAuth } from "google-auth-library";
-
-import type { LLMMessage, LLMProvider } from "../types.js";
-import { LLMHttpError } from "../types.js";
-
-export interface VertexProviderOptions {
-  /** GCP project id (numeric or string id from Cloud Console). */
-  projectId: string;
-  /** Vertex region, e.g. `us-central1`. */
-  location?: string;
-  /** Publisher model id, e.g. `gemini-2.0-flash-001`. */
-  model?: string;
-}
-
-function buildGenerateContentUrl(projectId: string, location: string, model: string): string {
-  const host = `${location}-aiplatform.googleapis.com`;
-  return `https://${host}/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
-}
-
 /**
- * Gemini on Vertex AI via `generateContent`, authenticated with Application Default Credentials
- * (e.g. `GOOGLE_APPLICATION_CREDENTIALS` to a service-account JSON file, or GCE / Cloud Run identity).
+ * Google Vertex AI — Gemini via `@google-cloud/vertexai`.
+ *
+ * Auth: Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` or GCP identity).
  */
-export function createVertexProvider(options: VertexProviderOptions): LLMProvider {
-  const location = options.location ?? "us-central1";
-  const model = options.model ?? "gemini-2.0-flash-001";
-  const url = buildGenerateContentUrl(options.projectId, location, model);
 
-  const auth = new GoogleAuth({
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  });
+import {
+  BlockedReason,
+  FinishReason,
+  type GenerateContentResponse,
+  HarmBlockThreshold,
+  HarmCategory,
+  VertexAI,
+} from "@google-cloud/vertexai";
 
-  return {
-    name: "vertex",
-    async complete(messages: LLMMessage[], maxTokens: number): Promise<string> {
-      const client = await auth.getClient();
-      const access = await client.getAccessToken();
-      const rawToken = access.token;
-      const token = typeof rawToken === "string" ? rawToken : "";
-      if (token.length === 0) {
-        throw new Error(
-          "Vertex: no access token (set GOOGLE_APPLICATION_CREDENTIALS or use a GCP-attached service identity)",
-        );
-      }
+import { getConfig } from "../../config/index.js";
+import { parseAndValidate } from "../json.js";
+import type {
+  GenerateJsonOptions,
+  GenerateTextOptions,
+  LlmJsonResult,
+  LlmProvider,
+  LlmTextResult,
+} from "../types.js";
 
-      const systemParts = messages.filter((m) => m.role === "system");
-      const systemText = systemParts.map((m) => m.content).join("\n\n");
-      const contents = messages
-        .filter((m) => m.role !== "system")
-        .map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        }));
+const RESEARCH_SAFETY_SETTINGS = [
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+];
 
-      const body: Record<string, unknown> = {
-        contents,
+export class VertexProvider implements LlmProvider {
+  readonly name = "vertex";
+  readonly model: string;
+  private readonly vertex: VertexAI;
+  private readonly timeoutMs: number;
+
+  constructor() {
+    const config = getConfig();
+    if (!config.VERTEX_PROJECT_ID) {
+      throw new Error(
+        "VertexProvider requires VERTEX_PROJECT_ID. Set it in .env or switch LLM_PROVIDER.",
+      );
+    }
+    this.model = config.VERTEX_MODEL;
+    this.timeoutMs = config.VERTEX_TIMEOUT_MS;
+    this.vertex = new VertexAI({
+      project: config.VERTEX_PROJECT_ID,
+      location: config.VERTEX_LOCATION,
+    });
+  }
+
+  async generateText(opts: GenerateTextOptions): Promise<LlmTextResult> {
+    const started = Date.now();
+    const generativeModel = this.vertex.getGenerativeModel(
+      {
+        model: this.model,
+        systemInstruction: opts.system,
+        safetySettings: RESEARCH_SAFETY_SETTINGS,
         generationConfig: {
-          maxOutputTokens: maxTokens,
+          temperature: opts.temperature ?? 0.2,
+          maxOutputTokens: opts.maxOutputTokens ?? 8192,
         },
-      };
-      if (systemText.length > 0) {
-        body.systemInstruction = { parts: [{ text: systemText }] };
-      }
+      },
+      { timeout: this.timeoutMs },
+    );
+
+    const result = await generativeModel.generateContent({
+      contents: [{ role: "user", parts: [{ text: opts.user }] }],
+    });
+
+    const text = extractResponseText(result.response);
+    const usage = result.response.usageMetadata;
+    return {
+      text,
+      model: this.model,
+      usage: {
+        inputTokens: usage?.promptTokenCount,
+        outputTokens: usage?.candidatesTokenCount,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+
+  async generateJson<T>(opts: GenerateJsonOptions<T>): Promise<LlmJsonResult<T>> {
+    const maxRetries = opts.maxRetries ?? 1;
+    let lastErr: unknown;
+    let lastRaw = "";
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const started = Date.now();
+      const userPrompt =
+        attempt === 0
+          ? opts.user
+          : `${opts.user}\n\nIMPORTANT: Return ONLY a single valid JSON object matching the schema. No markdown fences, no commentary.`;
+
+      const generativeModel = this.vertex.getGenerativeModel(
+        {
+          model: this.model,
+          systemInstruction: opts.system,
+          safetySettings: RESEARCH_SAFETY_SETTINGS,
+          generationConfig: {
+            temperature: opts.temperature ?? 0.1,
+            maxOutputTokens: opts.maxOutputTokens ?? 8192,
+            responseMimeType: "application/json",
+          },
+        },
+        { timeout: this.timeoutMs },
+      );
+
+      const result = await generativeModel.generateContent({
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      });
+
+      const raw = extractResponseText(result.response, { rejectMaxTokens: true });
+      lastRaw = raw;
+      const usage = result.response.usageMetadata;
 
       try {
-        const res = await axios.post<{
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string }> };
-          }>;
-        }>(url, body, {
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${token}`,
+        const data = parseAndValidate(raw, opts.schema);
+        return {
+          data,
+          raw,
+          model: this.model,
+          usage: {
+            inputTokens: usage?.promptTokenCount,
+            outputTokens: usage?.candidatesTokenCount,
+            durationMs: Date.now() - started,
           },
-          timeout: 120_000,
-          validateStatus: () => true,
-        });
-        if (res.status < 200 || res.status >= 300) {
-          const snippet =
-            typeof res.data === "object" ? JSON.stringify(res.data).slice(0, 500) : String(res.data);
-          throw new LLMHttpError(`Vertex HTTP ${res.status}`, res.status, snippet);
-        }
-        const parts = res.data.candidates?.[0]?.content?.parts ?? [];
-        return parts.map((p) => p.text ?? "").join("");
-      } catch (e) {
-        if (e instanceof LLMHttpError) {
-          throw e;
-        }
-        if (axios.isAxiosError(e) && e.response) {
-          const snippet = JSON.stringify(e.response.data ?? {}).slice(0, 500);
-          throw new LLMHttpError(`Vertex HTTP ${e.response.status}`, e.response.status, snippet);
-        }
-        throw e;
+        };
+      } catch (err) {
+        lastErr = err;
       }
-    },
-  };
+    }
+
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error(`Vertex JSON generation failed after retries: ${lastRaw.slice(0, 300)}`);
+  }
+}
+
+function extractResponseText(
+  response: GenerateContentResponse,
+  opts?: { rejectMaxTokens?: boolean },
+): string {
+  const pf = response.promptFeedback;
+  if (pf?.blockReason && pf.blockReason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED) {
+    throw new Error(`Vertex blocked the prompt: ${pf.blockReason}. ${pf.blockReasonMessage ?? ""}`);
+  }
+
+  const candidates = response.candidates ?? [];
+  const emptyReasons: string[] = [];
+
+  for (const cand of candidates) {
+    const reason = cand.finishReason;
+    let chunk = "";
+    if (cand.content?.parts?.length) {
+      for (const part of cand.content.parts) {
+        if ("text" in part && part.text) chunk += part.text;
+      }
+    }
+    const trimmed = chunk.trim();
+    if (trimmed) {
+      if (
+        reason &&
+        reason !== FinishReason.STOP &&
+        reason !== FinishReason.MAX_TOKENS &&
+        reason !== FinishReason.FINISH_REASON_UNSPECIFIED
+      ) {
+        throw new Error(
+          `Vertex stopped with finishReason=${reason}${cand.finishMessage ? `: ${cand.finishMessage}` : ""}`,
+        );
+      }
+      if (opts?.rejectMaxTokens && reason === FinishReason.MAX_TOKENS) {
+        throw new Error(
+          "Vertex hit MAX_TOKENS — output truncated. Increase maxOutputTokens or shorten the task.",
+        );
+      }
+      return trimmed;
+    }
+    if (reason && reason !== FinishReason.FINISH_REASON_UNSPECIFIED) {
+      emptyReasons.push(String(reason));
+    }
+  }
+
+  const hint = emptyReasons.length > 0 ? ` finishReason=${emptyReasons.join(",")}` : "";
+  throw new Error(`Vertex returned no text candidates (empty or filtered).${hint}`);
 }
