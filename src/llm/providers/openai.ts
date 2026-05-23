@@ -1,54 +1,91 @@
-import axios from "axios";
+/**
+ * OpenAI-compatible provider. Uses the official `openai` SDK (v6+).
+ * Set OPENAI_BASE_URL to point at DeepSeek or other OpenAI-compatible APIs.
+ */
 
-import type { LLMMessage, LLMProvider } from "../types.js";
-import { LLMHttpError } from "../types.js";
+import OpenAI from "openai";
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = "gpt-4o-mini";
+import { getConfig } from "../../config/index.js";
+import { parseAndValidate } from "../json.js";
+import type {
+  GenerateJsonOptions,
+  GenerateTextOptions,
+  LlmJsonResult,
+  LlmProvider,
+  LlmTextResult,
+} from "../types.js";
 
-export function createOpenAiProvider(apiKey: string): LLMProvider {
-  return {
-    name: "openai",
-    async complete(messages: LLMMessage[], maxTokens: number): Promise<string> {
-      const chatMessages = messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+export class OpenAIProvider implements LlmProvider {
+  readonly name = "openai";
+  readonly model: string;
+  private readonly client: OpenAI;
+
+  constructor() {
+    const config = getConfig();
+    if (!config.OPENAI_API_KEY) {
+      throw new Error(
+        "OpenAIProvider requires OPENAI_API_KEY. Set it in .env or switch LLM_PROVIDER.",
+      );
+    }
+    this.model = config.OPENAI_MODEL;
+    this.client = new OpenAI({
+      baseURL: config.OPENAI_BASE_URL,
+      apiKey: config.OPENAI_API_KEY,
+    });
+  }
+
+  async generateText(opts: GenerateTextOptions & { forceJson?: boolean }): Promise<LlmTextResult> {
+    const started = Date.now();
+    const response = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        temperature: opts.temperature ?? 0.2,
+        max_tokens: opts.maxOutputTokens ?? 4096,
+        messages: [
+          { role: "system", content: opts.system },
+          { role: "user", content: opts.user },
+        ],
+        ...(opts.forceJson && { response_format: { type: "json_object" } }),
+      },
+      { signal: opts.signal ?? undefined },
+    );
+
+    const text = response.choices[0]?.message?.content ?? "";
+    return {
+      text,
+      model: response.model,
+      usage: {
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+
+  async generateJson<T>(opts: GenerateJsonOptions<T>): Promise<LlmJsonResult<T>> {
+    const maxRetries = opts.maxRetries ?? 1;
+    let lastErr: unknown;
+    let lastRaw = "";
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const text = await this.generateText({
+        ...opts,
+        forceJson: true,
+        user:
+          attempt === 0
+            ? opts.user
+            : `${opts.user}\n\nIMPORTANT: Your previous response was not valid JSON. Return ONLY a JSON object, no markdown fences, no explanation.`,
+      });
+      lastRaw = text.text;
       try {
-        const res = await axios.post<{
-          choices?: Array<{ message?: { content?: string } }>;
-        }>(
-          OPENAI_URL,
-          {
-            model: MODEL,
-            max_tokens: maxTokens,
-            messages: chatMessages,
-          },
-          {
-            headers: {
-              "content-type": "application/json",
-              authorization: `Bearer ${apiKey}`,
-            },
-            timeout: 120_000,
-            validateStatus: () => true,
-          },
-        );
-        if (res.status < 200 || res.status >= 300) {
-          const snippet = typeof res.data === "object" ? JSON.stringify(res.data).slice(0, 500) : String(res.data);
-          throw new LLMHttpError(`OpenAI HTTP ${res.status}`, res.status, snippet);
-        }
-        const text = res.data.choices?.[0]?.message?.content ?? "";
-        return text;
-      } catch (e) {
-        if (e instanceof LLMHttpError) {
-          throw e;
-        }
-        if (axios.isAxiosError(e) && e.response) {
-          const snippet = JSON.stringify(e.response.data ?? {}).slice(0, 500);
-          throw new LLMHttpError(`OpenAI HTTP ${e.response.status}`, e.response.status, snippet);
-        }
-        throw e;
+        const data = parseAndValidate(text.text, opts.schema);
+        return { data, raw: text.text, model: text.model, usage: text.usage };
+      } catch (err) {
+        lastErr = err;
       }
-    },
-  };
+    }
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error(`OpenAI JSON generation failed: ${lastRaw.slice(0, 200)}`);
+  }
 }
