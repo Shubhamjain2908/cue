@@ -2,8 +2,8 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runEnrichment } from "../../src/llm/enricher.js";
-import { JSON_RETRY_USER_MESSAGE } from "../../src/llm/types.js";
-import type { LLMProvider } from "../../src/llm/types.js";
+import { EnrichmentResultSchema, type EnrichmentResult } from "../../src/llm/enrichment.js";
+import type { LlmProvider } from "../../src/llm/types.js";
 import { resetConfigCache } from "../../src/config/index.js";
 import { insertSignal } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
@@ -16,17 +16,16 @@ function envForEnrich(): void {
   process.env.POLYGON_API_KEY = "p";
   process.env.TELEGRAM_BOT_TOKEN = "t";
   process.env.TELEGRAM_CHAT_ID = "c";
-  process.env.LLM_PROVIDER = "anthropic";
-  process.env.ANTHROPIC_API_KEY = "a";
+  process.env.LLM_PROVIDER = "mock";
   process.env.LLM_MAX_TOKENS = "600";
 }
 
-const valid = {
+const valid: EnrichmentResult = {
   sentiment: "NEUTRAL",
   rationale: "This rationale is long enough for schema validation rules here.",
-  earningsDate: null as string | null,
+  earningsDate: null,
   sector: "Technology",
-  confidence: "LOW" as const,
+  confidence: "LOW",
 };
 
 describe("runEnrichment", () => {
@@ -39,7 +38,7 @@ describe("runEnrichment", () => {
     resetConfigCache();
   });
 
-  it("retries once with deterministic JSON correction message then persists", async () => {
+  it("calls generateJson with enrichment schema and persists", async () => {
     const db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     initSchema(db);
@@ -56,12 +55,19 @@ describe("runEnrichment", () => {
     });
     const { id } = db.prepare(`SELECT id FROM signals WHERE ticker = 'ZZZ'`).get() as { id: number };
 
-    const complete = vi
-      .fn()
-      .mockResolvedValueOnce("not-json")
-      .mockResolvedValueOnce(JSON.stringify(valid));
+    const generateJson = vi.fn().mockResolvedValue({
+      data: valid,
+      raw: JSON.stringify(valid),
+      model: "mock-model",
+      usage: { durationMs: 1 },
+    });
 
-    const provider: LLMProvider = { name: "mock", complete };
+    const provider: LlmProvider = {
+      name: "mock",
+      model: "mock-model",
+      generateText: vi.fn(),
+      generateJson,
+    };
 
     const fetchYahoo = vi.fn().mockResolvedValue({
       headlines: [],
@@ -73,11 +79,9 @@ describe("runEnrichment", () => {
 
     const result = await runEnrichment(db, id, { provider, fetchYahoo });
     expect(result.sentiment).toBe("NEUTRAL");
-    expect(complete).toHaveBeenCalledTimes(2);
-    const secondMsgs = complete.mock.calls[1]![0] as import("../../src/llm/types.js").LLMMessage[];
-    expect(secondMsgs[secondMsgs.length - 1]!.content).toBe(JSON_RETRY_USER_MESSAGE);
-    expect(secondMsgs[secondMsgs.length - 2]!.role).toBe("assistant");
-    expect(secondMsgs[secondMsgs.length - 2]!.content).toBe("not-json");
+    expect(generateJson).toHaveBeenCalledTimes(1);
+    expect(generateJson.mock.calls[0]![0].schema).toBe(EnrichmentResultSchema);
+    expect(generateJson.mock.calls[0]![0].maxRetries).toBe(1);
 
     const row = db.prepare(`SELECT sentiment, confidence FROM enrichments WHERE signal_id = ?`).get(id) as {
       sentiment: string;
@@ -110,14 +114,19 @@ describe("runEnrichment", () => {
       VALUES (?, 'BULLISH', 'This rationale is long enough for schema validation rules here.', '[]', 'HIGH')
     `,
     ).run(id);
-    const complete = vi.fn();
-    const provider: LLMProvider = { name: "mock", complete };
+    const generateJson = vi.fn();
+    const provider: LlmProvider = {
+      name: "mock",
+      model: "mock-model",
+      generateText: vi.fn(),
+      generateJson,
+    };
     const result = await runEnrichment(db, id, {
       provider,
       fetchYahoo: vi.fn(),
     });
     expect(result.sentiment).toBe("BULLISH");
-    expect(complete).not.toHaveBeenCalled();
+    expect(generateJson).not.toHaveBeenCalled();
     db.close();
   });
 });

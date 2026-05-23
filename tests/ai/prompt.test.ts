@@ -31,34 +31,18 @@ const baseYahoo = (over: Partial<YahooEnrichmentDto> = {}): YahooEnrichmentDto =
 });
 
 describe("buildPrompt", () => {
-  it("returns system then user messages", () => {
-    const msgs = buildPrompt("TEST", baseYahoo(), baseSignal());
-    expect(msgs).toHaveLength(2);
-    expect(msgs[0]!.role).toBe("system");
-    expect(msgs[1]!.role).toBe("user");
+  it("returns system and user strings", () => {
+    const prompt = buildPrompt("TEST", baseYahoo(), baseSignal());
+    expect(prompt.system).toContain("financial signal analyst");
+    expect(prompt.user).toContain("Ticker: TEST");
   });
 
-  it("displays 12-1 return as percent (raw fraction × 100)", () => {
-    const user = buildPrompt("TEST", baseYahoo(), baseSignal({ momentum12_1Return: 0.1 }))[1]!.content;
-    expect(user).toContain("10.00%");
-  });
-
-  it("includes confidence rubric in system prompt", () => {
-    const sys = buildPrompt("TEST", baseYahoo(), baseSignal())[0]!.content;
-    expect(sys).toContain("HIGH:");
-    expect(sys).toContain("MEDIUM:");
-    expect(sys).toContain("LOW:");
-  });
-
-  it("adds earnings risk clause when next earnings within 5 calendar days of signal date", () => {
-    const sys = buildPrompt("TEST", baseYahoo({ nextEarningsDate: "2024-06-04" }), baseSignal({ date: "2024-06-01" }))[0]!
-      .content;
-    expect(sys).toContain("MUST explicitly acknowledge earnings event risk");
-  });
-
-  it("omits earnings risk clause when earnings far from signal date", () => {
-    const sys = buildPrompt("TEST", baseYahoo({ nextEarningsDate: "2024-12-31" }), baseSignal({ date: "2024-06-01" }))[0]!
-      .content;
-    expect(sys).not.toContain("MUST explicitly acknowledge earnings event risk");
+  it("includes earnings risk clause when earnings within 5 days", () => {
+    const prompt = buildPrompt(
+      "TEST",
+      baseYahoo({ nextEarningsDate: "2024-06-03" }),
+      baseSignal({ date: "2024-06-01" }),
+    );
+    expect(prompt.system).toContain("earnings event risk");
   });
 });

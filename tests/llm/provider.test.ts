@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createLlmProviderFromEnv } from "../../src/llm/provider.js";
+import { getLlmProvider, resetLlmProvider } from "../../src/llm/factory.js";
 import { resetConfigCache } from "../../src/config/index.js";
 
 const savedEnv = { ...process.env };
@@ -13,6 +13,7 @@ function restoreEnv(): void {
   }
   Object.assign(process.env, savedEnv);
   resetConfigCache();
+  resetLlmProvider();
 }
 
 function setProviderEnv(over: Record<string, string | undefined>): void {
@@ -24,20 +25,21 @@ function setProviderEnv(over: Record<string, string | undefined>): void {
     ...over,
   });
   resetConfigCache();
+  resetLlmProvider();
 }
 
 afterEach(() => {
   restoreEnv();
 });
 
-describe("createLlmProviderFromEnv", () => {
+describe("getLlmProvider", () => {
   beforeEach(() => {
     restoreEnv();
   });
 
   it("returns anthropic provider", () => {
     setProviderEnv({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "x" });
-    expect(createLlmProviderFromEnv().name).toBe("anthropic");
+    expect(getLlmProvider().name).toBe("anthropic");
   });
 
   it("returns openai provider", () => {
@@ -47,17 +49,19 @@ describe("createLlmProviderFromEnv", () => {
     });
     delete process.env.ANTHROPIC_API_KEY;
     resetConfigCache();
-    expect(createLlmProviderFromEnv().name).toBe("openai");
+    resetLlmProvider();
+    expect(getLlmProvider().name).toBe("openai");
   });
 
-  it("returns google provider", () => {
+  it("returns google-studio provider", () => {
     setProviderEnv({
-      LLM_PROVIDER: "google",
+      LLM_PROVIDER: "google-studio",
       GOOGLE_AI_API_KEY: "g",
     });
     delete process.env.ANTHROPIC_API_KEY;
     resetConfigCache();
-    expect(createLlmProviderFromEnv().name).toBe("google");
+    resetLlmProvider();
+    expect(getLlmProvider().name).toBe("google-studio");
   });
 
   it("returns vertex provider", () => {
@@ -67,7 +71,16 @@ describe("createLlmProviderFromEnv", () => {
     });
     delete process.env.ANTHROPIC_API_KEY;
     resetConfigCache();
-    expect(createLlmProviderFromEnv().name).toBe("vertex");
+    resetLlmProvider();
+    expect(getLlmProvider().name).toBe("vertex");
+  });
+
+  it("returns mock provider", () => {
+    setProviderEnv({ LLM_PROVIDER: "mock" });
+    delete process.env.ANTHROPIC_API_KEY;
+    resetConfigCache();
+    resetLlmProvider();
+    expect(getLlmProvider().name).toBe("mock");
   });
 
   it("throws when vertex project id missing", () => {
@@ -77,12 +90,13 @@ describe("createLlmProviderFromEnv", () => {
     });
     delete process.env.ANTHROPIC_API_KEY;
     resetConfigCache();
-    expect(() => createLlmProviderFromEnv()).toThrow(/VERTEX_PROJECT_ID/);
+    resetLlmProvider();
+    expect(() => getLlmProvider()).toThrow(/VERTEX_PROJECT_ID/);
   });
 
   it("throws when anthropic key missing", () => {
     setProviderEnv({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "" });
-    expect(() => createLlmProviderFromEnv()).toThrow(/ANTHROPIC_API_KEY/);
+    expect(() => getLlmProvider()).toThrow(/ANTHROPIC_API_KEY/);
   });
 
   it("throws when openai key missing", () => {
@@ -92,6 +106,7 @@ describe("createLlmProviderFromEnv", () => {
     });
     delete process.env.ANTHROPIC_API_KEY;
     resetConfigCache();
-    expect(() => createLlmProviderFromEnv()).toThrow(/OPENAI_API_KEY/);
+    resetLlmProvider();
+    expect(() => getLlmProvider()).toThrow(/OPENAI_API_KEY/);
   });
 });
