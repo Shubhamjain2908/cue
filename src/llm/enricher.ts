@@ -7,15 +7,10 @@ import {
   insertEnrichment,
   type EnrichmentRow,
 } from "../db/queries.js";
-import { createLlmProviderFromEnv } from "./provider.js";
-import { buildPrompt, calendarDaysBetweenIso, tryParseModelJson } from "./prompt.js";
-import {
-  EnrichmentResultSchema,
-  JSON_RETRY_USER_MESSAGE,
-  type EnrichmentResult,
-  type LLMMessage,
-  type LLMProvider,
-} from "./types.js";
+import { EnrichmentResultSchema, type EnrichmentResult } from "./enrichment.js";
+import { getLlmProvider } from "./factory.js";
+import { buildPrompt, calendarDaysBetweenIso } from "./prompt.js";
+import type { LlmProvider } from "./types.js";
 import { fetchYahooEnrichmentDto, type YahooFinanceHandle } from "./yahooContext.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
@@ -54,13 +49,8 @@ function enrichmentRowToResult(row: EnrichmentRow): EnrichmentResult {
   });
 }
 
-function parseEnrichmentJson(raw: string): EnrichmentResult {
-  const parsed = tryParseModelJson(raw);
-  return EnrichmentResultSchema.parse(parsed);
-}
-
 export interface RunEnrichmentDeps {
-  provider?: LLMProvider;
+  provider?: LlmProvider;
   yahooFinance?: YahooFinanceHandle;
   /** Override Yahoo fetch (unit tests). */
   fetchYahoo?: typeof fetchYahooEnrichmentDto;
@@ -87,41 +77,31 @@ export async function runEnrichment(
   assertBuyMomentumRow(row);
 
   const yahoo = await (deps.fetchYahoo ?? fetchYahooEnrichmentDto)(row.ticker, deps.yahooFinance);
-  const messages = buildPrompt(row.ticker, yahoo, row);
+  const { system, user } = buildPrompt(row.ticker, yahoo, row);
   const config = getConfig();
-  const provider = deps.provider ?? createLlmProviderFromEnv();
-  const maxTokens = config.LLM_MAX_TOKENS;
+  const llm = deps.provider ?? getLlmProvider();
 
-  let raw = await provider.complete(messages, maxTokens);
-  let result: EnrichmentResult;
-  try {
-    result = parseEnrichmentJson(raw);
-  } catch {
-    const retryMessages: LLMMessage[] = [
-      ...messages,
-      { role: "assistant", content: raw },
-      { role: "user", content: JSON_RETRY_USER_MESSAGE },
-    ];
-    raw = await provider.complete(retryMessages, maxTokens);
-    try {
-      result = parseEnrichmentJson(raw);
-    } catch (secondErr) {
-      throw secondErr;
-    }
-  }
+  const result = await llm.generateJson({
+    system,
+    user,
+    schema: EnrichmentResultSchema,
+    maxOutputTokens: config.LLM_MAX_TOKENS,
+    maxRetries: 1,
+    temperature: 0.2,
+  });
 
   const earningsFlag = earningsProximityFlag(row.date, yahoo.nextEarningsDate);
   insertEnrichment(db, {
     signalId: row.id,
-    sentiment: result.sentiment,
-    rationale: result.rationale,
+    sentiment: result.data.sentiment,
+    rationale: result.data.rationale,
     earningsFlag,
-    earningsDate: result.earningsDate,
-    sector: result.sector,
+    earningsDate: result.data.earningsDate,
+    sector: result.data.sector,
     sectorTrend: null,
     headlines: JSON.stringify(yahoo.headlines),
-    confidence: result.confidence,
+    confidence: result.data.confidence,
   });
 
-  return result;
+  return result.data;
 }

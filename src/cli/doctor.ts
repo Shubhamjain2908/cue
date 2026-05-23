@@ -18,6 +18,7 @@ const SENSITIVE_ENV_KEYS = [
   "OPENAI_API_KEY",
   "GOOGLE_AI_API_KEY",
   "VERTEX_PROJECT_ID",
+  "CURSOR_API_KEY",
 ] as const;
 
 /**

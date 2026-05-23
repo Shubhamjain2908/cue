@@ -1,21 +1,10 @@
 import type { BuySignalForEnrichmentRow } from "../db/queries.js";
-import { ENRICHMENT_RATIONALE_MAX_CHARS, type LLMMessage } from "./types.js";
+import { ENRICHMENT_RATIONALE_MAX_CHARS } from "./enrichment.js";
 import type { YahooEnrichmentDto } from "./yahooContext.js";
 
-function stripFence(raw: string): string {
-  const t = raw.trim();
-  if (t.startsWith("```")) {
-    return t
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/i, "")
-      .trim();
-  }
-  return t;
-}
-
-export function tryParseModelJson(raw: string): unknown {
-  const cleaned = stripFence(raw);
-  return JSON.parse(cleaned) as unknown;
+export interface EnrichmentPrompt {
+  system: string;
+  user: string;
 }
 
 /**
@@ -25,7 +14,7 @@ export function buildPrompt(
   ticker: string,
   yahoo: YahooEnrichmentDto,
   signal: BuySignalForEnrichmentRow,
-): LLMMessage[] {
+): EnrichmentPrompt {
   const signalDate = signal.date;
   const returnPctDisplay = signal.momentum12_1Return * 100;
   const headlinesBlock =
@@ -45,11 +34,7 @@ export function buildPrompt(
       ? "Not scheduled in next 30 days (per provided calendar)"
       : earningsIso;
   const daysUntil =
-    earningsIso === null
-      ? "N/A"
-      : String(
-          calendarDaysBetweenIso(signalDate, earningsIso),
-        );
+    earningsIso === null ? "N/A" : String(calendarDaysBetweenIso(signalDate, earningsIso));
 
   const earningsRiskClause =
     earningsIso !== null && calendarDaysBetweenIso(signalDate, earningsIso) <= 5
@@ -85,10 +70,7 @@ Initial Stop: ${signal.initialAtrStop}
 
 Assess sentiment and provide a one-paragraph rationale for this BUY signal.`;
 
-  return [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ];
+  return { system, user };
 }
 
 /** Full calendar days between two ISO date strings (UTC noon anchor). */
