@@ -5,7 +5,14 @@ import type { SignalThresholds } from "../enrichers/momentum-types.js";
 
 loadDotenv();
 
-const providerKeySchema = z.enum(["anthropic", "openai", "google", "vertex"]);
+const providerKeySchema = z.enum([
+  "anthropic",
+  "openai",
+  "google-studio",
+  "vertex",
+  "mock",
+  "cursor-agent",
+]);
 
 const baseEnvSchema = z.object({
   /** Massive.com REST key (https://massive.com/; rebranded from Polygon.io; same key). */
@@ -28,15 +35,26 @@ const baseEnvSchema = z.object({
   EXIT_RSI_THRESHOLD: z.coerce.number().default(75),
   LLM_PROVIDER: providerKeySchema.default("anthropic"),
   LLM_MAX_TOKENS: z.coerce.number().int().positive().default(600),
-  OPENAI_API_KEY: z.string().optional(),
-  GOOGLE_AI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-20250514"),
+  ANTHROPIC_BASE_URL: z.string().url().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  /** OpenAI-compatible API base (e.g. DeepSeek: https://api.deepseek.com/v1). */
+  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  GOOGLE_AI_API_KEY: z.string().optional(),
+  GOOGLE_AI_MODEL: z.string().default("gemini-2.0-flash"),
   /** GCP project for Vertex AI Gemini (`LLM_PROVIDER=vertex`). */
   VERTEX_PROJECT_ID: z.string().optional(),
   /** Vertex region (default `us-central1`). */
   VERTEX_LOCATION: z.string().default("us-central1"),
   /** Vertex publisher model id (default `gemini-2.0-flash-001`). */
   VERTEX_MODEL: z.string().default("gemini-2.0-flash-001"),
+  VERTEX_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  CURSOR_API_KEY: z.string().optional(),
+  CURSOR_AGENT_BIN: z.string().default("cursor-agent"),
+  CURSOR_AGENT_MODEL: z.string().default("default"),
+  CURSOR_AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
@@ -65,8 +83,10 @@ export function getConfig(): AppConfig {
   if (provider === "openai" && (!d.OPENAI_API_KEY || d.OPENAI_API_KEY.length === 0)) {
     throw new Error("Invalid environment: OPENAI_API_KEY is required when LLM_PROVIDER=openai");
   }
-  if (provider === "google" && (!d.GOOGLE_AI_API_KEY || d.GOOGLE_AI_API_KEY.length === 0)) {
-    throw new Error("Invalid environment: GOOGLE_AI_API_KEY is required when LLM_PROVIDER=google");
+  if (provider === "google-studio" && (!d.GOOGLE_AI_API_KEY || d.GOOGLE_AI_API_KEY.length === 0)) {
+    throw new Error(
+      "Invalid environment: GOOGLE_AI_API_KEY is required when LLM_PROVIDER=google-studio",
+    );
   }
   if (provider === "vertex" && (!d.VERTEX_PROJECT_ID || d.VERTEX_PROJECT_ID.length === 0)) {
     throw new Error("Invalid environment: VERTEX_PROJECT_ID is required when LLM_PROVIDER=vertex");
