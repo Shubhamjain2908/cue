@@ -127,7 +127,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 
 | Command | Description |
 |---------|-------------|
-| `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: latest ET weekday on/before now), `--ticker SYM`, `--force` refetches that session |
+| `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: previous ET weekday session, T-1; Mon → Fri), `--ticker SYM`, `--force` refetches that session |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache (`--ticker`, `--limit`, `--force`, `--date` reserved) |
 | `pnpm run cue -- screen` | Momentum screener / ranking. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |

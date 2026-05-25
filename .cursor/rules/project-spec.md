@@ -150,7 +150,7 @@ interface PipelineStep {
 ### 6.1 Prices — Massive.com
 
 - **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
-- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default latest weekday on/before “now” in **`America/New_York`**, or **`--date YYYY-MM-DD`**; universe from `data/universe/${UNIVERSE}.json` (default **nasdaq100**) + **QQQ**; **`--force`** refetches that session. Grouped daily endpoint in use as of Phase 4 (4.2). S4 resolved.
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default **previous** completed weekday session (T-1 ET civil day, then latest weekday on/before that day — Mon → prior Fri), or **`--date YYYY-MM-DD`**; universe from `data/universe/${UNIVERSE}.json` (default **nasdaq100**) + **QQQ**; **`--force`** refetches that session. Grouped daily endpoint in use as of Phase 4 (4.2). S4 resolved.
 - **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
