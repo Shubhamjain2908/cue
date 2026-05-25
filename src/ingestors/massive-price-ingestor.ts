@@ -143,8 +143,20 @@ function latestWeekdayOnOrBeforeEtCivil(
   return null;
 }
 
-function rangeEndYmd(): string {
-  return formatEtYmd(new Date());
+/** ET civil date one calendar day before `now`, then latest Mon–Fri on or before that day. */
+function previousWeekdayBeforeEtCivil(now: Date): string {
+  const [ey, em, ed] = formatEtYmd(now).split("-").map(Number);
+  const civil = new Date(Date.UTC(ey!, em! - 1, ed!, 12, 0, 0));
+  civil.setUTCDate(civil.getUTCDate() - 1);
+  const resolved = latestWeekdayOnOrBeforeEtCivil(
+    civil.getUTCFullYear(),
+    civil.getUTCMonth() + 1,
+    civil.getUTCDate(),
+  );
+  if (resolved === null) {
+    throw new Error("Could not resolve previous ET session date for grouped ingest");
+  }
+  return resolved;
 }
 
 function parseFetchArgs(argv: string[]): {
@@ -299,18 +311,8 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   const tickerMask = new Set(tickersForMask.map((t) => t.toUpperCase()));
   const expectedMaskCount = tickerMask.size;
 
-  let sessionDate: string;
-  if (explicitSessionDate !== undefined) {
-    sessionDate = explicitSessionDate;
-  } else {
-    const rangeEnd = rangeEndYmd();
-    const [ey, em, ed] = rangeEnd.split("-").map(Number);
-    const resolved = latestWeekdayOnOrBeforeEtCivil(ey!, em!, ed!);
-    if (resolved === null) {
-      throw new Error("Could not resolve ET session date for grouped ingest");
-    }
-    sessionDate = resolved;
-  }
+  const sessionDate =
+    explicitSessionDate ?? previousWeekdayBeforeEtCivil(new Date());
 
   const db = openCueDb(config.DB_PATH);
   try {
@@ -364,3 +366,5 @@ if (isMain) {
 export async function runFetcher(argv?: readonly string[]): Promise<void> {
   await run(argv ?? process.argv);
 }
+
+export { previousWeekdayBeforeEtCivil };
