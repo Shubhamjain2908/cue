@@ -58,6 +58,8 @@ const baseEnvSchema = z.object({
   LOG_LEVEL: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
+  EPS_HISTORY_PATH: z.string().default("data/fundamentals/eps_history_20260520.json"),
+  QUALITY_SNAPSHOT_PATH: z.string().default("data/fundamentals/quality_snapshot_20260520.json"),
 });
 
 export type LlmProviderKey = z.infer<typeof providerKeySchema>;
@@ -65,6 +67,19 @@ export type LlmProviderKey = z.infer<typeof providerKeySchema>;
 export type AppConfig = z.infer<typeof baseEnvSchema> & SignalThresholds;
 
 let cached: AppConfig | undefined;
+
+/**
+ * Safe log-level accessor for logger creation at module load time.
+ * Falls back to `"info"` if the env is not yet configured, so winston loggers
+ * can be initialised without requiring the full config to parse successfully.
+ */
+export function getLogLevel(): string {
+  try {
+    return getConfig().LOG_LEVEL;
+  } catch {
+    return "info";
+  }
+}
 
 export function getConfig(): AppConfig {
   if (cached) {
