@@ -1,9 +1,10 @@
+import { getLogLevel } from "../config/index.js";
 import winston from "winston";
 
 /** Winston logger for `cue` CLI (subcommand failures, doctor, etc.). */
 export const cueLogger = winston.createLogger({
   defaultMeta: { service: "cue-cli" },
-  level: process.env.LOG_LEVEL ?? "info",
+  level: getLogLevel(),
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.printf((info) => {

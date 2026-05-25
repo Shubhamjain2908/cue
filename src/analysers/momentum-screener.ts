@@ -377,6 +377,11 @@ export function runLiveScreen(
     }
   }
 
+  /* Pre-compute set of currently open tickers to avoid N+1 queries inside the transaction. */
+  const currentOpenTickers = new Set(
+    listOpenPositions(db).map((p) => p.ticker.toUpperCase()),
+  );
+
   const tx = db.transaction(() => {
     for (const pos of openRows) {
       const reason = exitReasonByTicker.get(pos.ticker);
@@ -395,29 +400,21 @@ export function runLiveScreen(
       };
       insertSignal(db, sellRow);
       closePosition(db, pos.positionId, asOf, bar.close);
+      currentOpenTickers.delete(pos.ticker.toUpperCase());
     }
 
     if (mode !== "rebalance" || !regimeOk) {
       return;
     }
 
-    let openSlots = listOpenPositions(db).length;
+    let openSlots = currentOpenTickers.size;
     const rankedLen = fullRanked.length;
     for (const rankEntry of fullRanked.slice(0, cfg.topN)) {
       if (openSlots >= maxConcurrent) {
         break;
       }
-      const t = rankEntry.ticker;
-      const alreadyOpen = db
-        .prepare(
-          `
-        SELECT 1 AS x FROM positions p
-        INNER JOIN signals s ON s.id = p.signal_id
-        WHERE p.status = 'OPEN' AND s.ticker = @ticker LIMIT 1
-      `,
-        )
-        .get({ ticker: t }) as { x: number } | undefined;
-      if (alreadyOpen !== undefined) {
+      const t = rankEntry.ticker.toUpperCase();
+      if (currentOpenTickers.has(t)) {
         continue;
       }
 

@@ -5,7 +5,7 @@ import { clearInterval, setInterval } from "node:timers";
 import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
-import { getConfig } from "../config/index.js";
+import { getConfig, getLogLevel } from "../config/index.js";
 import type { CueDatabase } from "../db/provider.js";
 import { openCueDbReadonly } from "../db/provider.js";
 
@@ -49,7 +49,7 @@ const SCHEDULER_MON_THU_STEPS: PipelineStep[] = [
 
 const logger = winston.createLogger({
   defaultMeta: { service: "scheduler" },
-  level: process.env.LOG_LEVEL ?? "info",
+  level: getLogLevel(),
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.printf((info) => {

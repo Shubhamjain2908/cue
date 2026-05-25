@@ -5,7 +5,7 @@ import axios from "axios";
 import winston from "winston";
 import { z } from "zod";
 
-import { getConfig } from "../config/index.js";
+import { getConfig, getLogLevel } from "../config/index.js";
 import { listBuySignalsReadyToAlert, markSignalAlerted, type BuyAlertPendingRow } from "../db/queries.js";
 import { openCueDb } from "../db/provider.js";
 
@@ -19,7 +19,7 @@ const alertRunModeSchema = z.enum(["rebalance", "stop"]);
 
 const logger = winston.createLogger({
   defaultMeta: { service: "alert" },
-  level: process.env.LOG_LEVEL ?? "info",
+  level: getLogLevel(),
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.printf((info) => {
