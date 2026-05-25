@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import winston from "winston";
 
+import { getLogLevel } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 
 /** Friday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 5 Fri). */
@@ -35,7 +36,7 @@ export const PIPELINE_STEPS: PipelineStep[] = [
 
 const logger = winston.createLogger({
   defaultMeta: { service: "pipeline" },
-  level: process.env.LOG_LEVEL ?? "info",
+  level: getLogLevel(),
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.printf((info) => {
