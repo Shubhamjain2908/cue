@@ -62,7 +62,7 @@ type StrategyExitReason =
   | "REBALANCE_DROP"
   | "FORCED_CLOSE";
 
-function compareIsoDate(a: string, b: string): number {
+export function compareIsoDate(a: string, b: string): number {
   if (a < b) {
     return -1;
   }
@@ -72,12 +72,12 @@ function compareIsoDate(a: string, b: string): number {
   return 0;
 }
 
-function parseIsoUtcMs(iso: string): number {
+export function parseIsoUtcMs(iso: string): number {
   const [y, m, d] = iso.split("-").map(Number);
   return Date.UTC(y!, m! - 1, d!);
 }
 
-function addCalendarDays(iso: string, days: number): string {
+export function addCalendarDays(iso: string, days: number): string {
   const ms = parseIsoUtcMs(iso) + days * 86_400_000;
   const dt = new Date(ms);
   const y = dt.getUTCFullYear();
@@ -87,7 +87,7 @@ function addCalendarDays(iso: string, days: number): string {
 }
 
 /** 1 = Monday … 5 = Friday (ISO weekday, matches `Date#getUTCDay()` for Mon–Fri). */
-function isoWeekdayMon1ToFri5(iso: string): number {
+export function isoWeekdayMon1ToFri5(iso: string): number {
   const dow = new Date(parseIsoUtcMs(iso)).getUTCDay();
   if (dow === 0 || dow === 6) {
     return 0;
@@ -95,7 +95,7 @@ function isoWeekdayMon1ToFri5(iso: string): number {
   return dow;
 }
 
-function tradingDaysHeld(
+export function tradingDaysHeld(
   sortedDates: readonly string[],
   entryDate: string,
   asOf: string,
@@ -113,12 +113,12 @@ function tradingDaysHeld(
   return count;
 }
 
-function calendarYearFraction(fromIso: string, toIso: string): number {
+export function calendarYearFraction(fromIso: string, toIso: string): number {
   const raw = (parseIsoUtcMs(toIso) - parseIsoUtcMs(fromIso)) / 86_400_000 / 365.25;
   return Math.max(raw, 1e-9);
 }
 
-function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): number {
+export function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): number {
   let lo = 0;
   let hi = bars.length - 1;
   let ans = -1;
@@ -135,7 +135,7 @@ function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): num
   return ans;
 }
 
-function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): number {
+export function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): number {
   let lo = 0;
   let hi = bars.length - 1;
   let ans = -1;
@@ -151,7 +151,7 @@ function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): num
   return ans;
 }
 
-function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] | null {
+export function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] | null {
   const ub = upperBoundInclusiveByDate(bars, asOf);
   if (ub < 0) {
     return null;
@@ -159,7 +159,7 @@ function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] |
   return bars.slice(0, ub + 1);
 }
 
-function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
+export function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
   const ub = upperBoundInclusiveByDate(bars, asOf);
   if (ub < 0) {
     return null;
@@ -251,14 +251,14 @@ function benchmarkBuyHoldCagrPct(
   return cagrPct(start, end, yf);
 }
 
-function fmtPct(x: number | null, digits = 2): string {
+export function fmtPct(x: number | null, digits = 2): string {
   if (x === null || Number.isNaN(x)) {
     return "n/a";
   }
   return `${x.toFixed(digits)}%`;
 }
 
-function fmtNum(x: number | null, digits = 3): string {
+export function fmtNum(x: number | null, digits = 3): string {
   if (x === null || Number.isNaN(x)) {
     return "n/a";
   }
@@ -311,7 +311,7 @@ function emptyExitBucketAgg(): Record<StrategyExitReason, ExitBucketAgg> {
   };
 }
 
-function aggregateExitBuckets(closedTrades: readonly ClosedBacktestTrade[]): Record<
+export function aggregateExitBuckets(closedTrades: readonly ClosedBacktestTrade[]): Record<
   StrategyExitReason,
   ExitBucketAgg
 > {
@@ -331,7 +331,7 @@ function aggregateExitBuckets(closedTrades: readonly ClosedBacktestTrade[]): Rec
   return out;
 }
 
-function mean(nums: readonly number[]): number | null {
+export function mean(nums: readonly number[]): number | null {
   if (nums.length === 0) {
     return null;
   }
@@ -710,7 +710,7 @@ export function runBacktest(
   return { equityPoints, closedTrades, metrics, benchmarkCagrPct, yearFraction };
 }
 
-function parseCli(): {
+export function parseCli(): {
   from: string;
   to: string;
   strategy: "momentum" | "quality-garp";

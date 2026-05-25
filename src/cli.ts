@@ -43,7 +43,7 @@ function cueUserArgsAfterEntry(argv: string[]): string[] {
   return rest.slice(i);
 }
 
-function wrap(subcommand: string, fn: () => void | Promise<void>): () => void | Promise<void> {
+function wrap(subcommand: string, fn: () => void | Promise<void>): () => Promise<void> {
   return async () => {
     try {
       cueLogger.info(`subcommand_start subcommand=${subcommand}`);
