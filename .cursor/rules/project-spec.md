@@ -53,7 +53,7 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 ### 3.2 ATR trailing stop (close-based)
 
 - **Period:** ATR(14)
-- **Base multiplier:** **4.0×** ATR  
+- **Base multiplier:** **4.0×** ATR
 - **Tight multiplier:** **1.5×** ATR when unrealized profit **≥ 25%**
 - **Golden rule:** stop **never** moves down (`new_stop = MAX(candidate, current_stop_loss)` in application logic).
 
@@ -135,7 +135,7 @@ interface PipelineStep {
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
-| LLM | `src/llm/provider.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
+| LLM | `src/llm/factory.ts`, `src/llm/types.ts`, `src/llm/json.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
 | Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` |
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
@@ -150,7 +150,7 @@ interface PipelineStep {
 ### 6.1 Prices — Massive.com
 
 - **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
-- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default latest weekday on/before “now” in **`America/New_York`**, or **`--date YYYY-MM-DD`**; universe from `data/universe/${UNIVERSE}.json` (default **nasdaq100**) + **QQQ**; **`--force`** refetches that session.
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default latest weekday on/before “now” in **`America/New_York`**, or **`--date YYYY-MM-DD`**; universe from `data/universe/${UNIVERSE}.json` (default **nasdaq100**) + **QQQ**; **`--force`** refetches that session. Grouped daily endpoint in use as of Phase 4 (4.2). S4 resolved.
 - **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
@@ -162,18 +162,18 @@ interface PipelineStep {
 
 ### 6.3 LLM providers
 
-- **`src/llm/provider.ts`**: **`anthropic` | `openai` | `google` | `vertex`** (Vertex uses `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`).
-- **Contract:** `LLMProvider.complete(messages, maxTokens)`; structured output = **parse JSON + Zod** (`tryParseModelJson`, schemas in `types.ts` / enricher).
+- **`src/llm/factory.ts`**: **`anthropic` | `openai` | `google-studio` | `vertex` | `mock`** (legacy `google` env values normalize to `google-studio`; Vertex uses `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`).
+- **Contract:** `LlmProvider.generateText(...)` and `generateJson(...)`; structured output = shared JSON extraction + Zod validation via `src/llm/json.ts`.
 - **Smoke:** `cue llm-smoke` → `src/cli/llm-smoke.ts`.
 
 ---
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` (baseline), then **`003_positions_signals_upgrade.sql`** (Phase 4 S1/S2); ledger **`_migrations`**.
-- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**. (`spec/cue-db-schema.md` may still describe an older deployed snapshot — trust **`src/db/migrations`** first.)
-- **`fundamentals_cache`:** table exists; CLI still primarily writes **disk** cache — DB upsert wiring is a follow-up.
-- **Extended SQL / read patterns / deferred `backtest_trades`:** **`spec/cue-db-schema.md`**.
+- **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` + `003_positions_signals_upgrade.sql` + `004_create_backtest_trades.sql`; ledger **`_migrations`**.
+- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**; `backtest_trades` exists for per-trade audit but the writer is still a Phase 5 task.
+- **`fundamentals_cache`:** DB upsert wired in Phase 4; payload includes `yahoo.financials` (`trailingPE`, `returnOnEquity`, `debtToEquity`).
+- **Reference:** see **`cue-db-schema.md`** for deeper schema narrative and SQL examples.
 
 ---
 
@@ -213,6 +213,8 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 2 — AI & alerts | LLM enrich + Telegram | ✅ LOCKED |
 | 3 — Dashboard + pipeline | HTML dashboard + **`daily-workflow`** registry + **`cue brief`** | ✅ Complete |
 | 3+ — Ops hardening (this repo) | **`scheduler.ts`** ET window, Fri vs Mon–Thu routes, **`isRunning`**, **`LOCK_PATH`**, **`cue-timezone`**, **`llm-smoke`**, README / rules | ✅ Shipped here |
+| 4 — Infrastructure + universe | Grouped fetcher, lockfile, stop dashboard, full universe, fundamentals wiring, Quality-GARP research (closed) | ✅ Complete |
+
 
 ---
 
@@ -220,8 +222,8 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | ID | Severity           | Issue | Status                                                                                                                                            |
 |---|--------------------|---|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| S4 | FIXED              | Massive **free-tier / call count** | ✅ **Mitigated:** `cue ingest` uses **grouped daily** (one REST call / run); follow-ups: optional multi-day backfill, vendor paging if ever needed |
-| S5 | FIXED              | `rankedUniverse=0` log on stop runs (misleading) | ✅ Open — cosmetic                                                                                                                                 |
+| S4 | FIXED              | Massive **free-tier / call count** | ✅ **RESOLVED:** `cue ingest` uses **grouped daily** (one REST call / run); optional multi-day backfill / vendor paging remains separate future work |
+| S5 | FIXED              | `rankedUniverse=0` log on stop runs (misleading) | ✅ **RESOLVED:** stop path no longer emits misleading `info`-level ranking noise |
 | S6 | LOW                | No `backtest_trades` table — run-level stats only | Open — Phase 5 (schema ready, writer not wired)                                                                                                            |
 | — | DATA               | Massive EOD **lag** 1–2d | Accepted                                                                                                                                          |
 | — | FIXED (repo)       | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs`                                                                                                                   |
@@ -237,8 +239,8 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | Task | Notes |
 |---|---|
 | **Full NDX universe + `_meta.json`** | ✅ Shipped: `data/universe/_meta.json`, `src/universe/load-universe.ts` (no cache) |
-| **`backtest_trades`** | Per-trade audit (Phase 5 spec) |
-| **Quality-GARP** (research) | research only, new backtest required before any code |
+| **Wire `backtest_trades` writer** | Phase 5: persist per-trade audit rows from `src/backtest/runner.ts` |
+| **Quality-GARP as momentum filter** | research only, new backtest required before any code |
 | **systemd unit** | Optional alternative to PM2 (`cue.service`, `EnvironmentFile=`) |
 | **Winston file transport** | Optional rotating `logs/cue.log` |
 
