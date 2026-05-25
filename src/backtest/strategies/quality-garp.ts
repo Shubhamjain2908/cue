@@ -35,9 +35,6 @@ const SETTLEMENT_EXTENSION_CALENDAR_DAYS = 45;
 const GARP_TOP_N = 3;
 const GARP_MAX_CONCURRENT = 3;
 
-const DEFAULT_EPS_HISTORY = "data/fundamentals/eps_history_20260520.json";
-const DEFAULT_QUALITY_SNAPSHOT = "data/fundamentals/quality_snapshot_20260520.json";
-
 type StrategyExitReason = "TRAILING_STOP" | "MAX_HOLD" | "FORCED_CLOSE";
 
 interface DailyBar {
@@ -509,7 +506,7 @@ export function runQualityGarpBacktest(
   const positionUsd = appCfg.POSITION_SIZE_USD ?? BACKTEST_POSITION_USD;
   const maxHoldCalendarDays = appCfg.MAX_HOLD_DAYS;
 
-  const epsPath = opts.epsHistoryPath ?? DEFAULT_EPS_HISTORY;
+  const epsPath = opts.epsHistoryPath ?? appCfg.EPS_HISTORY_PATH;
   let epsHistory: EpsHistoryFile;
   try {
     epsHistory = loadEpsHistory(epsPath);
@@ -519,7 +516,7 @@ export function runQualityGarpBacktest(
     );
   }
 
-  const qualityPath = opts.qualitySnapshotPath ?? DEFAULT_QUALITY_SNAPSHOT;
+  const qualityPath = opts.qualitySnapshotPath ?? appCfg.QUALITY_SNAPSHOT_PATH;
   let qualitySnapshot: QualitySnapshotFile;
   try {
     qualitySnapshot = loadQualitySnapshot(qualityPath);
