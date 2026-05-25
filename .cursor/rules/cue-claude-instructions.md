@@ -48,7 +48,7 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 - **Regime:** **QQQ close > SMA(200)**. If false → **suppress new BUYs**; SELL / stop paths continue.
 - **ATR trailing stop:** **4.0×** base, **1.5×** tight when unrealized **≥ 25%**; **golden rule:** stop never moves down.
 - **Sizing / book:** **~$300–500** per trade (human / policy); **three** concurrent momentum slots **by screener design**; env **`MAX_POSITIONS`** and related knobs live in **`src/config/index.ts`**.
-- **Prices:** **Massive.com** REST (env **`POLYGON_API_KEY`**). **`massive-price-ingestor.ts`** uses the **grouped daily** endpoint (**one** HTTP request per ingest) for the latest ET session; see **`project-spec` §6.1**.
+- **Prices:** **Massive.com** REST (env **`POLYGON_API_KEY`**). **`massive-price-ingestor.ts`** uses the **grouped daily** endpoint (**one** HTTP request per ingest) for the **previous** completed ET weekday session by default; see **`project-spec` §6.1**.
 - **Enrichment context:** **`yahoo-finance2`** only (not a price truth source for signals).
 - **Alerts:** **Telegram** via **`cue brief`** → **`src/briefing/telegram-dispatcher.ts`** (`--mode rebalance|stop`).
 - **Dashboard:** **Static HTML** (e.g. **`dist/dashboard.html`**), no app server.
