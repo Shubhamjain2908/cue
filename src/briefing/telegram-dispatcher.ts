@@ -28,6 +28,7 @@ const alertRunModeSchema = z.enum(["rebalance", "stop"]);
 
 const TG_MAX = 4096;
 const RULE = "──────────────────────────────";
+const STOP_PROXIMITY_ATR_THRESHOLD = 0.5;
 
 const round2 = (n: number): string => n.toFixed(2);
 const round1 = (n: number): string => n.toFixed(1);
@@ -130,6 +131,7 @@ export interface DailyPulsePositionLine {
   unrealizedPct: number;
   stop: number;
   stopLabel: "BASE" | "TIGHT";
+  nearStop: boolean;
 }
 
 export function formatDailyPulseMessage(opts: {
@@ -151,8 +153,9 @@ export function formatDailyPulseMessage(opts: {
     for (const p of opts.positions) {
       const pctStr = round1(p.unrealizedPct);
       const sign = p.unrealizedPct >= 0 ? "+" : "";
+      const nearStopSuffix = p.nearStop ? "  ⚠️ NEAR STOP" : "";
       lines.push(
-        `${p.ticker}  ${sign}${pctStr}%  stop $${round2(p.stop)}  [${p.stopLabel}]`,
+        `${p.ticker}  ${sign}${pctStr}%  stop $${round2(p.stop)}  [${p.stopLabel}]${nearStopSuffix}`,
       );
     }
     lines.push(RULE);
@@ -186,11 +189,16 @@ export async function sendDailyPulse(db: CueDatabase): Promise<void> {
       continue;
     }
     const unrealizedPct = ((row.last_close - row.entry_price) / row.entry_price) * 100;
+    const cushion = row.last_close - row.current_stop_loss;
+    const nearStop =
+      row.atr14 !== null &&
+      cushion < row.atr14 * STOP_PROXIMITY_ATR_THRESHOLD;
     positions.push({
       ticker: row.ticker,
       unrealizedPct,
       stop: row.current_stop_loss,
       stopLabel: unrealizedPct >= 25.0 ? "TIGHT" : "BASE",
+      nearStop,
     });
   }
 
