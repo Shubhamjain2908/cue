@@ -182,6 +182,75 @@ export interface BacktestSummary {
   total_trades: number;
 }
 
+export interface LivePerformanceSummary {
+  closed_trades: number;
+  avg_pnl_pct: number | null;
+  win_rate_pct: number | null;
+  worst_trade_pct: number | null;
+  best_trade_pct: number | null;
+}
+
+export interface LivePerformanceByConfidenceRow {
+  confidence: string;
+  trades: number;
+  avg_pnl_pct: number;
+}
+
+const EMPTY_LIVE_PERFORMANCE_SUMMARY: LivePerformanceSummary = {
+  closed_trades: 0,
+  avg_pnl_pct: null,
+  win_rate_pct: null,
+  worst_trade_pct: null,
+  best_trade_pct: null,
+};
+
+/** Closed live trades with valid exit prices — overall P&L stats. */
+export function getLivePerformanceSummary(db: CueDatabase): LivePerformanceSummary {
+  const row = db
+    .prepare(
+      `
+      SELECT
+        COUNT(*) AS closed_trades,
+        ROUND(AVG((exit_price - entry_price) / entry_price * 100), 2) AS avg_pnl_pct,
+        ROUND(100.0 * SUM(CASE WHEN exit_price > entry_price THEN 1 ELSE 0 END)
+              / COUNT(*), 1) AS win_rate_pct,
+        ROUND(MIN((exit_price - entry_price) / entry_price * 100), 2) AS worst_trade_pct,
+        ROUND(MAX((exit_price - entry_price) / entry_price * 100), 2) AS best_trade_pct
+      FROM positions
+      WHERE status != 'OPEN'
+        AND exit_price IS NOT NULL
+        AND exit_price > 0
+    `,
+    )
+    .get() as LivePerformanceSummary | undefined;
+
+  if (!row || row.closed_trades === 0) {
+    return EMPTY_LIVE_PERFORMANCE_SUMMARY;
+  }
+  return row;
+}
+
+/** Closed live trades with valid exit prices — avg P&L by LLM confidence tier. */
+export function getLivePerformanceByConfidence(db: CueDatabase): LivePerformanceByConfidenceRow[] {
+  return db
+    .prepare(
+      `
+      SELECT e.confidence,
+             COUNT(*) AS trades,
+             ROUND(AVG((p.exit_price - p.entry_price) / p.entry_price * 100), 2) AS avg_pnl_pct
+      FROM positions p
+      JOIN signals s ON s.id = p.signal_id
+      JOIN enrichments e ON e.signal_id = s.id
+      WHERE p.status != 'OPEN'
+        AND p.exit_price IS NOT NULL
+        AND p.exit_price > 0
+      GROUP BY e.confidence
+      ORDER BY avg_pnl_pct DESC
+    `,
+    )
+    .all() as LivePerformanceByConfidenceRow[];
+}
+
 export interface DashboardPayload {
   generated_at: string;
   regime_active: boolean;
@@ -189,6 +258,8 @@ export interface DashboardPayload {
   recent_signals: RecentSignal[];
   backtest_summary: BacktestSummary | null;
   sector_allocation: { sector: string; count: number }[];
+  live_performance_summary: LivePerformanceSummary;
+  live_performance_by_confidence: LivePerformanceByConfidenceRow[];
 }
 
 interface BacktestRow {
@@ -344,6 +415,8 @@ export function extractDashboardPayload(): DashboardPayload {
       recent_signals,
       backtest_summary,
       sector_allocation,
+      live_performance_summary: getLivePerformanceSummary(db),
+      live_performance_by_confidence: getLivePerformanceByConfidence(db),
     };
   } finally {
     db.close();
