@@ -57,25 +57,29 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 
 ---
 
-## Current implementation state (post–Phase 3 in this repo)
+## Current implementation state (post–Phase 5 in this repo)
 
 - **Registry pipeline:** **`src/agents/daily-workflow.ts`** — `PIPELINE_STEPS`, `pnpm run cue -- run-all` / **`pipeline --now`**.
 - **Scheduler daemon:** **`src/agents/scheduler.ts`** — `pnpm run cue -- schedule` or **`pipeline`** without `--now`; **16:05–16:15 ET**, **`isRunning`** + **`LOCK_PATH`** PID lock, **`lastRunDate`** idempotency; **Fri** vs **Mon–Thu** step lists differ from registry `run-all` (see **`project-spec` §4**).
 - **ET constants:** **`src/config/cue-timezone.ts`** (`CUE_LOCALE`, `CUE_TIME_ZONE`) — use for all civil-date / window logic.
 - **LLM smoke:** **`pnpm run cue -- llm-smoke`** → **`src/cli/llm-smoke.ts`**.
-- **Schema on disk:** **`src/db/migrations/001_initial_schema.sql`**, **`002_create_fundamental_cache.sql`** — includes **`positions`** stop columns and **`signals`** `UNIQUE (ticker, date, signal, signal_type)` (arch S1/S2 class fixes **landed here**).
+- **Schema on disk:** **`src/db/migrations/001_initial_schema.sql`** → **`004_create_backtest_trades.sql`** applied; includes **`positions`** stop columns, **`signals`** `UNIQUE (ticker, date, signal, signal_type)`, **`fundamentals_cache`**, and **`backtest_trades`**.
+- **Backtest persistence:** **`src/backtest/runner.ts`** now writes both **`backtest_runs`** and per-trade **`backtest_trades`** rows when the table exists; DB exit mapping is **`TRAILING_STOP` / `TIME_EXIT` / `MANUAL`**.
+- **Briefing / alerts:** **`cue brief --mode rebalance`** sends enriched BUY alerts from **`signals`** + optional **`enrichments`**; **`cue brief --mode stop`** suppresses BUYs and always sends the **Daily Pulse** (open positions, stop regime labels, regime state, next Friday).
 
-**Phase 4 (reconciled):** Intent remains **infrastructure + universe scale**. In-repo status:
+**Phase 4 / 5 (reconciled):** Intent remains **infrastructure + universe scale**, then **alert enrichment + intra-week visibility**. In-repo status:
 
 | Arch task | Status in tree (verify in `project-spec` §12) |
 |---|---|
-| 4.0 Schema (stops + signal uniqueness) | **Applied** in migration `001` (confirm vs `spec/cue-db-schema.md` if stale). |
+| 4.0 Schema (stops + signal uniqueness) | **Applied** — repo shape reconciled by migrations `001` + `003`. |
 | 4.1 Scheduler concurrency | **Implemented** — `isRunning` + **`LOCK_PATH`** PID file in **`scheduler.ts`**. |
 | 4.2 Grouped Massive fetch | **Shipped** — `massive-price-ingestor.ts` (one REST call / run). |
 | 4.3 Full universe daily | **Shipped** — `nasdaq100.json` + `_meta.json`; shared `load-universe.ts` (no stale cache). |
-| 4.4 Dashboard stop / high-since-entry | **Partial** — depends on DB + `briefing` queries; confirm against migrations. |
-| 4.5 Cosmetic logs (`rankedUniverse=0`) | **Open**. |
+| 4.4 Dashboard stop / high-since-entry | **Shipped** — dashboard payload reads stop / high-water metrics from DB-backed briefing queries. |
+| 4.5 Cosmetic logs (`rankedUniverse=0`) | **Shipped** — stop path no longer emits misleading ranking noise. |
 | 4.6 Quality-GARP backtest (research) | **Research only** — no production screener code until gates pass (Sharpe **> 0.8**, expectancy **> 0** per arch §11). |
+| 5.1 Enriched BUY alert | **Shipped** — formatted entry range / stop / 1R / sizing from signal row + optional enrichment join. |
+| 5.2 Daily position pulse | **Shipped** — stop path sends pulse every `brief` run, even when no sells fire. |
 
 ---
 
@@ -102,4 +106,4 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 
 ---
 
-*End of Claude project instructions. Keep in sync with `.cursor/rules/project-spec.md` when behaviour or Phase 4 status changes.*
+*End of Claude project instructions. Keep in sync with `.cursor/rules/project-spec.md` when behaviour or Phase 5 status changes.*

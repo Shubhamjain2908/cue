@@ -98,7 +98,7 @@ Open and closed book from BUY signals.
 | `fetched_at` | Default `CURRENT_TIMESTAMP` |
 
 **Migration:** `002_create_fundamental_cache.sql`.  
-**Current ingest:** `cue enrich-fundamentals` writes primarily to **disk cache** under `CACHE_DIR`; DB upserts from that CLI may be wired later (see `project-spec.md` follow-ups).
+**Current ingest:** `cue enrich-fundamentals` writes Yahoo bundles to **disk cache** under `CACHE_DIR` and then best-effort upserts the same payload into SQLite `fundamentals_cache`. As of Phase 5, rows reflect run dates only; historical backfill remains backlog work.
 
 ---
 
@@ -109,9 +109,9 @@ Open and closed book from BUY signals.
 * `signals` composite unique key constraint relaxed from `UNIQUE(ticker, date)` to `UNIQUE(ticker, date, signal, signal_type)` to safely allow cross-strategy segregation.
 
 #### Migration 004: Historical Trade Ledger (`backtest_trades`)
-Stores granular point-in-time historical execution strings generated during simulator sessions.
+Stores granular point-in-time trade rows generated during simulator sessions. The writer is live in `src/backtest/runner.ts` (`persistBacktestArtifacts()`).
 * `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
-* `run_id` (TEXT NOT NULL REFERENCES backtest_runs(rowid))
+* `run_id` (INTEGER NOT NULL REFERENCES `backtest_runs(id)`)
 * `ticker` (TEXT NOT NULL)
 * `entry_date` (TEXT NOT NULL)
 * `entry_price` (REAL NOT NULL)
@@ -120,6 +120,8 @@ Stores granular point-in-time historical execution strings generated during simu
 * `pnl_pct` (REAL)
 * `exit_reason` (TEXT CHECK(exit_reason IN ('TRAILING_STOP','INITIAL_STOP','TIME_EXIT','MANUAL')))
 * `created_at` (TEXT DEFAULT CURRENT_TIMESTAMP)
+
+**Current exit mapping:** `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` is reserved in schema but unused by the current runner.
 
 ---
 
@@ -138,7 +140,7 @@ Aggregated metrics for a labeled historical run (written by `src/backtest/runner
 
 ## Indexes
 
-Migrations **001** / **002** / **003** do not declare secondary indexes beyond PK/UNIQUE constraints. Add indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
+Migrations **001** / **002** / **003** do not declare secondary indexes beyond PK/UNIQUE constraints. **`004_create_backtest_trades.sql`** adds `idx_bt_trades_ticker` and `idx_bt_trades_run`. Add further indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
 
 ---
 

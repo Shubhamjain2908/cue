@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.1 · May 2026 — paths aligned to this repository*
+*v1.2 · May 2026 — paths aligned to this repository*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in
@@ -38,8 +38,10 @@ not be bypassed without an explicit gate override (documented in
 
 | Guardrail | Rule | Enforced in |
 |---|---|---|
-| **BUY alerts on rebalance-style runs** | `brief` / dispatcher use `--mode rebalance\|stop`. | `src/briefing/telegram-dispatcher.ts` |
-| **SELL / stop alerts** | Appropriate paths on both modes where applicable. | `telegram-dispatcher.ts` |
+| **BUY alerts on rebalance-style runs only** | `brief` / dispatcher use `--mode rebalance\|stop`; `stop` runs must not emit BUY alerts. | `src/briefing/telegram-dispatcher.ts` |
+| **BUY message derivation is local-only** | Entry range / stop / 1R / share count come from the `signals` row, optional `enrichments` join, and `getConfig()` — no new tables, env vars, or external data sources. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
+| **Stop-path Daily Pulse always fires** | `cue brief --mode stop` sends the Daily Pulse regardless of sell count; rebalance path behavior is unchanged. | `src/briefing/telegram-dispatcher.ts` |
+| **Pulse tolerance for missing bars** | If an OPEN ticker has no `daily_prices` row for the resolved pulse `asOf`, skip that ticker with a warning; do not fail the whole pulse. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **Alert dedup** | `signals.alerted` updated after send. | `src/db/queries.ts`, dispatcher |
 
 ---
@@ -73,4 +75,5 @@ not be bypassed without an explicit gate override (documented in
 | **Backtest before production code** | No new production screener without multi-year backtest gates (see arch doc). |
 | **Signal type isolation** | `signals.signal_type` distinguishes strategies (default **`MOMENTUM`**). |
 | **No surprise data sources** | New data vendors require architecture + reliability review. |
-| **Quality-GARP standalone screen: CLOSED** | Factor falsified on NDX100 2023–2025 (Sharpe=-0.891, Expectancy=-0.332%). Do not reopen as standalone screener. Any quality-filter variant requires a new backtest spec and gate clearance before production code. |
+| **Quality-GARP standalone screen: CLOSED** | Factor falsified on NDX100 2023–2025. Do not reopen as standalone screener. |
+| **Quality as momentum exclusion filter: research-only** | Proposed exclusion rule (`ROE < 15%` or `D/E > 2.0`) is not approved production logic. Requires a separate backtest spec and gate clearance before any code lands in live screening. |

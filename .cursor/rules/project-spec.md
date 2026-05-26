@@ -1,6 +1,6 @@
 # Cue — Project specification (engineering)
 
-*Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 3 behaviour (scheduler, ET constants, `llm-smoke`, registry split).*
+*Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 5 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity).*
 
 **Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`spec/cue-db-schema.md`** (SQL snippets + read patterns + deferred items), **`.cursor/rules/db-schema.md`** (short table aligned to applied `src/db/migrations/*.sql`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
@@ -118,9 +118,13 @@ interface PipelineStep {
 
 **Startup / shutdown:** readonly DB **`SELECT 1`** for health; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 
-### 4.5 Alert / brief mode gating (Phase 3 behaviour)
+### 4.5 Alert / brief mode gating (Phase 5 behaviour)
 
-`src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**. **BUY** alerting is gated for **rebalance**-style runs; **stop** runs should not spam BUY Telegram noise (see dispatcher + `brief` forwarding). Invalid/missing mode should fail loudly in those code paths.
+`src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**.
+
+- **`rebalance`** → send formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`LEFT JOIN` in `src/briefing/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale.
+- **`stop`** → suppress **BUY** alerts, but **always** send the **Daily Pulse** for intra-week visibility, even when no SELLs fire. Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealized P&L, labels stops as **BASE** vs **TIGHT**, and shows the next ET Friday rebalance date.
+- Invalid / missing `--mode` should still fail loudly in these code paths.
 
 ---
 
@@ -139,7 +143,7 @@ interface PipelineStep {
 | Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` |
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
-| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` |
+| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + stop-path Daily Pulse)* |
 | DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
@@ -171,8 +175,10 @@ interface PipelineStep {
 ## 7. Schema & migrations
 
 - **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` + `003_positions_signals_upgrade.sql` + `004_create_backtest_trades.sql`; ledger **`_migrations`**.
-- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**; `backtest_trades` exists for per-trade audit but the writer is still a Phase 5 task.
-- **`fundamentals_cache`:** DB upsert wired in Phase 4; payload includes `yahoo.financials` (`trailingPE`, `returnOnEquity`, `debtToEquity`).
+- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**; `backtest_trades` is live and populated by `persistBacktestArtifacts()` in `src/backtest/runner.ts`.
+- **Backtest trade exit mapping:** internal `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` remains reserved in the table constraint but is not emitted by the current runner.
+- **`fundamentals_cache`:** `cue enrich-fundamentals` writes disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`). As of Phase 5 the table grows organically from run dates; historical backfill remains backlog work.
+- **Next migration ID:** **`005`**.
 - **Reference:** see **`cue-db-schema.md`** for deeper schema narrative and SQL examples.
 
 ---
@@ -214,6 +220,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 3 — Dashboard + pipeline | HTML dashboard + **`daily-workflow`** registry + **`cue brief`** | ✅ Complete |
 | 3+ — Ops hardening (this repo) | **`scheduler.ts`** ET window, Fri vs Mon–Thu routes, **`isRunning`**, **`LOCK_PATH`**, **`cue-timezone`**, **`llm-smoke`**, README / rules | ✅ Shipped here |
 | 4 — Infrastructure + universe | Grouped fetcher, lockfile, stop dashboard, full universe, fundamentals wiring, Quality-GARP research (closed) | ✅ Complete |
+| 5 — Alert enrichment + intra-week visibility | Enriched BUY Telegram message, `brief --mode stop` Daily Pulse, S6 writer verification | ✅ Complete |
 
 
 ---
@@ -224,25 +231,27 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 |---|--------------------|---|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | S4 | FIXED              | Massive **free-tier / call count** | ✅ **RESOLVED:** `cue ingest` uses **grouped daily** (one REST call / run); optional multi-day backfill / vendor paging remains separate future work |
 | S5 | FIXED              | `rankedUniverse=0` log on stop runs (misleading) | ✅ **RESOLVED:** stop path no longer emits misleading `info`-level ranking noise |
-| S6 | LOW                | No `backtest_trades` table — run-level stats only | Open — Phase 5 (schema ready, writer not wired)                                                                                                            |
+| S6 | FIXED              | `backtest_trades` writer | ✅ **CONFIRMED LIVE:** `persistBacktestArtifacts()` captures inserted run id and persists per-trade rows when `backtest_trades` exists |
 | — | DATA               | Massive EOD **lag** 1–2d | Accepted                                                                                                                                          |
+| — | DATA               | `fundamentals_cache` only reflects run dates | Accepted — table grows organically via `cue enrich-fundamentals`; historical backfill deferred |
 | — | FIXED (repo)       | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs`                                                                                                                   |
 | — | FIXED (repo)       | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard                                                                                                                               |
 | — | FIXED (repo)       | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher                                                                                                                      |
+| — | FIXED (repo)       | No intra-week Telegram visibility when sells=0 | ✅ stop path now sends Daily Pulse on every `cue brief --mode stop` run |
 | — | FIXED (arch S3)    | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts`                                                                                             |
 | — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
 
 ---
 
-## 13. Phase 4+ engineering backlog (from arch §11, reconciled)
+## 13. Phase 6 backlog (starting point)
 
 | Task | Notes |
 |---|---|
-| **Full NDX universe + `_meta.json`** | ✅ Shipped: `data/universe/_meta.json`, `src/universe/load-universe.ts` (no cache) |
-| **Wire `backtest_trades` writer** | Phase 5: persist per-trade audit rows from `src/backtest/runner.ts` |
-| **Quality-GARP as momentum filter** | research only, new backtest required before any code |
-| **systemd unit** | Optional alternative to PM2 (`cue.service`, `EnvironmentFile=`) |
-| **Winston file transport** | Optional rotating `logs/cue.log` |
+| **`fundamentals_cache` historical backfill** | LOW — current table grows organically from `enrich-fundamentals` run dates |
+| **systemd unit** | LOW — deferred; PM2 is currently stable |
+| **Winston file transport** | LOW — deferred; log volume is negligible |
+| **Quality-GARP as momentum exclusion filter** | RESEARCH — exclude momentum BUY if `ROE < 15%` or `D/E > 2.0`; requires separate backtest spec + gate clearance before any production code |
+| **New research / strategy improvements** | OPEN — no active thesis; strategy gate discipline still applies |
 
 ---
 
