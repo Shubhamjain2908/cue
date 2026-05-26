@@ -6,10 +6,15 @@ import winston from "winston";
 import { z } from "zod";
 
 import { getConfig } from "../config/index.js";
+import { getExchangeDateString } from "../config/cue-timezone.js";
 import { markSignalAlerted } from "../db/queries.js";
-import { openCueDb } from "../db/provider.js";
+import { openCueDb, type CueDatabase } from "../db/provider.js";
 import {
+  computeNextRebalanceFriday,
+  getOpenPositionsWithLastClose,
+  getRegimeLabel,
   listBuySignalsReadyToAlert,
+  resolvePulseAsOfDate,
   type BuyAlertPendingRow,
 } from "./queries.js";
 
@@ -120,6 +125,88 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
   return text;
 }
 
+export interface DailyPulsePositionLine {
+  ticker: string;
+  unrealizedPct: number;
+  stop: number;
+  stopLabel: "BASE" | "TIGHT";
+}
+
+export function formatDailyPulseMessage(opts: {
+  asOf: string;
+  regimeLabel: "BULLISH" | "BEARISH";
+  nextFriday: string;
+  maxPositions: number;
+  openCount: number;
+  positions: DailyPulsePositionLine[];
+}): string {
+  const header = `📊 Cue Daily  |  ${opts.asOf}  |  ${opts.regimeLabel}`;
+  const lines = [header, RULE];
+
+  if (opts.openCount === 0) {
+    lines.push("No open positions.");
+    lines.push(RULE);
+    lines.push(`Next rebalance: ${opts.nextFriday}`);
+  } else {
+    for (const p of opts.positions) {
+      const pctStr = round1(p.unrealizedPct);
+      const sign = p.unrealizedPct >= 0 ? "+" : "";
+      lines.push(
+        `${p.ticker}  ${sign}${pctStr}%  stop $${round2(p.stop)}  [${p.stopLabel}]`,
+      );
+    }
+    lines.push(RULE);
+    lines.push(`Open: ${opts.openCount}/${opts.maxPositions}  |  Next rebalance: ${opts.nextFriday}`);
+  }
+
+  let text = lines.join("\n");
+  if (text.length > TG_MAX) {
+    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+  }
+  return text;
+}
+
+export async function sendDailyPulse(db: CueDatabase): Promise<void> {
+  const asOf = resolvePulseAsOfDate(db);
+  if (asOf === null) {
+    throw new Error("daily pulse: no QQQ rows in daily_prices — run ingest first");
+  }
+
+  const regimeLabel = getRegimeLabel(db);
+  const etToday = getExchangeDateString();
+  const nextFriday = computeNextRebalanceFriday(etToday);
+  const { MAX_POSITIONS } = getConfig();
+
+  const raw = getOpenPositionsWithLastClose(db, asOf);
+  const positions: DailyPulsePositionLine[] = [];
+
+  for (const row of raw) {
+    if (row.last_close === null) {
+      logger.warn(`daily pulse: skip ${row.ticker} — no daily_prices row for asOf=${asOf}`);
+      continue;
+    }
+    const unrealizedPct = ((row.last_close - row.entry_price) / row.entry_price) * 100;
+    positions.push({
+      ticker: row.ticker,
+      unrealizedPct,
+      stop: row.current_stop_loss,
+      stopLabel: unrealizedPct >= 25.0 ? "TIGHT" : "BASE",
+    });
+  }
+
+  const text = formatDailyPulseMessage({
+    asOf,
+    regimeLabel,
+    nextFriday,
+    maxPositions: MAX_POSITIONS,
+    openCount: raw.length,
+    positions,
+  });
+
+  await sendTelegramMessage(text);
+  logger.info(`Daily pulse sent (asOf=${asOf}, open=${raw.length}, lines=${positions.length})`);
+}
+
 async function sendTelegramMessage(text: string): Promise<void> {
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID } = getConfig();
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -154,6 +241,16 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
 
   if (mode === "stop") {
     logger.info("mode=stop — BUY alerts suppressed");
+    const config = getConfig();
+    const db = openCueDb(config.DB_PATH);
+    try {
+      await sendDailyPulse(db);
+    } catch (e) {
+      logger.error(`Daily pulse failed: ${String(e)}`);
+      process.exitCode = 1;
+    } finally {
+      db.close();
+    }
     return;
   }
 
