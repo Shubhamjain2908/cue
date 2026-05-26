@@ -12,6 +12,10 @@ import { openCueDb } from "../db/provider.js";
 import { extractDashboardPayload } from "./queries.js";
 import { renderHtml } from "./template.js";
 
+/** Hardcoded backtest benchmarks for Live Performance comparison (not from `backtest_runs`). */
+export const LIVE_PERF_BACKTEST_EXPECTANCY_PCT = 4.78;
+export const LIVE_PERF_BACKTEST_WIN_RATE_PCT = 52.2;
+
 export function runBriefDashboardCli(argv: readonly string[] = process.argv): void {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const OUT_DIR = path.resolve(__dirname, "..", "..", "dist");
@@ -29,7 +33,10 @@ export function runBriefDashboardCli(argv: readonly string[] = process.argv): vo
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   const payload = extractDashboardPayload();
-  const html = renderHtml(payload);
+  const html = renderHtml(payload, {
+    expectancyPct: LIVE_PERF_BACKTEST_EXPECTANCY_PCT,
+    winRatePct: LIVE_PERF_BACKTEST_WIN_RATE_PCT,
+  });
 
   fs.writeFileSync(OUT_FILE, html, "utf-8");
   console.log(`[dashboard] Written → ${OUT_FILE}`);
