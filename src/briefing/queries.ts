@@ -8,6 +8,7 @@ export interface OpenPositionPulseRow {
   entry_price: number;
   current_stop_loss: number;
   last_close: number | null;
+  atr14: number | null;
 }
 
 function parseIsoUtcMs(iso: string): number {
@@ -87,7 +88,8 @@ export function getOpenPositionsWithLastClose(
         sig.ticker AS ticker,
         p.entry_price AS entry_price,
         COALESCE(p.current_stop_loss, sig.initial_atr_stop) AS current_stop_loss,
-        dp.close AS last_close
+        dp.close AS last_close,
+        sig.atr14 AS atr14
       FROM positions p
       INNER JOIN signals sig ON sig.id = p.signal_id
       LEFT JOIN daily_prices dp ON dp.ticker = sig.ticker AND dp.date = @asOf
