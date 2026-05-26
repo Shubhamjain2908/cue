@@ -16,6 +16,7 @@ import {
   closePosition,
   insertPosition,
   insertSignal,
+  mapLiveExitReason,
   type SignalInsert,
 } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
@@ -394,7 +395,7 @@ export function runLiveScreen(
         price: bar.close,
       };
       insertSignal(db, sellRow);
-      closePosition(db, pos.positionId, asOf, bar.close);
+      closePosition(db, pos.positionId, asOf, bar.close, mapLiveExitReason(reason));
     }
 
     if (mode !== "rebalance" || !regimeOk) {

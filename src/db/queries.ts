@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 
+import { cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { openCueDb } from "./provider.js";
 
@@ -345,18 +346,53 @@ export function insertPosition(
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
 
+export type BacktestTradeExitReasonDb = "TRAILING_STOP" | "INITIAL_STOP" | "TIME_EXIT" | "MANUAL";
+
+export type LiveStrategyExitReason =
+  | "TRAILING_STOP"
+  | "MAX_HOLD"
+  | "REBALANCE_DROP"
+  | "FORCED_CLOSE";
+
+export function mapLiveExitReason(reason: LiveStrategyExitReason): BacktestTradeExitReasonDb {
+  switch (reason) {
+    case "TRAILING_STOP":
+      return "TRAILING_STOP";
+    case "MAX_HOLD":
+      return "TIME_EXIT";
+    case "REBALANCE_DROP":
+    case "FORCED_CLOSE":
+      return "MANUAL";
+  }
+}
+
 export function closePosition(
   db: SqliteConnection,
   positionId: number,
   exitDate: string,
   exitPrice: number,
+  exitReason: BacktestTradeExitReasonDb,
 ): void {
+  if (exitPrice == null || exitPrice <= 0 || Number.isNaN(exitPrice)) {
+    cueLogger.error(
+      `closePosition: invalid exit_price=${String(exitPrice)} for position id=${String(positionId)}; pnl_pct left NULL`,
+    );
+  }
   const stmt = db.prepare(`
     UPDATE positions
-    SET status = 'CLOSED', exit_date = @exitDate, exit_price = @exitPrice
+    SET
+      status = 'CLOSED',
+      exit_date = @exitDate,
+      exit_price = @exitPrice,
+      exit_reason = @exitReason,
+      pnl_pct = CASE
+        WHEN @exitPrice IS NOT NULL AND @exitPrice > 0
+        THEN ROUND((@exitPrice - entry_price) / entry_price * 100, 4)
+        ELSE pnl_pct
+      END
     WHERE id = @id AND status = 'OPEN'
   `);
-  stmt.run({ id: positionId, exitDate, exitPrice });
+  stmt.run({ id: positionId, exitDate, exitPrice, exitReason });
 }
 
 export interface BacktestRunInsert {
@@ -397,8 +433,6 @@ export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert):
   });
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
-
-export type BacktestTradeExitReasonDb = "TRAILING_STOP" | "INITIAL_STOP" | "TIME_EXIT" | "MANUAL";
 
 export interface BacktestTradeInsert {
   /** `backtest_runs.id` from the inserted run row. */
