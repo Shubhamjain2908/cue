@@ -1,7 +1,15 @@
 import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import type { DashboardPayload } from "./queries.js";
 
-export function renderHtml(payload: DashboardPayload): string {
+export interface LivePerfBacktestRefs {
+  expectancyPct: number;
+  winRatePct: number;
+}
+
+export function renderHtml(
+  payload: DashboardPayload,
+  livePerfBacktestRefs: LivePerfBacktestRefs,
+): string {
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
   const atrTighten = DEFAULT_RANKING_CONFIG.atrTightenThresholdPct;
   const atrMultBase = DEFAULT_RANKING_CONFIG.atrMultiplierBase;
@@ -69,6 +77,9 @@ export function renderHtml(payload: DashboardPayload): string {
     </table>
   </div>
 
+  <h2 class="section-title">Live Performance</h2>
+  <div class="card" id="live-perf-section"></div>
+
   <div class="two-col">
     <div>
       <h2 class="section-title">Recent Signals (Last 20)</h2>
@@ -95,6 +106,8 @@ export function renderHtml(payload: DashboardPayload): string {
     const ATR_TIGHTEN_PCT = ${atrTighten};
     const ATR_MULT_BASE = ${atrMultBase};
     const ATR_MULT_TIGHT = ${atrMultTight};
+    const BT_EXPECTANCY_PCT = ${livePerfBacktestRefs.expectancyPct};
+    const BT_WIN_RATE_PCT = ${livePerfBacktestRefs.winRatePct};
 
     // Meta
     document.getElementById('meta').innerHTML =
@@ -146,6 +159,36 @@ export function renderHtml(payload: DashboardPayload): string {
         );
       }).join('');
     }
+
+    // Live Performance
+    const lp = d.live_performance_summary;
+    const lpConf = d.live_performance_by_confidence;
+    const fmtPct = v => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+    const fmtPctPlain = v => v == null ? '—' : v.toFixed(2) + '%';
+    const fmtWinRate = v => v == null ? '—' : v.toFixed(1) + '%';
+
+    let livePerfHtml =
+      '<h3 style="font-size:0.9rem;font-weight:600;margin:0 0 12px">Overall</h3>' +
+      '<table><thead><tr><th>Metric</th><th>Live</th><th>Backtest (ref)</th></tr></thead><tbody>' +
+      '<tr><td>Closed trades</td><td>' + lp.closed_trades + '</td><td>—</td></tr>' +
+      '<tr><td>Expectancy</td><td>' + fmtPct(lp.avg_pnl_pct) + '</td><td>+' + BT_EXPECTANCY_PCT.toFixed(2) + '%</td></tr>' +
+      '<tr><td>Win rate</td><td>' + fmtWinRate(lp.win_rate_pct) + '</td><td>' + BT_WIN_RATE_PCT.toFixed(1) + '%</td></tr>' +
+      '<tr><td>Worst trade</td><td>' + fmtPctPlain(lp.worst_trade_pct) + '</td><td>—</td></tr>' +
+      '<tr><td>Best trade</td><td>' + fmtPctPlain(lp.best_trade_pct) + '</td><td>—</td></tr>' +
+      '</tbody></table>';
+
+    livePerfHtml += '<h3 style="font-size:0.9rem;font-weight:600;margin:20px 0 12px">P&amp;L by confidence tier</h3>';
+    if (lp.closed_trades === 0 || lpConf.length === 0) {
+      livePerfHtml += '<p style="color:var(--muted)">No closed trades with recorded exit prices yet.</p>';
+    } else {
+      livePerfHtml += '<table><thead><tr><th>Confidence</th><th>Trades</th><th>Avg P&amp;L %</th></tr></thead><tbody>' +
+        lpConf.map(r =>
+          '<tr><td>' + r.confidence + '</td><td>' + r.trades + '</td><td>' + fmtPctPlain(r.avg_pnl_pct) + '</td></tr>'
+        ).join('') +
+        '</tbody></table>';
+    }
+    livePerfHtml += '<p class="meta" style="margin-top:16px;margin-bottom:0">Confidence tiers meaningful at ≥10 trades each.</p>';
+    document.getElementById('live-perf-section').innerHTML = livePerfHtml;
 
     // Signals table
     const sentimentColor = s => s === 'BULLISH' ? 'var(--green)' : s === 'BEARISH' ? 'var(--red)' : 'var(--amber)';
