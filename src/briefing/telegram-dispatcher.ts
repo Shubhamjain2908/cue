@@ -33,6 +33,38 @@ const STOP_PROXIMITY_ATR_THRESHOLD = 0.5;
 const round2 = (n: number): string => n.toFixed(2);
 const round1 = (n: number): string => n.toFixed(1);
 
+let portfolioFallbackWarned = false;
+
+export function deriveBuyAlertShares(
+  row: BuyAlertPendingRow,
+  config: ReturnType<typeof getConfig>,
+): { shares: number; positionUsd: number } {
+  const entryMid = row.price;
+
+  let shares: number;
+  if (config.PORTFOLIO_VALUE_USD !== undefined) {
+    const portfolio = config.PORTFOLIO_VALUE_USD;
+    const riskPerShare = row.atr14 * 2;
+    const rawShares = Math.floor((portfolio * 0.01) / riskPerShare);
+    const capShares = Math.floor((portfolio * 0.05) / entryMid);
+    shares = Math.min(rawShares, capShares);
+  } else {
+    if (!portfolioFallbackWarned) {
+      logger.warn("PORTFOLIO_VALUE_USD not set, using fixed POSITION_SIZE_USD");
+      portfolioFallbackWarned = true;
+    }
+    shares = Math.floor(config.POSITION_SIZE_USD / entryMid);
+  }
+
+  if (shares === 0) {
+    logger.warn(`BUY alert ${row.ticker}: shares resolved to 0, flooring to 1`);
+    shares = 1;
+  }
+
+  const positionUsd = Math.round(shares * entryMid);
+  return { shares, positionUsd };
+}
+
 const logger = winston.createLogger({
   defaultMeta: { service: "alert" },
   level: process.env.LOG_LEVEL ?? "info",
@@ -82,9 +114,9 @@ function trimRationale(text: string): string {
 }
 
 export function formatTelegramAlert(row: BuyAlertPendingRow): string {
-  const { POSITION_SIZE_USD } = getConfig();
-
+  const config = getConfig();
   const entryMid = row.price;
+  const { shares, positionUsd } = deriveBuyAlertShares(row, config);
   const entryLo = round2(entryMid * 0.99);
   const entryHi = round2(entryMid * 1.01);
   const stop = round2(row.initialAtrStop);
@@ -92,7 +124,6 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
   const multiplierLabel = "4.0× ATR";
   const riskPerShare = entryMid - row.initialAtrStop;
   const target = round2(entryMid + riskPerShare);
-  const shares = Math.floor(POSITION_SIZE_USD / entryMid);
 
   const sentiment = row.sentiment?.toUpperCase() ?? "";
   const confidence = row.confidence?.toUpperCase() ?? "";
@@ -109,7 +140,7 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
     `Entry range : $${entryLo} – $${entryHi}   (±1% last close)`,
     `Stop loss   : $${stop}  (${stopPct}% | ${multiplierLabel})`,
     `1R target   : $${target}  (1:1 R-multiple above entry mid)`,
-    `Position    : $${POSITION_SIZE_USD} → ~${shares} shares @ $${round2(entryMid)}`,
+    `Position    : $${positionUsd} → ~${shares} shares @ $${round2(entryMid)}`,
     RULE,
     `Sector: ${row.sector ?? "N/A"}  |  Earnings: ${row.earningsDate ?? "N/A"}`,
   ];
