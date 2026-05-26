@@ -1,6 +1,103 @@
 import { getConfig } from "../config/index.js";
 import { openCueDbReadonly, type CueDatabase } from "../db/provider.js";
 
+export type RegimeLabel = "BULLISH" | "BEARISH";
+
+export interface OpenPositionPulseRow {
+  ticker: string;
+  entry_price: number;
+  current_stop_loss: number;
+  last_close: number | null;
+}
+
+function parseIsoUtcMs(iso: string): number {
+  const [y, m, d] = iso.split("-").map(Number);
+  return Date.UTC(y!, m! - 1, d!);
+}
+
+function addCalendarDays(iso: string, days: number): string {
+  const ms = parseIsoUtcMs(iso) + days * 86_400_000;
+  const dt = new Date(ms);
+  const y = dt.getUTCFullYear();
+  const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const da = String(dt.getUTCDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}`;
+}
+
+/** Gregorian weekday for an America/New_York calendar date (0 Sunday … 6 Saturday). */
+function weekdayForEtYmd(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!, 12, 0, 0)).getUTCDay();
+}
+
+/** Latest QQQ session in DB (screen / pulse as-of). */
+export function resolvePulseAsOfDate(db: CueDatabase): string | null {
+  const row = db
+    .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = 'QQQ'`)
+    .get() as { d: string | null };
+  return row.d;
+}
+
+/** QQQ close vs SMA(200) — same logic as dashboard regime query. */
+export function getRegimeLabel(db: CueDatabase): RegimeLabel {
+  const regimeRow = db
+    .prepare(
+      `
+      WITH qqq_prices AS (
+        SELECT date, close
+        FROM daily_prices
+        WHERE ticker = 'QQQ'
+        ORDER BY date DESC
+        LIMIT 200
+      ),
+      latest AS (SELECT close FROM qqq_prices LIMIT 1),
+      sma AS (SELECT AVG(close) AS sma200 FROM qqq_prices)
+      SELECT CASE
+        WHEN (SELECT close FROM latest) > (SELECT sma200 FROM sma) THEN 1
+        ELSE 0
+      END AS regime_active
+    `,
+    )
+    .get() as { regime_active: number } | undefined;
+  return (regimeRow?.regime_active ?? 0) === 1 ? "BULLISH" : "BEARISH";
+}
+
+/**
+ * Nearest future Friday on the ET civil calendar.
+ * If `etToday` is Friday, returns the following Friday (+7 days).
+ */
+export function computeNextRebalanceFriday(etToday: string): string {
+  const dow = weekdayForEtYmd(etToday);
+  if (dow === 5) {
+    return addCalendarDays(etToday, 7);
+  }
+  const daysUntil = (5 - dow + 7) % 7;
+  return addCalendarDays(etToday, daysUntil);
+}
+
+/** OPEN positions with `daily_prices.close` on `asOf` (null when bar missing). */
+export function getOpenPositionsWithLastClose(
+  db: CueDatabase,
+  asOf: string,
+): OpenPositionPulseRow[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        sig.ticker AS ticker,
+        p.entry_price AS entry_price,
+        COALESCE(p.current_stop_loss, sig.initial_atr_stop) AS current_stop_loss,
+        dp.close AS last_close
+      FROM positions p
+      INNER JOIN signals sig ON sig.id = p.signal_id
+      LEFT JOIN daily_prices dp ON dp.ticker = sig.ticker AND dp.date = @asOf
+      WHERE p.status = 'OPEN'
+      ORDER BY sig.ticker ASC
+    `,
+    )
+    .all({ asOf }) as OpenPositionPulseRow[];
+}
+
 /** BUY signal row for Telegram alerts (enrichment optional). */
 export interface BuyAlertPendingRow {
   id: number;
