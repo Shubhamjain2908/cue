@@ -27,6 +27,8 @@ const baseEnvSchema = z.object({
   UNIVERSE: z.string().default("nasdaq100"),
   MAX_POSITIONS: z.coerce.number().int().positive().default(5),
   POSITION_SIZE_USD: z.coerce.number().positive().default(400),
+  /** Total portfolio notional for ATR-normalized BUY alert sizing (optional). */
+  PORTFOLIO_VALUE_USD: z.coerce.number().positive().optional(),
   STOP_LOSS_PCT: z.coerce.number().positive().default(5),
   MAX_HOLD_DAYS: z.coerce.number().int().positive().default(40),
   SMA_PERIOD: z.coerce.number().int().positive().default(50),
