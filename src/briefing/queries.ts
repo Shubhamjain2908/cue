@@ -1,5 +1,53 @@
 import { getConfig } from "../config/index.js";
-import { openCueDbReadonly } from "../db/provider.js";
+import { openCueDbReadonly, type CueDatabase } from "../db/provider.js";
+
+/** BUY signal row for Telegram alerts (enrichment optional). */
+export interface BuyAlertPendingRow {
+  id: number;
+  ticker: string;
+  date: string;
+  signal: "BUY" | "SELL";
+  price: number;
+  alerted: number;
+  momentumRank: number;
+  universeRankedCount: number;
+  momentum12_1Return: number;
+  atr14: number;
+  initialAtrStop: number;
+  sentiment: string | null;
+  rationale: string | null;
+  earningsDate: string | null;
+  sector: string | null;
+  confidence: string | null;
+}
+
+/** BUY rows not yet Telegram-alerted; enrichments joined when present. */
+export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[] {
+  const stmt = db.prepare(`
+    SELECT
+      s.id AS id,
+      s.ticker AS ticker,
+      s.date AS date,
+      s.signal AS signal,
+      s.price AS price,
+      s.alerted AS alerted,
+      s.momentum_rank AS momentumRank,
+      s.universe_ranked_count AS universeRankedCount,
+      s.momentum_12_1_return AS momentum12_1Return,
+      s.atr14 AS atr14,
+      s.initial_atr_stop AS initialAtrStop,
+      e.sentiment AS sentiment,
+      e.rationale AS rationale,
+      e.earnings_date AS earningsDate,
+      e.sector AS sector,
+      e.confidence AS confidence
+    FROM signals s
+    LEFT JOIN enrichments e ON e.signal_id = s.id
+    WHERE s.signal = 'BUY' AND s.alerted = 0
+    ORDER BY s.date ASC, s.ticker ASC
+  `);
+  return stmt.all() as BuyAlertPendingRow[];
+}
 
 export interface OpenPosition {
   ticker: string;
