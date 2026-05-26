@@ -7,6 +7,7 @@ import {
   insertPosition,
   insertSignal,
   listUnenrichedBuySignals,
+  mapLiveExitReason,
   markSignalAlerted,
 } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
@@ -125,13 +126,30 @@ describe("db queries", () => {
     });
     const positionId = Number(lastInsertRowid);
 
-    closePosition(db, positionId, "2024-06-10", 105);
+    closePosition(db, positionId, "2024-06-10", 105, mapLiveExitReason("TRAILING_STOP"));
     const row = db
-      .prepare(`SELECT status, exit_date, exit_price FROM positions WHERE id = ?`)
-      .get(positionId) as { status: string; exit_date: string | null; exit_price: number | null };
+      .prepare(
+        `SELECT status, exit_date, exit_price, pnl_pct, exit_reason FROM positions WHERE id = ?`,
+      )
+      .get(positionId) as {
+      status: string;
+      exit_date: string | null;
+      exit_price: number | null;
+      pnl_pct: number | null;
+      exit_reason: string | null;
+    };
     expect(row.status).toBe("CLOSED");
     expect(row.exit_date).toBe("2024-06-10");
     expect(row.exit_price).toBe(105);
+    expect(row.exit_reason).toBe("TRAILING_STOP");
+    expect(row.pnl_pct).toBeCloseTo(6.0606, 3);
     db.close();
+  });
+
+  it("mapLiveExitReason maps all strategy exit reasons", () => {
+    expect(mapLiveExitReason("TRAILING_STOP")).toBe("TRAILING_STOP");
+    expect(mapLiveExitReason("MAX_HOLD")).toBe("TIME_EXIT");
+    expect(mapLiveExitReason("REBALANCE_DROP")).toBe("MANUAL");
+    expect(mapLiveExitReason("FORCED_CLOSE")).toBe("MANUAL");
   });
 });
