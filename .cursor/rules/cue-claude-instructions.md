@@ -57,15 +57,16 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 
 ---
 
-## Current implementation state (post–Phase 5 in this repo)
+## Current implementation state (post–Phase 6 in this repo)
 
 - **Registry pipeline:** **`src/agents/daily-workflow.ts`** — `PIPELINE_STEPS`, `pnpm run cue -- run-all` / **`pipeline --now`**.
 - **Scheduler daemon:** **`src/agents/scheduler.ts`** — `pnpm run cue -- schedule` or **`pipeline`** without `--now`; **16:05–16:15 ET**, **`isRunning`** + **`LOCK_PATH`** PID lock, **`lastRunDate`** idempotency; **Fri** vs **Mon–Thu** step lists differ from registry `run-all` (see **`project-spec` §4**).
 - **ET constants:** **`src/config/cue-timezone.ts`** (`CUE_LOCALE`, `CUE_TIME_ZONE`) — use for all civil-date / window logic.
 - **LLM smoke:** **`pnpm run cue -- llm-smoke`** → **`src/cli/llm-smoke.ts`**.
-- **Schema on disk:** **`src/db/migrations/001_initial_schema.sql`** → **`004_create_backtest_trades.sql`** applied; includes **`positions`** stop columns, **`signals`** `UNIQUE (ticker, date, signal, signal_type)`, **`fundamentals_cache`**, and **`backtest_trades`**.
+- **Schema on disk:** **`src/db/migrations/001_initial_schema.sql`** → **`005_positions_pnl_exit_reason.sql`** applied; includes **`positions`** stop columns plus **`pnl_pct`** / **`exit_reason`**, **`signals`** `UNIQUE (ticker, date, signal, signal_type)`, **`fundamentals_cache`**, and **`backtest_trades`**.
 - **Backtest persistence:** **`src/backtest/runner.ts`** now writes both **`backtest_runs`** and per-trade **`backtest_trades`** rows when the table exists; DB exit mapping is **`TRAILING_STOP` / `TIME_EXIT` / `MANUAL`**.
-- **Briefing / alerts:** **`cue brief --mode rebalance`** sends enriched BUY alerts from **`signals`** + optional **`enrichments`**; **`cue brief --mode stop`** suppresses BUYs and always sends the **Daily Pulse** (open positions, stop regime labels, regime state, next Friday).
+- **Briefing / alerts:** **`cue brief --mode rebalance`** sends enriched BUY alerts from **`signals`** + optional **`enrichments`**, with ATR-normalized sizing when **`PORTFOLIO_VALUE_USD`** is set and fallback to **`POSITION_SIZE_USD`**; **`cue brief --mode stop`** suppresses BUYs and always sends the **Daily Pulse** (open positions, stop regime labels, regime state, next Friday, inline **`⚠️ NEAR STOP`** warning).
+- **Dashboard:** **`src/briefing/dashboard.ts`** + **`template.ts`** render the **Live Performance** section (closed trades, expectancy, win rate, confidence-tier P&L) from the live `positions` ledger.
 
 **Phase 4 / 5 (reconciled):** Intent remains **infrastructure + universe scale**, then **alert enrichment + intra-week visibility**. In-repo status:
 
@@ -80,6 +81,10 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 | 4.6 Quality-GARP backtest (research) | **Research only** — no production screener code until gates pass (Sharpe **> 0.8**, expectancy **> 0** per arch §11). |
 | 5.1 Enriched BUY alert | **Shipped** — formatted entry range / stop / 1R / sizing from signal row + optional enrichment join. |
 | 5.2 Daily position pulse | **Shipped** — stop path sends pulse every `brief` run, even when no sells fire. |
+| 6.A Stop proximity warning | **Shipped** — Daily Pulse appends **`⚠️ NEAR STOP`** when stop cushion is under **0.5× ATR(14)**. |
+| 6.B ATR position sizer | **Shipped** — BUY alerts use `PORTFOLIO_VALUE_USD` risk sizing with `POSITION_SIZE_USD` fallback. |
+| 6.C Live performance dashboard | **Shipped** — dashboard compares live expectancy / win rate vs locked backtest references. |
+| 6.D Live positions exit instrumentation | **Shipped** — migration `005` adds `positions.pnl_pct` + `positions.exit_reason`; `closePosition()` writes both atomically. |
 
 ---
 
@@ -106,4 +111,4 @@ Objective, data-driven, first-principles. **No fluff.** **Code-first.** Explain 
 
 ---
 
-*End of Claude project instructions. Keep in sync with `.cursor/rules/project-spec.md` when behaviour or Phase 5 status changes.*
+*End of Claude project instructions. Keep in sync with `.cursor/rules/project-spec.md` when behaviour or Phase 6 status changes.*

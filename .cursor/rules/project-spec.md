@@ -1,6 +1,6 @@
 # Cue — Project specification (engineering)
 
-*Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 5 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity).*
+*Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 6 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity, live instrumentation).*
 
 **Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`spec/cue-db-schema.md`** (SQL snippets + read patterns + deferred items), **`.cursor/rules/db-schema.md`** (short table aligned to applied `src/db/migrations/*.sql`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
@@ -118,12 +118,12 @@ interface PipelineStep {
 
 **Startup / shutdown:** readonly DB **`SELECT 1`** for health; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 
-### 4.5 Alert / brief mode gating (Phase 5 behaviour)
+### 4.5 Alert / brief mode gating (Phase 6 behaviour)
 
 `src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**.
 
-- **`rebalance`** → send formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`LEFT JOIN` in `src/briefing/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale.
-- **`stop`** → suppress **BUY** alerts, but **always** send the **Daily Pulse** for intra-week visibility, even when no SELLs fire. Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealized P&L, labels stops as **BASE** vs **TIGHT**, and shows the next ET Friday rebalance date.
+- **`rebalance`** → send formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`LEFT JOIN` in `src/briefing/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale. Share sizing is ATR-normalized when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`**.
+- **`stop`** → suppress **BUY** alerts, but **always** send the **Daily Pulse** for intra-week visibility, even when no SELLs fire. Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealized P&L, labels stops as **BASE** vs **TIGHT**, flags **`⚠️ NEAR STOP`** when stop cushion is under **0.5× ATR(14)**, and shows the next ET Friday rebalance date.
 - Invalid / missing `--mode` should still fail loudly in these code paths.
 
 ---
@@ -143,7 +143,7 @@ interface PipelineStep {
 | Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` |
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
-| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + stop-path Daily Pulse)* |
+| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + ATR sizing; stop-path Daily Pulse + near-stop warning; dashboard Live Performance section)* |
 | DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
@@ -174,11 +174,11 @@ interface PipelineStep {
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` + `003_positions_signals_upgrade.sql` + `004_create_backtest_trades.sql`; ledger **`_migrations`**.
-- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**; `backtest_trades` is live and populated by `persistBacktestArtifacts()` in `src/backtest/runner.ts`.
+- **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` + `003_positions_signals_upgrade.sql` + `004_create_backtest_trades.sql` + `005_positions_pnl_exit_reason.sql`; ledger **`_migrations`**.
+- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**, **`pnl_pct`**, and **`exit_reason`**; `backtest_trades` is live and populated by `persistBacktestArtifacts()` in `src/backtest/runner.ts`.
 - **Backtest trade exit mapping:** internal `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` remains reserved in the table constraint but is not emitted by the current runner.
-- **`fundamentals_cache`:** `cue enrich-fundamentals` writes disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`). As of Phase 5 the table grows organically from run dates; historical backfill remains backlog work.
-- **Next migration ID:** **`005`**.
+- **`fundamentals_cache`:** `cue enrich-fundamentals` writes disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`). As of Phase 6 the table grows organically from run dates; historical backfill remains backlog work.
+- **Next migration ID:** **`006`**.
 - **Reference:** see **`cue-db-schema.md`** for deeper schema narrative and SQL examples.
 
 ---
@@ -207,7 +207,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | `LLM_PROVIDER`, provider keys, `VERTEX_*`, `LLM_MAX_TOKENS` | LLM |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alerts |
 | `LOG_LEVEL` | Winston |
-| Position / RSI / ATR params | `MAX_POSITIONS`, `POSITION_SIZE_USD`, `STOP_LOSS_PCT`, `MAX_HOLD_DAYS`, `SMA_PERIOD`, etc. |
+| Position / RSI / ATR params | `MAX_POSITIONS`, `POSITION_SIZE_USD`, `PORTFOLIO_VALUE_USD`, `STOP_LOSS_PCT`, `MAX_HOLD_DAYS`, `SMA_PERIOD`, etc. |
 
 ---
 
@@ -221,6 +221,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 3+ — Ops hardening (this repo) | **`scheduler.ts`** ET window, Fri vs Mon–Thu routes, **`isRunning`**, **`LOCK_PATH`**, **`cue-timezone`**, **`llm-smoke`**, README / rules | ✅ Shipped here |
 | 4 — Infrastructure + universe | Grouped fetcher, lockfile, stop dashboard, full universe, fundamentals wiring, Quality-GARP research (closed) | ✅ Complete |
 | 5 — Alert enrichment + intra-week visibility | Enriched BUY Telegram message, `brief --mode stop` Daily Pulse, S6 writer verification | ✅ Complete |
+| 6 — Live performance instrumentation | Stop proximity warning, ATR position sizer, live expectancy dashboard, positions `pnl_pct` + `exit_reason` (migration 005) | ✅ Complete |
 
 
 ---
@@ -238,20 +239,27 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | — | FIXED (repo)       | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard                                                                                                                               |
 | — | FIXED (repo)       | BUY Telegram noise on stop | ✅ `--mode stop` + dispatcher                                                                                                                      |
 | — | FIXED (repo)       | No intra-week Telegram visibility when sells=0 | ✅ stop path now sends Daily Pulse on every `cue brief --mode stop` run |
+| — | FIXED (Phase 6)    | positions missing `pnl_pct` / `exit_reason` — live trades not comparable to `backtest_trades` | ✅ Migration `005` + `closePosition()` writer updated |
+| — | FIXED (Phase 6)    | No live expectancy visibility on dashboard | ✅ Live Performance section added |
 | — | FIXED (arch S3)    | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts`                                                                                             |
 | — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
 
 ---
 
-## 13. Phase 6 backlog (starting point)
+## 13. Phase 7 backlog
 
-| Task | Notes |
-|---|---|
-| **`fundamentals_cache` historical backfill** | LOW — current table grows organically from `enrich-fundamentals` run dates |
-| **systemd unit** | LOW — deferred; PM2 is currently stable |
-| **Winston file transport** | LOW — deferred; log volume is negligible |
-| **Quality-GARP as momentum exclusion filter** | RESEARCH — exclude momentum BUY if `ROE < 15%` or `D/E > 2.0`; requires separate backtest spec + gate clearance before any production code |
-| **New research / strategy improvements** | OPEN — no active thesis; strategy gate discipline still applies |
+| Task | Status / Priority | Notes |
+|---|---|---|
+| **Stop proximity warning (P6-A)** | ✅ Shipped | `⚠️ NEAR STOP` now renders inline on the Daily Pulse |
+| **ATR position sizer (P6-B)** | ✅ Shipped | `PORTFOLIO_VALUE_USD` env var supported; fallback to `POSITION_SIZE_USD` retained |
+| **signal_outcomes table + `cue measure-signals`** | LOW | Directional accuracy tracking independent of position management; next natural instrumentation step |
+| **Regime 4-state filter (VIX secondary suppression)** | RESEARCH | Backtest question: does `VIX > 25` gating improve Sharpe without CAGR dropping below 12%? |
+| **Volume breakout entry filter** | RESEARCH | Evaluate whether `volume > 1.5× 20d avg` on entry improves expectancy |
+| **`fundamentals_cache` historical backfill** | LOW | Current table grows organically from `enrich-fundamentals` run dates |
+| **systemd unit** | LOW | Deferred; PM2 is currently stable |
+| **Winston file transport** | LOW | Deferred; log volume is negligible |
+| **Quality-GARP as momentum exclusion filter** | RESEARCH | Exclude momentum BUY if `ROE < 15%` or `D/E > 2.0`; requires separate backtest spec + gate clearance before any production code |
+| **New research / strategy improvements** | OPEN | No active thesis; strategy gate discipline still applies |
 
 ---
 

@@ -1,7 +1,7 @@
 /**
  * Cross-Sectional Momentum Ranker — Jegadeesh-Titman 12-1
  * Pure functions, no I/O, no side effects.
- * Per §6.2 of Cue_Spec_v1.3.md
+ * Per §6.2 of Cue_Spec.md
  */
 
 import type { RankedTicker, RankingConfig } from "../enrichers/momentum-types.js";

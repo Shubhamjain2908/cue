@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.2 · May 2026 — paths aligned to this repository*
+*v1.3 · May 2026 — paths aligned to this repository*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in
@@ -39,9 +39,11 @@ not be bypassed without an explicit gate override (documented in
 | Guardrail | Rule | Enforced in |
 |---|---|---|
 | **BUY alerts on rebalance-style runs only** | `brief` / dispatcher use `--mode rebalance\|stop`; `stop` runs must not emit BUY alerts. | `src/briefing/telegram-dispatcher.ts` |
-| **BUY message derivation is local-only** | Entry range / stop / 1R / share count come from the `signals` row, optional `enrichments` join, and `getConfig()` — no new tables, env vars, or external data sources. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
+| **BUY message derivation is local-only** | Entry range / stop / 1R come from the `signals` row; share count comes from `getConfig()` (`PORTFOLIO_VALUE_USD` when set, else `POSITION_SIZE_USD`) plus optional `enrichments` join. No new tables or external data sources. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **Stop-path Daily Pulse always fires** | `cue brief --mode stop` sends the Daily Pulse regardless of sell count; rebalance path behavior is unchanged. | `src/briefing/telegram-dispatcher.ts` |
 | **Pulse tolerance for missing bars** | If an OPEN ticker has no `daily_prices` row for the resolved pulse `asOf`, skip that ticker with a warning; do not fail the whole pulse. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
+| **Stop proximity threshold** | `STOP_PROXIMITY_ATR_THRESHOLD = 0.5` (hardcoded). `⚠️ NEAR STOP` fires when `(last_close - current_stop_loss) < atr14 * 0.5`. Not configurable at runtime. | `src/briefing/telegram-dispatcher.ts` |
+| **ATR position sizer fallback** | If `PORTFOLIO_VALUE_USD` unset, share count falls back to `floor(POSITION_SIZE_USD / entry_mid)`. Cap: `shares × entry_mid` must not exceed `PORTFOLIO_VALUE_USD × 0.05`. `shares` minimum = 1. | `src/briefing/telegram-dispatcher.ts` |
 | **Alert dedup** | `signals.alerted` updated after send. | `src/db/queries.ts`, dispatcher |
 
 ---

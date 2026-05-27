@@ -81,6 +81,8 @@ Open and closed book from BUY signals.
 | `entry_date`, `entry_price` | REAL / ISO date |
 | `status` | App-defined status string (OPEN / closed variants) |
 | `exit_date`, `exit_price` | Optional |
+| `pnl_pct` | REAL — computed at close: `ROUND((exit_price - entry_price) / entry_price * 100, 4)`. `NULL` if `exit_price` invalid. |
+| `exit_reason` | TEXT CHECK IN (`'TRAILING_STOP'`,`'INITIAL_STOP'`,`'TIME_EXIT'`,`'MANUAL'`). Maps from live `ExitReason` enum. |
 | `highest_close_since_entry`, `current_stop_loss` | Trailing stop machinery |
 
 **Written by:** screener / `cue execute-stops` paths in `momentum-screener.ts` (see `queries.ts`).
@@ -123,6 +125,12 @@ Stores granular point-in-time trade rows generated during simulator sessions. Th
 
 **Current exit mapping:** `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` is reserved in schema but unused by the current runner.
 
+#### Migration 005: positions `pnl_pct` + `exit_reason`
+* `positions` table gains `pnl_pct` (REAL) and `exit_reason` (TEXT with CHECK constraint).
+* Backfill: existing closed rows with valid `exit_price` get `pnl_pct` computed; `REBALANCE_DROP`
+  flat closes correctly show `pnl_pct = 0.00`, `exit_reason = 'MANUAL'`.
+* `exit_reason` enum mirrors `backtest_trades` for live vs backtest comparability.
+
 ---
 
 ## Backtesting
@@ -140,7 +148,7 @@ Aggregated metrics for a labeled historical run (written by `src/backtest/runner
 
 ## Indexes
 
-Migrations **001** / **002** / **003** do not declare secondary indexes beyond PK/UNIQUE constraints. **`004_create_backtest_trades.sql`** adds `idx_bt_trades_ticker` and `idx_bt_trades_run`. Add further indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
+Migrations **001** / **002** / **003** / **005** do not declare secondary indexes beyond PK/UNIQUE constraints. **`004_create_backtest_trades.sql`** adds `idx_bt_trades_ticker` and `idx_bt_trades_run`. Add further indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
 
 ---
 
