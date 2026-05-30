@@ -2,9 +2,30 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getConfig } from "../config/index.js";
-import { listUnenrichedBuySignals, listUnenrichedWatchlistSignals } from "../db/queries.js";
+import {
+  getGenuineClosedTradeCount,
+  listUnenrichedBuySignals,
+  listUnenrichedWatchlistSignals,
+} from "../db/queries.js";
 import { openCueDb } from "../db/provider.js";
 import { runEnrichment } from "../llm/enricher.js";
+
+const P7_F_GATE_MIN_GENUINE_CLOSED = 15;
+
+export async function runRefreshCli(): Promise<void> {
+  const config = getConfig();
+  const db = openCueDb(config.DB_PATH);
+  try {
+    const count = getGenuineClosedTradeCount(db);
+    if (count < P7_F_GATE_MIN_GENUINE_CLOSED) {
+      console.error(`P7-F gate not cleared: ${String(count)}/15 genuine closed trades`);
+      process.exit(1);
+    }
+    console.log(`P7-F gate cleared: ${String(count)}/15 genuine closed trades`);
+  } finally {
+    db.close();
+  }
+}
 
 export async function runEnrichCli(): Promise<void> {
   const config = getConfig();
