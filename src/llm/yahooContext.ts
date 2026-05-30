@@ -159,6 +159,37 @@ function numOrNull(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+const searchNewsItemSchema = z.object({
+  title: z.string(),
+  publisher: z.string().optional(),
+  providerPublishTime: z.union([z.date(), z.string(), z.number()]).optional(),
+});
+
+const searchNewsResultSchema = z.object({
+  news: z.array(searchNewsItemSchema).optional().default([]),
+});
+
+function parseSearchNews(raw: unknown): Array<{
+  title: string;
+  source?: string;
+  publishedAt?: string;
+}> {
+  const parsed = searchNewsResultSchema.safeParse(raw);
+  if (!parsed.success) {
+    return [];
+  }
+  return parsed.data.news.map((n) => ({
+    title: n.title,
+    source: n.publisher,
+    publishedAt:
+      n.providerPublishTime instanceof Date
+        ? n.providerPublishTime.toISOString()
+        : n.providerPublishTime !== undefined
+          ? new Date(n.providerPublishTime).toISOString()
+          : undefined,
+  }));
+}
+
 function extractFinancialsFromQuoteSummary(qs: {
   summaryDetail?: { trailingPE?: unknown };
   financialData?: { returnOnEquity?: unknown; debtToEquity?: unknown };
@@ -223,15 +254,13 @@ export async function fetchYahooEnrichmentDto(
   let headlines =
     readJsonCache(newsPath, NEWS_TTL_MS, cachedNewsBundleSchema)?.headlines ?? null;
   if (headlines === null) {
-    const search = await yf.search(ticker, { newsCount: 10, quotesCount: 1 });
-    const rawNews = (search.news ?? []).map((n) => ({
-      title: n.title,
-      source: n.publisher,
-      publishedAt:
-        n.providerPublishTime instanceof Date
-          ? n.providerPublishTime.toISOString()
-          : undefined,
-    }));
+    // Quotes are unused; skip quote validation (Yahoo `typeDisp` casing drifts vs library schema).
+    const search = await yf.search(
+      ticker,
+      { newsCount: 10, quotesCount: 0 },
+      { validateResult: false },
+    );
+    const rawNews = parseSearchNews(search);
     headlines = filterHeadlinesLast7Days(rawNews, nowMs);
     writeJsonCache(newsPath, root, {
       ticker: safe,
