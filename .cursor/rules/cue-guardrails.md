@@ -13,6 +13,7 @@ not be bypassed without an explicit gate override (documented in
 |---|---|---|
 | **Regime gate — BUY suppression** | If QQQ close < SMA(200): suppress all new BUY signals. SELL and stop evaluation run unconditionally. | `src/analysers/momentum-screener.ts` |
 | **Top-N hard cap** | At most **3** momentum BUY entries per rebalance pass (`topN = 3` contract). | `src/analysers/momentum-screener.ts` (portfolio cap also tied to `MAX_POSITIONS` in config) |
+| **Watchlist bench — no positions** | Ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` persist as `signals.signal = WATCHLIST` on rebalance only; **no** `positions` insert. Depth `0` disables bench end-to-end. | `momentum-screener.ts`, `WATCHLIST_BENCH_DEPTH` in `src/config/index.ts` |
 | **Rebalance vs stop** | Full **BUY** ranking on **`rebalance`** / Friday scheduler path; **stop** path runs maintenance (`execute-stops`) without Friday-style screen. | `src/agents/scheduler.ts`, `src/agents/daily-workflow.ts` (`detectRunMode`) |
 | **Momentum formula locked** | `(close[today-21] - close[today-252]) / close[today-252]`. Any change requires backtest re-validation against Phase 1 gate metrics. | `src/enrichers/momentum-technical.ts` (and backtest) |
 | **ATR multipliers locked** | Base: 4.0×. Tight: 1.5×. Tight trigger: ≥ 25% unrealized. | `src/analysers/momentum-screener.ts` — constants / config as designed |
@@ -44,7 +45,9 @@ not be bypassed without an explicit gate override (documented in
 | **Pulse tolerance for missing bars** | If an OPEN ticker has no `daily_prices` row for the resolved pulse `asOf`, skip that ticker with a warning; do not fail the whole pulse. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **Stop proximity threshold** | `STOP_PROXIMITY_ATR_THRESHOLD = 0.5` (hardcoded). `⚠️ NEAR STOP` fires when `(last_close - current_stop_loss) < atr14 * 0.5`. Not configurable at runtime. | `src/briefing/telegram-dispatcher.ts` |
 | **ATR position sizer fallback** | If `PORTFOLIO_VALUE_USD` unset, share count falls back to `floor(POSITION_SIZE_USD / entry_mid)`. Cap: `shares × entry_mid` must not exceed `PORTFOLIO_VALUE_USD × 0.05`. `shares` minimum = 1. | `src/briefing/telegram-dispatcher.ts` |
-| **Alert dedup** | `signals.alerted` updated after send. | `src/db/queries.ts`, dispatcher |
+| **Alert dedup** | `signals.alerted` updated after send (BUY alerts and watchlist bench). | `src/db/queries.ts`, dispatcher |
+| **Watchlist bench on rebalance only** | Second Telegram message “Next in Rank”; no sizing/stops; `stop` mode must not send bench. | `src/briefing/telegram-dispatcher.ts` |
+| **Enrich must not skip WATCHLIST** | `cue enrich` runs WATCHLIST pass even when no pending BUY rows. | `src/agents/thesis-generator.ts` |
 
 ---
 

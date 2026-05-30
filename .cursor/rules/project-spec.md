@@ -122,8 +122,8 @@ interface PipelineStep {
 
 `src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**.
 
-- **`rebalance`** → send formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`LEFT JOIN` in `src/briefing/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale. Share sizing is ATR-normalized when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`**.
-- **`stop`** → suppress **BUY** alerts, but **always** send the **Daily Pulse** for intra-week visibility, even when no SELLs fire. Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealized P&L, labels stops as **BASE** vs **TIGHT**, flags **`⚠️ NEAR STOP`** when stop cushion is under **0.5× ATR(14)**, and shows the next ET Friday rebalance date.
+- **`rebalance`** → send formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`INNER JOIN` for ready-to-alert BUYs in `src/db/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale. Share sizing is ATR-normalized when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`**. Then, when **`WATCHLIST_BENCH_DEPTH` > 0**, send a second Telegram message **“Next in Rank”** for unalerted **`WATCHLIST`** rows on the session `asOf` (rank, 12-1 fraction, sentiment/sector from enrichment when present — `—` if enrich did not run or failed).
+- **`stop`** → suppress **BUY** and **watchlist bench** alerts, but **always** send the **Daily Pulse** for intra-week visibility, even when no SELLs fire. Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealized P&L, labels stops as **BASE** vs **TIGHT**, flags **`⚠️ NEAR STOP`** when stop cushion is under **0.5× ATR(14)**, and shows the next ET Friday rebalance date.
 - Invalid / missing `--mode` should still fail loudly in these code paths.
 
 ---
@@ -140,10 +140,10 @@ interface PipelineStep {
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
 | LLM | `src/llm/factory.ts`, `src/llm/types.ts`, `src/llm/json.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
-| Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` |
+| Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` (pending **BUY**, then pending **WATCHLIST**; watchlist failures are warn-only) |
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
-| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + ATR sizing; stop-path Daily Pulse + near-stop warning; dashboard Live Performance section)* |
+| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts`, `src/briefing/template.ts` (`formatWatchlistBench`) | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + watchlist bench; stop-path Daily Pulse; dashboard Live Performance section)* |
 | DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 

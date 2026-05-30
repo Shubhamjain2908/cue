@@ -16,7 +16,7 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 
 - Pulls **EOD OHLCV** for the configured universe and stores it in SQLite.
 - **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
-- On **Friday rebalance** path: fundamentals prefetch (cache), full screen with `--force-rebalance`, LLM enrich for pending BUYs, then brief.
+- On **Friday rebalance** path: fundamentals prefetch (cache), full screen with `--force-rebalance`, LLM enrich for pending BUYs and **WATCHLIST** bench rows, then brief (BUY Telegram alerts + optional **Next in Rank** bench message).
 - On **Mon–Thu stop** path: price refresh, **execute-stops** maintenance, then brief (no full rebalance screen).
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
@@ -136,9 +136,9 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 
 | Command | Description |
 |---------|-------------|
-| `pnpm run cue -- enrich` | LLM enrichment for pending BUY signals (`thesis-generator`) |
+| `pnpm run cue -- enrich` | LLM enrichment for pending **BUY** and **WATCHLIST** signals (`thesis-generator`) |
 | `pnpm run cue -- llm-smoke` | Live smoke: text + JSON + mini thesis (`pnpm llm-smoke`) |
-| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
+| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Rebalance: BUY alerts + **Next in Rank** bench (`WATCHLIST_BENCH_DEPTH`, default 5). Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
 | `pnpm run cue -- brief:dashboard` | Write `dist/dashboard.html` only (`pnpm dashboard`, `pnpm dashboard:open`) |
 | `pnpm run cue -- brief:alert` | Telegram only (internal; expects `--mode` in argv) |
 
@@ -176,7 +176,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 4. **`CACHE_DIR`** — Yahoo / ingest caches (default `./data/cache`).
 5. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google` \| `vertex` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
 
-Strategy thresholds (`MAX_POSITIONS`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see `project-spec.md` for **locked** momentum / ATR / regime rules.
+Strategy thresholds (`MAX_POSITIONS`, `WATCHLIST_BENCH_DEPTH`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see `project-spec.md` for **locked** momentum / ATR / regime rules. Set **`WATCHLIST_BENCH_DEPTH=0`** to disable watchlist rows and the rebalance **Next in Rank** Telegram message.
 
 ---
 
