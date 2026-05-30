@@ -779,6 +779,7 @@ function persistBacktestArtifacts(
   from: string,
   to: string,
   result: RunBacktestResult,
+  strategy: string,
 ): { runId: bigint; tradesInserted: number } {
   const expectancyPctPerTrade = mean(
     result.closedTrades.map((t) =>
@@ -799,6 +800,7 @@ function persistBacktestArtifacts(
     totalTrades: result.metrics.totalTrades,
     benchmarkCagr: realOrZero(result.benchmarkCagrPct),
     expectancy: realOrZero(expectancyPctPerTrade),
+    strategy,
   });
 
   let tradesInserted = 0;
@@ -853,7 +855,7 @@ if (isMain) {
       }
 
       const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
-      const { runId, tradesInserted } = persistBacktestArtifacts(db, from, to, result);
+      const { runId, tradesInserted } = persistBacktestArtifacts(db, from, to, result, "GARP_RESEARCH");
       console.log(
         `Saved backtest run to SQLite (id=${runId.toString()}, trades=${tradesInserted}, file=${dbAbsPath}).`,
       );
@@ -876,7 +878,7 @@ if (isMain) {
       }
 
       const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
-      const { runId, tradesInserted } = persistBacktestArtifacts(db, from, to, result);
+      const { runId, tradesInserted } = persistBacktestArtifacts(db, from, to, result, "MOMENTUM");
       console.log(
         `Saved backtest run to SQLite (id=${runId.toString()}, trades=${tradesInserted}, file=${dbAbsPath}). Point sqlite-cue / other tools at this path.`,
       );
