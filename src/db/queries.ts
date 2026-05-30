@@ -533,3 +533,46 @@ export function setPipelineState(db: SqliteConnection, key: string, value: strin
       updated_at = CURRENT_TIMESTAMP
   `).run(key, value);
 }
+
+export type StopRegime = "BASE" | "TIGHT";
+
+export interface StopMovementInsert {
+  position_id: number;
+  as_of_date: string;
+  previous_stop: number;
+  new_stop: number;
+  previous_high: number;
+  new_high: number;
+  stop_regime: StopRegime;
+  close_price: number;
+  atr14: number;
+}
+
+/** Append-only audit row for a trailing-stop ladder mutation (`011_position_audit`). */
+export function insertStopMovement(db: SqliteConnection, fields: StopMovementInsert): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO stop_movements (
+      position_id, as_of_date, previous_stop, new_stop, previous_high, new_high,
+      stop_regime, close_price, atr14
+    ) VALUES (
+      @position_id, @as_of_date, @previous_stop, @new_stop, @previous_high, @new_high,
+      @stop_regime, @close_price, @atr14
+    )
+  `).run(fields);
+}
+
+/**
+ * Closed positions that count toward the P7-F thesis-refresh gate
+ * (excludes operator manual closes and rebalance rotation drops).
+ */
+export function getGenuineClosedTradeCount(db: SqliteConnection): number {
+  const row = db
+    .prepare(`
+      SELECT COUNT(*) AS c
+      FROM positions
+      WHERE status = 'CLOSED'
+        AND exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
+    `)
+    .get() as { c: number };
+  return row.c;
+}

@@ -16,6 +16,7 @@ import {
   closePosition,
   insertPosition,
   insertSignal,
+  insertStopMovement,
   mapLiveExitReason,
   type SignalInsert,
 } from "../db/queries.js";
@@ -239,6 +240,7 @@ interface OpenPositionRow {
   entryDate: string;
   entryPrice: number;
   highestCloseSinceEntry: number | null;
+  currentStop: number;
   initialAtrStop: number;
 }
 
@@ -253,6 +255,7 @@ function listOpenPositions(db: SqliteConnection): OpenPositionRow[] {
       p.entry_date AS entryDate,
       p.entry_price AS entryPrice,
       p.highest_close_since_entry AS highestCloseSinceEntry,
+      COALESCE(p.current_stop_loss, sig.initial_atr_stop) AS currentStop,
       sig.initial_atr_stop AS initialAtrStop
     FROM positions p
     INNER JOIN signals sig ON sig.id = p.signal_id
@@ -425,7 +428,67 @@ export function runLiveScreen(
     }
   }
 
+  const updateStopStmt = db.prepare(`
+    UPDATE positions
+    SET current_stop_loss = @newStop, highest_close_since_entry = @nextHigh
+    WHERE id = @positionId AND status = 'OPEN'
+  `);
+
   const tx = db.transaction(() => {
+    if (mode === "stop") {
+      for (const pos of openRows) {
+        if (exitReasonByTicker.has(pos.ticker)) {
+          continue;
+        }
+        const bar = resolveAsOfBar(pos.ticker, dayMap, byTicker, asOf);
+        if (bar === undefined) {
+          continue;
+        }
+        const prevHigh = pos.highestCloseSinceEntry ?? pos.entryPrice;
+        const nextHigh = Math.max(prevHigh, bar.close);
+        const series = byTicker.get(pos.ticker);
+        const slice = series ? sliceBarsThrough(series, asOf) : null;
+        if (!slice || slice.length === 0) {
+          continue;
+        }
+        const highs = slice.map((b) => b.high);
+        const lows = slice.map((b) => b.low);
+        const closes = slice.map((b) => b.close);
+        const atrToday = atr(highs, lows, closes, cfg.atrPeriod);
+        if (atrToday === null) {
+          continue;
+        }
+        const newStop = computeTrailingStop(
+          pos.currentStop,
+          nextHigh,
+          pos.entryPrice,
+          atrToday,
+          cfg.atrMultiplierBase,
+          cfg.atrMultiplierTight,
+          cfg.atrTightenThresholdPct,
+        );
+        if (newStop !== pos.currentStop || nextHigh !== prevHigh) {
+          updateStopStmt.run({
+            positionId: pos.positionId,
+            newStop,
+            nextHigh,
+          });
+          const unrealizedPct = ((nextHigh - pos.entryPrice) / pos.entryPrice) * 100;
+          insertStopMovement(db, {
+            position_id: pos.positionId,
+            as_of_date: asOf,
+            previous_stop: pos.currentStop,
+            new_stop: newStop,
+            previous_high: prevHigh,
+            new_high: nextHigh,
+            stop_regime: unrealizedPct >= cfg.atrTightenThresholdPct ? "TIGHT" : "BASE",
+            close_price: bar.close,
+            atr14: atrToday,
+          });
+        }
+      }
+    }
+
     for (const pos of openRows) {
       const reason = exitReasonByTicker.get(pos.ticker);
       if (reason === undefined) {
