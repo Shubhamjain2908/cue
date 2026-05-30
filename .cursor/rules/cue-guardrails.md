@@ -17,6 +17,8 @@ not be bypassed without an explicit gate override (documented in
 | **Rebalance vs stop** | Full **BUY** ranking on **`rebalance`** / Friday scheduler path; **stop** path runs maintenance (`execute-stops`) without Friday-style screen. | `src/agents/scheduler.ts`, `src/agents/daily-workflow.ts` (`detectRunMode`) |
 | **Split adjustment before evaluation** | `adjust-splits` runs after **ingest**, before **screen** / **execute-stops**. Non-critical — Yahoo failure must not abort stop evaluation. | `corporate-actions.ts`, `daily-workflow.ts`, `scheduler.ts` |
 | **Locked backtest reference** | Dashboard / briefing backtest metrics use latest **`MOMENTUM` + `locked = 1`** run, not newest `run_date`. New backtests default **unlocked**. | `briefing/queries.ts`, migration `009` |
+| **Live performance scope** | Dashboard live P&amp;L aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')`. Rotation drops must not inflate closed-trade counts or show 0% win-rate noise. | `briefing/queries.ts` |
+| **Live `REBALANCE_DROP` fidelity** | Screener rotation closes persist **`REBALANCE_DROP`** on `positions` (not aliased to `MANUAL`). | `006`, `mapLiveExitReason`, `momentum-screener.ts` |
 | **Momentum formula locked** | `(close[today-21] - close[today-252]) / close[today-252]`. Any change requires backtest re-validation against Phase 1 gate metrics. | `src/enrichers/momentum-technical.ts` (and backtest) |
 | **ATR multipliers locked** | Base: 4.0×. Tight: 1.5×. Tight trigger: ≥ 25% unrealized. | `src/analysers/momentum-screener.ts` — constants / config as designed |
 | **ATR golden rule** | `current_stop_loss` never decreases. `new_stop = MAX(candidate, current_stop_loss)`. | Stop evaluation in `momentum-screener.ts` |

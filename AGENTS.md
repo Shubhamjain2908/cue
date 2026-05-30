@@ -1,5 +1,13 @@
 # Agent instructions (Cue)
 
-Principal engineering + quant context for this repo lives in **`.cursor/rules/cue-claude-instructions.md`** (role, SoU reading order, locked stack, strategy, Phase 4 reconciliation, workflow directives, path map from arch doc → current tree).
+**Role, guardrails, and workflow:** **`.cursor/rules/.cursorrules`**.
 
-Repo-accurate behaviour and CLI: **`.cursor/rules/project-spec.md`**. Operator quickstart: **`README.md`**.
+**Repo-accurate behaviour and CLI:** **`.cursor/rules/project-spec.md`**.
+
+**SQLite schema (migrations `001`–`009`):** **`.cursor/rules/db-schema.md`**.
+
+**Hard constraints:** **`.cursor/rules/cue-guardrails.md`**.
+
+**Operator quickstart:** **`README.md`**.
+
+**Frozen narrative SoU (read-only):** **`spec/cue-architecture-v1.md`** — do not edit from agent work; update **`project-spec.md`** / **`db-schema.md`** when the live repo diverges.

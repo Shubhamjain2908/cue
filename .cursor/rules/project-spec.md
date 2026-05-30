@@ -163,9 +163,12 @@ interface PipelineStep {
 
 **Historical depth:** prior **~400-day** per-ticker backfill is no longer performed by `cue ingest`; long lookbacks require rows already present in `daily_prices` (e.g. from earlier installs or a separate backfill).
 
-### 6.2 Enrichment context — Yahoo
+### 6.2 Yahoo Finance (two call sites)
 
-- **`yahoo-finance2`** via `src/llm/yahooContext.ts`; JSON under **`CACHE_DIR`**.
+| Use | Module | Methods |
+|-----|--------|---------|
+| LLM enrichment / fundamentals CLI | `src/llm/yahooContext.ts` | `search()`, `quoteSummary()` — disk cache under **`CACHE_DIR`** |
+| Corporate split events | `src/ingestors/corporate-actions.ts` | `chart()` — persisted in **`corporate_actions`** (`008`) |
 
 ### 6.3 LLM providers
 
@@ -181,7 +184,9 @@ interface PipelineStep {
 - **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`**; `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`).
 - **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (bull window **2023–2025** pinned in `009` backfill); newer unlocked research runs (e.g. extended **2022–2025**) do not displace it.
 - **Split adjustment:** `corporate_actions` idempotency + price-level updates on OPEN book before screen/stops (`cue adjust-splits`).
-- **Backtest trade exit mapping:** internal `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` reserved in `backtest_trades` CHECK but not emitted by the current runner.
+- **Live `positions` exit mapping** (`mapLiveExitReason` / `006`): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP → REBALANCE_DROP`**; `FORCED_CLOSE → MANUAL`.
+- **Live Performance dashboard:** `getLivePerformanceSummary` / `getLivePerformanceByConfidence` exclude **`MANUAL`** and **`REBALANCE_DROP`**; backtest comparison metrics come from **`getMomentumBacktestSummary`** (`formatBacktestRef` in `template.ts`), not hardcoded constants.
+- **`backtest_trades` exit mapping** (simulator only): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`**. `INITIAL_STOP` reserved in CHECK but not emitted by the current runner.
 - **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`).
 - **Next migration ID:** **`010`**.
 - **Reference:** **`.cursor/rules/db-schema.md`** (repo agent summary tied to applied migrations).

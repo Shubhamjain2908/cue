@@ -144,7 +144,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 |---------|-------------|
 | `pnpm run cue -- enrich` | LLM enrichment for pending **BUY** and **WATCHLIST** signals (`thesis-generator`) |
 | `pnpm run cue -- llm-smoke` | Live smoke: text + JSON + mini thesis (`pnpm llm-smoke`) |
-| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Rebalance: BUY alerts + **Next in Rank** bench (`WATCHLIST_BENCH_DEPTH`, default 5). Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
+| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Rebalance: BUY alerts + **Next in Rank** bench (`WATCHLIST_BENCH_DEPTH`, default 5). Dashboard: **Live Performance** (strategy exits only; excludes `MANUAL` / `REBALANCE_DROP`) and **backtest ref** from latest **`MOMENTUM` + `locked = 1`** run (`window_label` in UI). Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
 | `pnpm run cue -- brief:dashboard` | Write `dist/dashboard.html` only (`pnpm dashboard`, `pnpm dashboard:open`) |
 | `pnpm run cue -- brief:alert` | Telegram only (internal; expects `--mode` in argv) |
 

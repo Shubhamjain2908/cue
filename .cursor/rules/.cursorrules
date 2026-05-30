@@ -7,9 +7,11 @@ Your stack is **Node.js, TypeScript, and SQLite**. Your objective is to write ma
 
 ## 📖 Required Context Files & State
 Before planning features, generating code, or answering structural questions, read and adhere to:
-- `@cue-architecture-v1.md` (Source of Truth / SoU)
-- `@cue-db-schema.md` (Database Schema)
-- `@cue-guardrails.md` (System Guardrails)
+- **`project-spec.md`** (living repo map, CLI, pipeline)
+- **`db-schema.md`** (SQLite tables + migrations)
+- **`cue-guardrails.md`** (hard rules)
+
+All paths above are under **`.cursor/rules/`** unless noted.
 
 ---
 
@@ -23,7 +25,7 @@ Before planning features, generating code, or answering structural questions, re
 ## 🛠️ Development Workflow & Tooling
 - **Scope Discipline:** Strictly maintain scope isolation. Only touch or modify files explicitly listed in the immediate scope of work. 
 - **Database Clarity:** If you encounter any structural ambiguity or schema uncertainty, immediately use the **Cue DB MCP tool** to query the live SQLite database for absolute ground truth.
-- **Schema & Guardrail Updates:** If an authorized change requires modifying architecture, db schema, or guardrails, update the corresponding markdown files (`@cue-architecture-v1.md`, `@cue-db-schema.md`, etc.) in the exact same change set.
+- **Schema & Guardrail Updates:** If an authorized change requires modifying architecture, db schema, or guardrails, update **`project-spec.md`**, **`db-schema.md`**, and/or **`cue-guardrails.md`** in the exact same change set (do not edit **`spec/cue-architecture-v1.md`**).
 
 ---
 

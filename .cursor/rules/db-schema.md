@@ -17,7 +17,7 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `004_create_backtest_trades` | `backtest_trades` + indexes |
 | `005_positions_pnl_exit_reason` | `positions.pnl_pct`, `positions.exit_reason` (CHECK without `REBALANCE_DROP` yet) |
 | `006_rebalance_drop_exit_reason` | Rebuild `positions`; CHECK adds **`REBALANCE_DROP`**; backfill flat same-day rotation exits |
-| `007_backtest_runs_strategy` | `backtest_runs.strategy` |
+| `007_backtest_runs_strategy` | `backtest_runs.strategy`; backfill by id: **73, 74** → `MOMENTUM`; **75–79** → `GARP_RESEARCH`; remaining rows → `SWEEP` |
 | `008_corporate_actions` | `corporate_actions` (splits / reverse splits) |
 | `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked`; backfill locks bull-window runs **73, 74** (`2023-2025 (bull)`), labels extended run **80** (`2022-2025 (extended)`, unlocked) |
 
@@ -66,7 +66,9 @@ Split / reverse-split events for price adjustment (`008_corporate_actions`).
 | `source` | TEXT, default `yahoo` |
 | `applied_at` | Timestamp |
 
-**Written by:** `cue adjust-splits` (corporate-actions ingestor).
+**Written by:** `cue adjust-splits` (`src/ingestors/corporate-actions.ts`).
+
+**Yahoo API:** split events via **`yahoo-finance2` `chart()`** (not `src/llm/yahooContext.ts`, which uses `search` / `quoteSummary` for LLM enrichment only).
 
 ---
 
@@ -123,6 +125,8 @@ Open and closed book from **BUY** signals only (not WATCHLIST).
 **Written by:** `momentum-screener.ts` (`cue screen`, `cue execute-stops`).
 
 **Live exit mapping:** `TRAILING_STOP` → `TRAILING_STOP`; `MAX_HOLD` → `TIME_EXIT`; `REBALANCE_DROP` → `REBALANCE_DROP`; `FORCED_CLOSE` → `MANUAL`.
+
+**Dashboard Live Performance** (`src/briefing/queries.ts`): closed-position aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')` so rotation drops do not appear as strategy P&amp;L. Zero-state copy uses **`formatBacktestRef`** from the locked momentum backtest row (see `backtest_runs` below).
 
 ---
 
