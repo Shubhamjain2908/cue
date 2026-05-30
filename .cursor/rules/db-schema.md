@@ -7,6 +7,24 @@ This document summarizes tables, important columns, and how they relate to pipel
 
 ---
 
+## Migration ledger (applied order)
+
+| `id` (stem) | Summary |
+|-------------|---------|
+| `001_initial_schema` | Core tables: `daily_prices`, `signals`, `enrichments`, `positions`, `backtest_runs` |
+| `002_create_fundamental_cache` | `fundamentals_cache` |
+| `003_positions_signals_upgrade` | `positions` trailing-stop columns; `signals` unique → `(ticker, date, signal, signal_type)` |
+| `004_create_backtest_trades` | `backtest_trades` + indexes |
+| `005_positions_pnl_exit_reason` | `positions.pnl_pct`, `positions.exit_reason` (CHECK without `REBALANCE_DROP` yet) |
+| `006_rebalance_drop_exit_reason` | Rebuild `positions`; CHECK adds **`REBALANCE_DROP`**; backfill flat same-day rotation exits |
+| `007_backtest_runs_strategy` | `backtest_runs.strategy` |
+| `008_corporate_actions` | `corporate_actions` (splits / reverse splits) |
+| `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked` |
+
+There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
+
+---
+
 ## Ledger
 
 ### `_migrations`
@@ -35,28 +53,43 @@ End-of-day OHLCV bars (Massive.com ingest).
 
 **Written by:** `cue ingest` (`massive-price-ingestor.ts`); universe list from `data/universe/${UNIVERSE}.json` (see `src/universe/load-universe.ts`, `_meta.json`).
 
+### `corporate_actions`
+
+Split / reverse-split events for price adjustment (`008_corporate_actions`).
+
+| Column | Notes |
+|--------|--------|
+| `ticker`, `ex_date`, `type` | **UNIQUE** composite; `type` CHECK IN (`split`, `reverse_split`) |
+| `factor` | REAL |
+| `source` | TEXT, default `yahoo` |
+| `applied_at` | Timestamp |
+
+**Written by:** `cue adjust-splits` (corporate-actions ingestor).
+
 ---
 
 ## Signals & AI output
 
 ### `signals`
 
-Momentum / regime screen outputs and BUY/SELL rows. BUY rows carry denormalized momentum fields for enrichment and alerts.
+Momentum screen outputs: actionable **BUY** / **SELL**, plus rebalance-only **WATCHLIST** bench rows (ranks just below the top-N book).
 
 | Column | Notes |
 |--------|--------|
-| `ticker`, `date`, `signal`, `signal_type` | **UNIQUE** composite |
-| `signal` | e.g. BUY / SELL semantics used by screener |
+| `id` | INTEGER PK AUTOINCREMENT |
+| `ticker`, `date`, `signal`, `signal_type` | **UNIQUE** composite (`003`) |
+| `signal` | `BUY` \| `SELL` \| `HOLD` \| `WATCHLIST` — plain TEXT, no DB enum |
+| `signal_type` | Strategy lane; default **`MOMENTUM`** |
 | `price` | REAL at signal |
-| `alerted` | 0/1 — Telegram / brief idempotency |
-| `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context |
-| `atr14`, `initial_atr_stop` | Stop ladder inputs |
+| `alerted` | 0/1 — Telegram / brief idempotency (BUY alerts and watchlist bench) |
+| `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context (required for BUY and WATCHLIST at insert) |
+| `atr14`, `initial_atr_stop` | Stop ladder inputs; `initial_atr_stop` set on BUY; optional on WATCHLIST |
 
-**Written by:** `cue screen` (momentum-screener).
+**Written by:** `cue screen` (`momentum-screener.ts`). **WATCHLIST** rows: Friday **rebalance** path only, ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` (default depth 5, ranks 4–8 when `topN=3`). No `positions` row. Depth `0` disables WATCHLIST writes and bench Telegram.
 
 ### `enrichments`
 
-One row per enriched BUY `signal_id` (LLM + Yahoo headlines snapshot).
+One row per enriched **`BUY` or `WATCHLIST`** `signal_id` (LLM + Yahoo headlines snapshot).
 
 | Column | Notes |
 |--------|--------|
@@ -65,7 +98,7 @@ One row per enriched BUY `signal_id` (LLM + Yahoo headlines snapshot).
 | `earnings_flag`, `earnings_date` | Proximity / calendar |
 | `sector`, `sector_trend`, `headlines` | Context persisted for briefing |
 
-**Written by:** `cue enrich` (thesis-generator + `llm/enricher.ts`).
+**Written by:** `cue enrich` (`thesis-generator` + `llm/enricher.ts`). Watchlist enrichment is fail-open per ticker (warnings only).
 
 ---
 
@@ -73,19 +106,21 @@ One row per enriched BUY `signal_id` (LLM + Yahoo headlines snapshot).
 
 ### `positions`
 
-Open and closed book from BUY signals.
+Open and closed book from **BUY** signals only (not WATCHLIST).
 
 | Column | Notes |
 |--------|--------|
 | `signal_id` | FK → `signals.id` **ON DELETE CASCADE** |
-| `entry_date`, `entry_price` | REAL / ISO date |
-| `status` | App-defined status string (OPEN / closed variants) |
-| `exit_date`, `exit_price` | Optional |
-| `pnl_pct` | REAL — computed at close: `ROUND((exit_price - entry_price) / entry_price * 100, 4)`. `NULL` if `exit_price` invalid. |
-| `exit_reason` | TEXT CHECK IN (`'TRAILING_STOP'`,`'INITIAL_STOP'`,`'TIME_EXIT'`,`'MANUAL'`). Maps from live `ExitReason` enum. |
-| `highest_close_since_entry`, `current_stop_loss` | Trailing stop machinery |
+| `entry_date`, `entry_price` | ISO date / REAL |
+| `status` | `OPEN` \| `CLOSED` (app-defined strings) |
+| `exit_date`, `exit_price` | Set on close |
+| `pnl_pct` | REAL — `ROUND((exit - entry) / entry * 100, 4)` at close; NULL if invalid exit |
+| `exit_reason` | TEXT CHECK IN (`TRAILING_STOP`, `INITIAL_STOP`, `TIME_EXIT`, `MANUAL`, **`REBALANCE_DROP`**) — see `006` |
+| `highest_close_since_entry`, `current_stop_loss` | Trailing stop machinery (`003` backfill from signal stop) |
 
-**Written by:** screener / `cue execute-stops` paths in `momentum-screener.ts` (see `queries.ts`).
+**Written by:** `momentum-screener.ts` (`cue screen`, `cue execute-stops`).
+
+**Live exit mapping:** `TRAILING_STOP` → `TRAILING_STOP`; `MAX_HOLD` → `TIME_EXIT`; `REBALANCE_DROP` → `REBALANCE_DROP`; `FORCED_CLOSE` → `MANUAL`.
 
 ---
 
@@ -99,37 +134,7 @@ Open and closed book from BUY signals.
 | `payload_json` | TEXT — serialized bundle for briefing / future prompts |
 | `fetched_at` | Default `CURRENT_TIMESTAMP` |
 
-**Migration:** `002_create_fundamental_cache.sql`.  
-**Current ingest:** `cue enrich-fundamentals` writes Yahoo bundles to **disk cache** under `CACHE_DIR` and then best-effort upserts the same payload into SQLite `fundamentals_cache`. As of Phase 5, rows reflect run dates only; historical backfill remains backlog work.
-
----
-
-### Applied Schema Migrations Ledger
-
-#### Migration 003: Portfolio Tracking Upgrade
-* `positions` table expanded to include trailing stop metrics: `highest_close_since_entry` (REAL) and `current_stop_loss` (REAL).
-* `signals` composite unique key constraint relaxed from `UNIQUE(ticker, date)` to `UNIQUE(ticker, date, signal, signal_type)` to safely allow cross-strategy segregation.
-
-#### Migration 004: Historical Trade Ledger (`backtest_trades`)
-Stores granular point-in-time trade rows generated during simulator sessions. The writer is live in `src/backtest/runner.ts` (`persistBacktestArtifacts()`).
-* `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
-* `run_id` (INTEGER NOT NULL REFERENCES `backtest_runs(id)`)
-* `ticker` (TEXT NOT NULL)
-* `entry_date` (TEXT NOT NULL)
-* `entry_price` (REAL NOT NULL)
-* `exit_date` (TEXT)
-* `exit_price` (REAL)
-* `pnl_pct` (REAL)
-* `exit_reason` (TEXT CHECK(exit_reason IN ('TRAILING_STOP','INITIAL_STOP','TIME_EXIT','MANUAL')))
-* `created_at` (TEXT DEFAULT CURRENT_TIMESTAMP)
-
-**Current exit mapping:** `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` is reserved in schema but unused by the current runner.
-
-#### Migration 005: positions `pnl_pct` + `exit_reason`
-* `positions` table gains `pnl_pct` (REAL) and `exit_reason` (TEXT with CHECK constraint).
-* Backfill: existing closed rows with valid `exit_price` get `pnl_pct` computed; `REBALANCE_DROP`
-  flat closes correctly show `pnl_pct = 0.00`, `exit_reason = 'MANUAL'`.
-* `exit_reason` enum mirrors `backtest_trades` for live vs backtest comparability.
+**Written by:** `cue enrich-fundamentals` (disk cache under `CACHE_DIR`, then best-effort SQLite upsert).
 
 ---
 
@@ -137,37 +142,52 @@ Stores granular point-in-time trade rows generated during simulator sessions. Th
 
 ### `backtest_runs`
 
-Aggregated metrics for a labeled historical run (written by `src/backtest/runner.ts`).
+Aggregated metrics for a labeled historical run (`src/backtest/runner.ts`).
 
 | Column | Notes |
 |--------|--------|
 | `run_date`, `from_date`, `to_date` | ISO strings |
 | `cagr`, `max_drawdown`, `win_rate`, `sharpe_ratio`, `total_trades`, `benchmark_cagr`, `expectancy` | REAL metrics |
+| `strategy` | TEXT — e.g. `MOMENTUM`, `GARP_RESEARCH`, `SWEEP` (`007`) |
+| `window_label` | TEXT — human label for dashboard (`009`) |
+| `locked` | INTEGER 0/1 — briefing prefers latest **locked** `MOMENTUM` run (`009`) |
+
+### `backtest_trades`
+
+Granular trades per backtest run (`004`).
+
+| Column | Notes |
+|--------|--------|
+| `run_id` | FK → `backtest_runs.id` |
+| `ticker`, `entry_date`, `entry_price`, `exit_date`, `exit_price`, `pnl_pct` | Trade fields |
+| `exit_reason` | CHECK IN (`TRAILING_STOP`, `INITIAL_STOP`, `TIME_EXIT`, `MANUAL`) — no `REBALANCE_DROP` on this table |
+
+**Indexes:** `idx_bt_trades_ticker`, `idx_bt_trades_run`.
 
 ---
 
 ## Indexes
 
-Migrations **001** / **002** / **003** / **005** do not declare secondary indexes beyond PK/UNIQUE constraints. **`004_create_backtest_trades.sql`** adds `idx_bt_trades_ticker` and `idx_bt_trades_run`. Add further indexes in a new migration if query plans warrant them (e.g. `signals(date)`, `positions(status)`).
+Migrations **001**–**003**, **005**–**008** rely on PK/UNIQUE only. **`004`** adds backtest trade indexes. Consider new migrations for hot paths (e.g. `signals(date, signal)`) if profiling warrants.
 
 ---
 
 ## ER-style relationships (text)
 
 ```
-signals 1──* enrichments
-signals 1──* positions
-(daily_prices standalone by ticker+date)
+signals 1──* enrichments   (BUY and WATCHLIST signal_ids)
+signals 1──* positions     (BUY only)
+daily_prices (ticker, date)
+corporate_actions (ticker, ex_date)
+backtest_runs 1──* backtest_trades
 ```
 
 ---
 
 ## Regenerating this document from a live DB
 
-If you need a raw SQL dump (e.g. after local experiments):
-
 ```bash
 sqlite3 db/cue.db ".schema"
 ```
 
-Prefer checking in **migration SQL** as the contract; ad-hoc `ALTER` in dev should be folded into a new numbered migration before sharing.
+Prefer **migration SQL** as the contract; fold ad-hoc dev `ALTER` into a new numbered migration before sharing.

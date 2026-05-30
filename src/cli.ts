@@ -75,7 +75,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   adjust-splits        Adjust open position price levels for recent stock splits (Yahoo)
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
   screen               Momentum screen / technical ranking (or --ticker probe)
-  enrich               LLM sentiment + thesis for pending BUYs
+  enrich               LLM sentiment + thesis for pending BUY and WATCHLIST signals
   llm-smoke            Live LLM check: text + JSON + mini thesis (active provider)
   brief                Static HTML dashboard + Telegram alerts
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
@@ -203,7 +203,7 @@ screen.action(
 
 program
   .command("enrich")
-  .description("LLM enrich pending BUY signals (thesis-generator)")
+  .description("LLM enrich pending BUY and WATCHLIST signals (thesis-generator)")
   .action(
     wrap("enrich", async () => {
       const { runEnrichCli } = await import("./agents/thesis-generator.js");
@@ -223,7 +223,7 @@ program
 
 const brief = program
   .command("brief")
-  .description("Build dist/dashboard.html and send Telegram alerts for enriched BUYs")
+  .description("Build dist/dashboard.html and send Telegram alerts (BUY + watchlist bench on rebalance)")
   .option("--mode <mode>", "Telegram branch: rebalance | stop", "stop")
   .option("--skip-dashboard", "only Telegram", false)
   .option("--skip-alert", "only dashboard HTML", false)

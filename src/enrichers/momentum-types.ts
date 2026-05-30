@@ -6,7 +6,7 @@
 // RETIRED: SignalThresholds (RSI/volume exhaustion entry) — do not use in backtest
 // ACTIVE: RankingConfig (Cross-Sectional Momentum, per §6.2 spec)
 
-export type TradeSignal = "BUY" | "SELL" | "HOLD";
+export type TradeSignal = "BUY" | "SELL" | "HOLD" | "WATCHLIST";
 
 /** Present on `signal: "SELL"` from `decideSide` / `generateSignal` when exiting an open position. */
 export type SignalExitReason = "TAKE_PROFIT" | "TREND_BREAK";

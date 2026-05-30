@@ -34,6 +34,19 @@ const sampleSignal = {
 };
 
 describe("db queries", () => {
+  it("throws when WATCHLIST insert is missing momentum fields", () => {
+    const db = openMemoryDb();
+    expect(() =>
+      insertSignal(db, {
+        ticker: "WL",
+        date: "2024-06-01",
+        signal: "WATCHLIST",
+        price: 50,
+      }),
+    ).toThrow(/WATCHLIST signal requires non-null momentumRank/);
+    db.close();
+  });
+
   it("inserts a signal", () => {
     const db = openMemoryDb();
     const { changes } = insertSignal(db, sampleSignal);

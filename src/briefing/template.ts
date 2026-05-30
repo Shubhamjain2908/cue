@@ -1,5 +1,27 @@
 import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
+import type { WatchlistBriefingRow } from "../db/queries.js";
 import type { DashboardPayload } from "./queries.js";
+
+const TG_MAX = 4096;
+
+/** Telegram "Next in Rank" bench — read-only context, not an entry signal. */
+export function formatWatchlistBench(rows: readonly WatchlistBriefingRow[], asOf: string): string {
+  const lines = [`📊 Next in Rank — ${asOf}`, ""];
+  for (const row of rows) {
+    const rank = row.momentumRank;
+    const ticker = row.ticker.padEnd(6, " ").slice(0, 6);
+    const mom = row.momentum12_1Return.toFixed(2);
+    const sentiment = row.sentiment?.toUpperCase() ?? "—";
+    const sector = row.sector ?? "—";
+    lines.push(`#${rank}  ${ticker}  12-1: ${mom}  ${sentiment}   ${sector}`);
+  }
+  lines.push("", "ⓘ Watch context only — not an entry signal");
+  let text = lines.join("\n");
+  if (text.length > TG_MAX) {
+    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+  }
+  return text;
+}
 
 export function renderHtml(payload: DashboardPayload): string {
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");

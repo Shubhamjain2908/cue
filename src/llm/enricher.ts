@@ -15,7 +15,7 @@ import { fetchYahooEnrichmentDto, type YahooFinanceHandle } from "./yahooContext
 
 type SqliteConnection = InstanceType<typeof Database>;
 
-function assertBuyMomentumRow(
+function assertEnrichableMomentumRow(
   row: import("../db/queries.js").BuySignalForEnrichmentRow,
 ): void {
   const checks: Array<[string, unknown]> = [
@@ -23,11 +23,13 @@ function assertBuyMomentumRow(
     ["universeRankedCount", row.universeRankedCount],
     ["momentum12_1Return", row.momentum12_1Return],
     ["atr14", row.atr14],
-    ["initialAtrStop", row.initialAtrStop],
   ];
+  if (row.signal === "BUY") {
+    checks.push(["initialAtrStop", row.initialAtrStop]);
+  }
   for (const [name, v] of checks) {
     if (v === null || v === undefined || (typeof v === "number" && Number.isNaN(v))) {
-      throw new Error(`BUY signal ${row.id} is missing denormalized momentum field: ${name}`);
+      throw new Error(`${row.signal} signal ${row.id} is missing denormalized momentum field: ${name}`);
     }
   }
 }
@@ -72,9 +74,9 @@ export async function runEnrichment(
 
   const row = getBuySignalForEnrichment(db, signalId);
   if (row === undefined) {
-    throw new Error(`No BUY signal found for id ${signalId}`);
+    throw new Error(`No enrichable signal found for id ${signalId}`);
   }
-  assertBuyMomentumRow(row);
+  assertEnrichableMomentumRow(row);
 
   const yahoo = await (deps.fetchYahoo ?? fetchYahooEnrichmentDto)(row.ticker, deps.yahooFinance);
   const { system, user } = buildPrompt(row.ticker, yahoo, row);

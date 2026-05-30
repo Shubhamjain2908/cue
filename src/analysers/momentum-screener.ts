@@ -468,6 +468,48 @@ export function runLiveScreen(
       });
       openSlots += 1;
     }
+
+    const benchDepth = appCfg.WATCHLIST_BENCH_DEPTH;
+    if (benchDepth > 0) {
+      const benchSlice = fullRanked.slice(cfg.topN, cfg.topN + benchDepth);
+      for (const rankEntry of benchSlice) {
+        const t = rankEntry.ticker;
+        const series = byTicker.get(t);
+        if (!series) {
+          continue;
+        }
+        const slice = sliceBarsThrough(series, asOf);
+        if (!slice || slice.length < cfg.lookbackDays) {
+          continue;
+        }
+        const highs = slice.map((b) => b.high);
+        const lows = slice.map((b) => b.low);
+        const closes = slice.map((b) => b.close);
+        const entryAtrVal = atr(highs, lows, closes, cfg.atrPeriod);
+        if (entryAtrVal === null) {
+          continue;
+        }
+        const bar = dayMap.get(t);
+        if (!bar) {
+          continue;
+        }
+        const closePx = bar.close;
+        const watch: SignalInsert = {
+          ticker: t,
+          date: asOf,
+          signal: "WATCHLIST",
+          price: closePx,
+          momentumRank: rankEntry.rank,
+          universeRankedCount: rankedLen,
+          momentum12_1Return: rankEntry.momentumReturn,
+          atr14: entryAtrVal,
+        };
+        const ins = insertSignal(db, watch);
+        if (ins.changes > 0) {
+          cueLogger.debug(`[screener] watchlist rank #${String(rankEntry.rank)} ${t}`);
+        }
+      }
+    }
   });
 
   tx();
