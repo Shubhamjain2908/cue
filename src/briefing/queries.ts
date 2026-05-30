@@ -64,15 +64,15 @@ export function getRegimeLabel(db: CueDatabase): RegimeLabel {
 }
 
 /**
- * Nearest future Friday on the ET civil calendar.
- * If `etToday` is Friday, returns the following Friday (+7 days).
+ * Nearest future Saturday on the ET civil calendar (rebalance session day).
+ * If `etToday` is Saturday, returns the following Saturday (+7 days).
  */
 export function computeNextRebalanceFriday(etToday: string): string {
   const dow = weekdayForEtYmd(etToday);
-  if (dow === 5) {
+  if (dow === 6) {
     return addCalendarDays(etToday, 7);
   }
-  const daysUntil = (5 - dow + 7) % 7;
+  const daysUntil = (6 - dow + 7) % 7;
   return addCalendarDays(etToday, daysUntil);
 }
 

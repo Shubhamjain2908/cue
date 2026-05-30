@@ -4,7 +4,7 @@ import path from "node:path";
 import axios from "axios";
 import type { Logger } from "winston";
 
-import { weekdayUtcForNyCalendarDate } from "./daily-workflow.js";
+import { REBALANCE_DAY_OF_WEEK, weekdayUtcForNyCalendarDate } from "./daily-workflow.js";
 import type { AppConfig } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE, getExchangeDateString } from "../config/cue-timezone.js";
 import type { CueDatabase } from "../db/provider.js";
@@ -92,9 +92,9 @@ export function checkPipelineRanToday(db: CueDatabase, now: Date): CheckResult {
   const name = "pipeline";
   const todayEt = getExchangeDateString(now);
   const [y, m, d] = todayEt.split("-").map(Number);
-  const isFriday = weekdayUtcForNyCalendarDate(y!, m!, d!) === 5;
+  const isRebalanceDay = weekdayUtcForNyCalendarDate(y!, m!, d!) === REBALANCE_DAY_OF_WEEK;
 
-  if (isFriday) {
+  if (isRebalanceDay) {
     const row = db
       .prepare(`SELECT COUNT(*) AS c FROM signals WHERE date = @todayEt`)
       .get({ todayEt }) as { c: number };
