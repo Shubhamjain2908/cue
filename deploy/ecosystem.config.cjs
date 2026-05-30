@@ -67,5 +67,26 @@ module.exports = {
       error_file: path.join(logDir, 'healthcheck-error.log'),
       time: true,
     },
+    // Saturday post-rebalance (~10:00 ET when host is UTC; use `0 10 * * 6` if host clock is America/New_York).
+    {
+      name: 'cue-healthcheck-sat',
+      cwd: root,
+      script: 'node_modules/.bin/tsx',
+      args: 'src/cli.ts healthcheck',
+      interpreter: 'none',
+      instances: 1,
+      autorestart: false,
+      cron_restart: '0 14 * * 6',
+      watch: false,
+      env_file: path.join(root, '.env'),
+      env: {
+        NODE_ENV: 'production',
+      },
+      merge_logs: true,
+      combine_logs: true,
+      out_file: path.join(logDir, 'healthcheck-sat-out.log'),
+      error_file: path.join(logDir, 'healthcheck-sat-error.log'),
+      time: true,
+    },
   ],
 };
