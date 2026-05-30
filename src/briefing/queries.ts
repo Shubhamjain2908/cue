@@ -222,6 +222,7 @@ export function getLivePerformanceSummary(db: CueDatabase): LivePerformanceSumma
       WHERE status != 'OPEN'
         AND exit_price IS NOT NULL
         AND exit_price > 0
+        AND exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
     `,
     )
     .get() as LivePerformanceSummary | undefined;
@@ -246,6 +247,7 @@ export function getLivePerformanceByConfidence(db: CueDatabase): LivePerformance
       WHERE p.status != 'OPEN'
         AND p.exit_price IS NOT NULL
         AND p.exit_price > 0
+        AND p.exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
       GROUP BY e.confidence
       ORDER BY avg_pnl_pct DESC
     `,

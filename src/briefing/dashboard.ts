@@ -13,6 +13,9 @@ import { extractDashboardPayload } from "./queries.js";
 import { renderHtml } from "./template.js";
 
 /** Hardcoded backtest benchmarks for Live Performance comparison (not from `backtest_runs`). */
+export const LIVE_PERF_BACKTEST_CAGR_PCT = 21.39;
+export const LIVE_PERF_BACKTEST_SHARPE = 1.16;
+export const LIVE_PERF_BACKTEST_MAXDD_PCT = 11.54;
 export const LIVE_PERF_BACKTEST_EXPECTANCY_PCT = 4.78;
 export const LIVE_PERF_BACKTEST_WIN_RATE_PCT = 52.2;
 
@@ -34,6 +37,9 @@ export function runBriefDashboardCli(argv: readonly string[] = process.argv): vo
 
   const payload = extractDashboardPayload();
   const html = renderHtml(payload, {
+    cagrPct: LIVE_PERF_BACKTEST_CAGR_PCT,
+    sharpe: LIVE_PERF_BACKTEST_SHARPE,
+    maxDdPct: LIVE_PERF_BACKTEST_MAXDD_PCT,
     expectancyPct: LIVE_PERF_BACKTEST_EXPECTANCY_PCT,
     winRatePct: LIVE_PERF_BACKTEST_WIN_RATE_PCT,
   });

@@ -2,6 +2,9 @@ import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import type { DashboardPayload } from "./queries.js";
 
 export interface LivePerfBacktestRefs {
+  cagrPct: number;
+  sharpe: number;
+  maxDdPct: number;
   expectancyPct: number;
   winRatePct: number;
 }
@@ -106,6 +109,9 @@ export function renderHtml(
     const ATR_TIGHTEN_PCT = ${atrTighten};
     const ATR_MULT_BASE = ${atrMultBase};
     const ATR_MULT_TIGHT = ${atrMultTight};
+    const BT_CAGR_PCT = ${livePerfBacktestRefs.cagrPct};
+    const BT_SHARPE = ${livePerfBacktestRefs.sharpe};
+    const BT_MAXDD_PCT = ${livePerfBacktestRefs.maxDdPct};
     const BT_EXPECTANCY_PCT = ${livePerfBacktestRefs.expectancyPct};
     const BT_WIN_RATE_PCT = ${livePerfBacktestRefs.winRatePct};
 
@@ -167,27 +173,34 @@ export function renderHtml(
     const fmtPctPlain = v => v == null ? '—' : v.toFixed(2) + '%';
     const fmtWinRate = v => v == null ? '—' : v.toFixed(1) + '%';
 
-    let livePerfHtml =
-      '<h3 style="font-size:0.9rem;font-weight:600;margin:0 0 12px">Overall</h3>' +
-      '<table><thead><tr><th>Metric</th><th>Live</th><th>Backtest (ref)</th></tr></thead><tbody>' +
-      '<tr><td>Closed trades</td><td>' + lp.closed_trades + '</td><td>—</td></tr>' +
-      '<tr><td>Expectancy</td><td>' + fmtPct(lp.avg_pnl_pct) + '</td><td>+' + BT_EXPECTANCY_PCT.toFixed(2) + '%</td></tr>' +
-      '<tr><td>Win rate</td><td>' + fmtWinRate(lp.win_rate_pct) + '</td><td>' + BT_WIN_RATE_PCT.toFixed(1) + '%</td></tr>' +
-      '<tr><td>Worst trade</td><td>' + fmtPctPlain(lp.worst_trade_pct) + '</td><td>—</td></tr>' +
-      '<tr><td>Best trade</td><td>' + fmtPctPlain(lp.best_trade_pct) + '</td><td>—</td></tr>' +
-      '</tbody></table>';
-
-    livePerfHtml += '<h3 style="font-size:0.9rem;font-weight:600;margin:20px 0 12px">P&amp;L by confidence tier</h3>';
-    if (lp.closed_trades === 0 || lpConf.length === 0) {
-      livePerfHtml += '<p style="color:var(--muted)">No closed trades with recorded exit prices yet.</p>';
+    let livePerfHtml;
+    if (lp.closed_trades === 0) {
+      livePerfHtml =
+        '<p style="color:var(--muted);margin:0">No strategy exits recorded yet.</p>' +
+        '<p class="meta" style="margin-top:12px;margin-bottom:0">Backtest ref: CAGR ' + BT_CAGR_PCT.toFixed(2) + '% · Sharpe ' + BT_SHARPE.toFixed(2) + ' · Expectancy +' + BT_EXPECTANCY_PCT.toFixed(2) + '% · MaxDD ' + BT_MAXDD_PCT.toFixed(2) + '%</p>';
     } else {
-      livePerfHtml += '<table><thead><tr><th>Confidence</th><th>Trades</th><th>Avg P&amp;L %</th></tr></thead><tbody>' +
-        lpConf.map(r =>
-          '<tr><td>' + r.confidence + '</td><td>' + r.trades + '</td><td>' + fmtPctPlain(r.avg_pnl_pct) + '</td></tr>'
-        ).join('') +
+      livePerfHtml =
+        '<h3 style="font-size:0.9rem;font-weight:600;margin:0 0 12px">Overall</h3>' +
+        '<table><thead><tr><th>Metric</th><th>Live</th><th>Backtest (ref)</th></tr></thead><tbody>' +
+        '<tr><td>Closed trades</td><td>' + lp.closed_trades + '</td><td>—</td></tr>' +
+        '<tr><td>Expectancy</td><td>' + fmtPct(lp.avg_pnl_pct) + '</td><td>+' + BT_EXPECTANCY_PCT.toFixed(2) + '%</td></tr>' +
+        '<tr><td>Win rate</td><td>' + fmtWinRate(lp.win_rate_pct) + '</td><td>' + BT_WIN_RATE_PCT.toFixed(1) + '%</td></tr>' +
+        '<tr><td>Worst trade</td><td>' + fmtPctPlain(lp.worst_trade_pct) + '</td><td>—</td></tr>' +
+        '<tr><td>Best trade</td><td>' + fmtPctPlain(lp.best_trade_pct) + '</td><td>—</td></tr>' +
         '</tbody></table>';
+
+      livePerfHtml += '<h3 style="font-size:0.9rem;font-weight:600;margin:20px 0 12px">P&amp;L by confidence tier</h3>';
+      if (lpConf.length === 0) {
+        livePerfHtml += '<p style="color:var(--muted)">No closed trades with recorded exit prices yet.</p>';
+      } else {
+        livePerfHtml += '<table><thead><tr><th>Confidence</th><th>Trades</th><th>Avg P&amp;L %</th></tr></thead><tbody>' +
+          lpConf.map(r =>
+            '<tr><td>' + r.confidence + '</td><td>' + r.trades + '</td><td>' + fmtPctPlain(r.avg_pnl_pct) + '</td></tr>'
+          ).join('') +
+          '</tbody></table>';
+      }
+      livePerfHtml += '<p class="meta" style="margin-top:16px;margin-bottom:0">Confidence tiers meaningful at ≥10 trades each.</p>';
     }
-    livePerfHtml += '<p class="meta" style="margin-top:16px;margin-bottom:0">Confidence tiers meaningful at ≥10 trades each.</p>';
     document.getElementById('live-perf-section').innerHTML = livePerfHtml;
 
     // Signals table
