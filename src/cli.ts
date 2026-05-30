@@ -76,6 +76,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUY and WATCHLIST signals
+  refresh-thesis       Daily position thesis refresh (P7-F; gated on 15+ genuine closed trades)
   llm-smoke            Live LLM check: text + JSON + mini thesis (active provider)
   brief                Static HTML dashboard + Telegram alerts
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
@@ -208,6 +209,16 @@ program
     wrap("enrich", async () => {
       const { runEnrichCli } = await import("./agents/thesis-generator.js");
       await runEnrichCli();
+    }),
+  );
+
+program
+  .command("refresh-thesis")
+  .description("Daily position thesis refresh (P7-F; requires 15+ genuine closed trades)")
+  .action(
+    wrap("refresh-thesis", async () => {
+      const { runRefreshCli } = await import("./agents/thesis-generator.js");
+      await runRefreshCli();
     }),
   );
 
