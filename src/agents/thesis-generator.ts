@@ -14,12 +14,17 @@ export async function runEnrichCli(): Promise<void> {
     if (pending.length === 0) {
       console.log("No unenriched BUY signals.");
     }
-    for (const s of pending) {
-      try {
-        const r = await runEnrichment(db, s.id);
+    const buyResults = await Promise.allSettled(
+      pending.map((s) => runEnrichment(db, s.id)),
+    );
+    for (let i = 0; i < buyResults.length; i++) {
+      const s = pending[i]!;
+      const result = buyResults[i]!;
+      if (result.status === "fulfilled") {
+        const r = result.value;
         console.log(`Enriched ${s.ticker} (${s.id}): ${r.sentiment} / ${r.confidence}`);
-      } catch (e) {
-        console.error(`Enrichment failed for ${s.ticker} (${s.id}):`, e);
+      } else {
+        console.error(`Enrichment failed for ${s.ticker} (${s.id}):`, result.reason);
       }
     }
 
@@ -27,12 +32,17 @@ export async function runEnrichCli(): Promise<void> {
     if (watchlistPending.length === 0) {
       console.log("No unenriched WATCHLIST signals.");
     }
-    for (const s of watchlistPending) {
-      try {
-        const r = await runEnrichment(db, s.id);
+    const watchlistResults = await Promise.allSettled(
+      watchlistPending.map((s) => runEnrichment(db, s.id)),
+    );
+    for (let i = 0; i < watchlistResults.length; i++) {
+      const s = watchlistPending[i]!;
+      const result = watchlistResults[i]!;
+      if (result.status === "fulfilled") {
+        const r = result.value;
         console.log(`Enriched watchlist ${s.ticker} (${s.id}): ${r.sentiment} / ${r.confidence}`);
-      } catch (e) {
-        console.warn(`Watchlist enrichment failed for ${s.ticker} (${s.id}):`, e);
+      } else {
+        console.warn(`Watchlist enrichment failed for ${s.ticker} (${s.id}):`, result.reason);
       }
     }
   } finally {
