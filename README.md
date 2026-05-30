@@ -165,7 +165,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm cue` | `tsx src/cli.ts` (pass args after the script name, e.g. `pnpm run cue ingest --date …` or `pnpm run cue -- ingest --date …`) |
 | `pnpm db:init` | `tsx src/db/schema.ts` (init + migrate from config) |
 | `pnpm db:migrate` | `pnpm run cue -- db:migrate` |
-| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum; research: `pnpm run backtest -- --strategy quality-garp`, window defaults `2023-01-01`→`2025-12-31` unless `--from` / `--to`) |
+| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Override window with `--from` / `--to` |
 | `pnpm ingest` / `pnpm fetch` | `pnpm run cue -- ingest` |
 | `pnpm screen` | `pnpm run cue -- screen` |
 | `pnpm enrich` | `pnpm run cue -- enrich` |

@@ -74,3 +74,39 @@ export interface RunBacktestResult {
   benchmarkCagrPct: number | null;
   yearFraction: number;
 }
+
+/** `backtest_runs.strategy` label for P7-G VIX threshold sweep (research only). */
+export const VIX_MOMENTUM_RESEARCH_STRATEGY = "VIX_MOMENTUM_RESEARCH";
+
+/** VIX ceilings tested by `runVixMomentumSweep` (stacked on QQQ SMA200). */
+export const VIX_MOMENTUM_THRESHOLDS = [25, 28, 30, 35] as const;
+
+export type VixMomentumThreshold = (typeof VIX_MOMENTUM_THRESHOLDS)[number];
+
+/** Phase 1 / extended-window gates for comparing sweep rows. */
+export interface BacktestGateThresholds {
+  minCagrPct: number;
+  maxDrawdownPct: number;
+  minSharpe: number;
+  minExpectancyPct: number;
+}
+
+export const DEFAULT_BACKTEST_GATES: BacktestGateThresholds = {
+  minCagrPct: 12,
+  maxDrawdownPct: 20,
+  minSharpe: 1.0,
+  minExpectancyPct: 0,
+};
+
+/**
+ * Optional stacked regime gate for momentum backtest (P7-G).
+ * When set, new BUYs on rebalance require `VIX_close <= maxVix` in addition to QQQ > SMA200.
+ */
+export interface VixRegimeGate {
+  vixByDate: ReadonlyMap<string, number>;
+  maxVix: number;
+}
+
+export interface MomentumBacktestOptions {
+  vixGate?: VixRegimeGate;
+}

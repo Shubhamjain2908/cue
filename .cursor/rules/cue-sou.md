@@ -2,7 +2,7 @@
 
 *Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, and **Phase 7** behaviour (Saturday rebalance, corporate actions, watchlist bench, healthcheck, locked backtest ref).*
 
-**Also read:** root **`README.md`** (operator quickstart), **`spec/cue-phase7-complete.md`** (session record), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`009`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
+**Also read:** root **`README.md`** (operator quickstart), **`spec/cue-phase8-complete.md`** (session record), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`011`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
 ---
 
@@ -269,21 +269,27 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | — | FIXED (Phase 6)    | No live expectancy visibility on dashboard | ✅ Live Performance section added |
 | — | FIXED (arch S3)    | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts`                                                                                             |
 | — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
-| — | BACKTEST | Sharpe 0.956 on 2022–2025 window misses >1.0 gate | Documented — no param change. Gate target for **P7-G** VIX research |
+| — | BACKTEST | Sharpe 0.956 on 2022–2025 window misses >1.0 gate | **Closed (P7-G falsified)** — not high-VIX entry noise; VIX overlay inactive on rebalance Fridays; no param change |
 | — | BACKTEST | Survivorship bias in pre-2024 NDX100 constituent history | Accepted caveat |
 
 ---
 
-## 13. Phase 8 backlog
+## 13. Phase 8 — complete (May 2026)
 
-| Task | Priority | Gate |
-|------|----------|------|
-| **P7-F** Daily position thesis refresh | LOW | 15+ closed trades |
-| **P7-G** VIX secondary regime (research) | RESEARCH | Backtest Q: does VIX>25 recover Sharpe >1.0 on 2022–2025 without CAGR <12%? No prod code until all four gates clear on extended window. |
-| **P7-H** Trailing stop audit log | LOW | Bundle with P7-F migration (`010+`) |
-| **`fundamentals_cache` historical backfill** | LOW | — |
-| **systemd unit** | LOW | — |
-| **Winston file transport** | LOW | — |
+| Task | Status |
+|------|--------|
+| **P8-A** Scheduler idempotency (`010_pipeline_state`) | ✅ Merged |
+| **P8-B** Stop eval + healthcheck hardening | ✅ Merged |
+| **P8-C** Parallel LLM enrichment | ✅ Merged |
+| **P7-H** Trailing stop audit log (`011_position_audit`) | ✅ Merged |
+| **P7-F** Daily position thesis refresh | ✅ Gated stub (`cue refresh-thesis`); body pending 15+ genuine closed trades |
+| **P7-G** VIX secondary regime (research) | ✅ **Falsified** — `VIX_MOMENTUM_RESEARCH` runs 81–84; gate inactive; Sharpe 0.956 unchanged |
+
+**P7-G conclusion:** VIX ≤ {25,28,30,35} stacked on QQQ SMA200 did not change the trade set on 2022–2025 rebalance Fridays. Sharpe miss is not attributable to high-VIX entry noise. Research archived in `src/backtest/strategies/vix-momentum.ts`; no prod code.
+
+**Deferred (no gate dependency):** `fundamentals_cache` backfill, systemd unit, Winston file transport. **Active pending:** P7-F refresh body (self-gates on production ledger).
+
+Full record: **`spec/cue-phase8-complete.md`**.
 
 ---
 
@@ -291,9 +297,10 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Document | Role |
 |---|---|
-| `spec/cue-phase7-complete.md` | Phase 7 session record + Phase 8 handoff |
+| `spec/cue-phase8-complete.md` | Phase 8 session record (current) |
+| `spec/cue-phase7-complete.md` | Phase 7 record + Phase 8 handoff (historical) |
 | `.cursor/rules/cue-sou.md` | Living engineering spec (this file) |
-| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`009`) |
+| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`011`) |
 | `.cursor/rules/cue-guardrails.md` | Hard constraints |
 | `README.md` | Operator-facing commands + quickstart |
 
