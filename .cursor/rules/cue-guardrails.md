@@ -2,8 +2,7 @@
 *v1.3 · May 2026 — paths aligned to this repository*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
-not be bypassed without an explicit gate override (documented in
-`spec/cue-architecture-v1.md` + **`.cursor/rules/project-spec.md`** + committed to repo).
+not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
 
 ---
 

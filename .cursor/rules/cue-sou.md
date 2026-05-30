@@ -1,6 +1,6 @@
 # Cue — Project specification (engineering)
 
-*Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 6 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity, live instrumentation).*
+*Living document for this repository. **Do not edit** `spec/cue-sou.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 6 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity, live instrumentation).*
 
 **Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`.cursor/rules/db-schema.md`** (tables + migrations `001`–`009` aligned to applied SQL), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
@@ -283,12 +283,10 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Document | Role |
 |---|---|
-| `spec/cue-architecture-v1.md` | **Frozen** narrative SoU + Phase 4 plan wording — **do not edit in Cursor tasks unless the user explicitly asks** |
+| `.cursor/rules/cue-sou.md` | **Frozen** narrative SoU + Phase 4 plan wording — **do not edit in Cursor tasks unless the user explicitly asks** |
 | `.cursor/rules/db-schema.md` | Schema summary tied to **applied** migrations (`001`–`009`) |
 | `.cursor/rules/cue-guardrails.md` | Hard constraints (**paths aligned to this repo** in v1.1) |
 | `README.md` | Operator-facing commands + quickstart |
-| `.cursor/rules/project-spec.md` | **This file** — repo-accurate engineering spec |
-| `.cursor/rules/cue-claude-instructions.md` | **Claude / Cursor agent** role, SoU reading order, stack, workflow directives, path map |
 
 ---
 
