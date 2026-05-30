@@ -110,6 +110,31 @@ function resolveAsOfBar(
   return ub >= 0 ? series[ub] : undefined;
 }
 
+/**
+ * Exit fill for close + SELL signal. MAX_HOLD may use ledger high-water or entry when no bar exists;
+ * other reasons require a resolved bar (no high-water ratchet — read-only exit evaluation).
+ */
+function resolveExitClosePrice(
+  pos: OpenPositionRow,
+  reason: ExitReason,
+  bar: DailyBar | undefined,
+): number | undefined {
+  if (bar !== undefined) {
+    return bar.close;
+  }
+  if (reason !== "MAX_HOLD") {
+    return undefined;
+  }
+  const hw = pos.highestCloseSinceEntry;
+  if (hw !== null && hw > 0 && !Number.isNaN(hw)) {
+    return hw;
+  }
+  if (pos.entryPrice > 0 && !Number.isNaN(pos.entryPrice)) {
+    return pos.entryPrice;
+  }
+  return undefined;
+}
+
 function tradingDaysHeld(
   sortedDates: readonly string[],
   entryDate: string,
@@ -213,6 +238,7 @@ interface OpenPositionRow {
   ticker: string;
   entryDate: string;
   entryPrice: number;
+  highestCloseSinceEntry: number | null;
   initialAtrStop: number;
 }
 
@@ -226,6 +252,7 @@ function listOpenPositions(db: SqliteConnection): OpenPositionRow[] {
       sig.ticker AS ticker,
       p.entry_date AS entryDate,
       p.entry_price AS entryPrice,
+      p.highest_close_since_entry AS highestCloseSinceEntry,
       sig.initial_atr_stop AS initialAtrStop
     FROM positions p
     INNER JOIN signals sig ON sig.id = p.signal_id
@@ -405,20 +432,26 @@ export function runLiveScreen(
         continue;
       }
       const bar = resolveAsOfBar(pos.ticker, dayMap, byTicker, asOf);
-      if (bar === undefined) {
+      const exitClose = resolveExitClosePrice(pos, reason, bar);
+      if (exitClose === undefined) {
         cueLogger.warn(
-          `screen: skip close ${pos.ticker} reason=${reason} — no price bar on or before asOf=${asOf}`,
+          `screen: skip close ${pos.ticker} reason=${reason} — no price bar on or before asOf=${asOf} and no MAX_HOLD fallback`,
         );
         continue;
+      }
+      if (bar === undefined && reason === "MAX_HOLD") {
+        cueLogger.warn(
+          `screen: MAX_HOLD ${pos.ticker} exit_price=${String(exitClose)} fallback (no bar on or before asOf=${asOf})`,
+        );
       }
       const sellRow: SignalInsert = {
         ticker: pos.ticker,
         date: asOf,
         signal: "SELL",
-        price: bar.close,
+        price: exitClose,
       };
       insertSignal(db, sellRow);
-      closePosition(db, pos.positionId, asOf, bar.close, mapLiveExitReason(reason));
+      closePosition(db, pos.positionId, asOf, exitClose, mapLiveExitReason(reason));
     }
 
     if (mode !== "rebalance" || !regimeOk) {
