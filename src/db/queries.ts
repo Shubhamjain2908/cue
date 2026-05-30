@@ -514,3 +514,22 @@ export function insertBacktestTrade(db: SqliteConnection, row: BacktestTradeInse
     exitReason: row.exitReason,
   });
 }
+
+/** Read a single `pipeline_state` value (e.g. scheduler `last_successful_run_date`). */
+export function getPipelineState(db: SqliteConnection, key: string): string | null {
+  const row = db.prepare(`SELECT value FROM pipeline_state WHERE key = ?`).get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+/** Upsert a `pipeline_state` row; `updated_at` refreshed on conflict. */
+export function setPipelineState(db: SqliteConnection, key: string, value: string): void {
+  db.prepare(`
+    INSERT INTO pipeline_state (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(key, value);
+}

@@ -6,8 +6,9 @@ import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
+import { getPipelineState, setPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
-import { openCueDbReadonly } from "../db/provider.js";
+import { openCueDb } from "../db/provider.js";
 
 import {
   executionWindowEtForDate,
@@ -19,6 +20,9 @@ import {
 } from "./daily-workflow.js";
 
 const POLL_MS = 60_000;
+
+/** `pipeline_state.key` — ET `YYYY-MM-DD` of last scheduler run that exited 0. */
+const PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE = "last_successful_run_date";
 
 /** Saturday morning: full rebalance (Friday session OHLCV). */
 const SCHEDULER_REBALANCE_STEPS: PipelineStep[] = [
@@ -76,10 +80,9 @@ export function schedulerRunKindForNyWeekday(dow: number): "rebalance" | "weekda
   return null;
 }
 
-let lastRunDate = "";
 let isRunning = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
-/** Parent-held readonly handle for clean shutdown (subprocess `cue` steps open their own DBs). */
+/** Parent-held DB for health, pipeline_state, and clean shutdown (subprocess `cue` steps open their own DBs). */
 let heldDb: CueDatabase | undefined;
 
 /** `process.kill(pid, 0)` liveness probe; EPERM means a process exists but we cannot signal it. */
@@ -199,7 +202,7 @@ function openAndLogHealth(): void {
   try {
     const cfg = getConfig();
     const now = new Date();
-    heldDb = openCueDbReadonly(cfg.DB_PATH);
+    heldDb = openCueDb(cfg.DB_PATH);
     heldDb.prepare("SELECT 1 AS ok").get();
     logger.info(
       `scheduler_health ${JSON.stringify({
@@ -231,7 +234,10 @@ function schedulerTick(): void {
     return;
   }
   const todayEt = formatEtYmd(now);
-  if (lastRunDate === todayEt) {
+  if (heldDb === undefined) {
+    return;
+  }
+  if (getPipelineState(heldDb, PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE) === todayEt) {
     return;
   }
 
@@ -255,22 +261,20 @@ function schedulerTick(): void {
   }
 
   isRunning = true;
+  let exitCode = 1;
   try {
     if (kind === "rebalance") {
       logger.info(`scheduler_fire kind=rebalance etDate=${todayEt} dow=${dow}`);
-      const code = runPipelineWithSteps(SCHEDULER_REBALANCE_STEPS, "rebalance");
-      if (code === 0) {
-        lastRunDate = todayEt;
-      }
+      exitCode = runPipelineWithSteps(SCHEDULER_REBALANCE_STEPS, "rebalance");
     } else {
       logger.info(`scheduler_fire kind=weekday_stop etDate=${todayEt} dow=${dow}`);
-      const code = runPipelineWithSteps(SCHEDULER_WEEKDAY_STOP_STEPS, "stop");
-      if (code === 0) {
-        lastRunDate = todayEt;
-      }
+      exitCode = runPipelineWithSteps(SCHEDULER_WEEKDAY_STOP_STEPS, "stop");
     }
   } finally {
     isRunning = false;
+    if (exitCode === 0) {
+      setPipelineState(heldDb, PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE, todayEt);
+    }
     releaseSchedulerLock(LOCK_PATH);
   }
 }
