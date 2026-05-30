@@ -367,4 +367,9 @@ export async function runFetcher(argv?: readonly string[]): Promise<void> {
   await run(argv ?? process.argv);
 }
 
+/** Last completed US equity session date expected in `daily_prices` after ingest (ET). */
+export function resolveLastETSession(now: Date = new Date()): string {
+  return previousWeekdayBeforeEtCivil(now);
+}
+
 export { previousWeekdayBeforeEtCivil };
