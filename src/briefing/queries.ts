@@ -177,11 +177,54 @@ export interface RecentSignal {
 
 export interface BacktestSummary {
   run_date: string;
+  strategy: string;
   cagr: number;
   sharpe: number;
   max_drawdown: number;
   expectancy: number;
+  win_rate: number;
   total_trades: number;
+}
+
+interface BacktestRow {
+  run_date: string;
+  strategy: string;
+  cagr: number;
+  sharpe_ratio: number;
+  max_drawdown: number;
+  expectancy: number;
+  win_rate: number;
+  total_trades: number;
+}
+
+/** Latest locked momentum backtest run for dashboard reference metrics. */
+export function getMomentumBacktestSummary(db: CueDatabase): BacktestSummary | null {
+  const raw = db
+    .prepare(
+      `
+      SELECT run_date, strategy, cagr, sharpe_ratio, max_drawdown, expectancy, win_rate, total_trades
+      FROM backtest_runs
+      WHERE strategy = 'MOMENTUM'
+      ORDER BY run_date DESC
+      LIMIT 1
+    `,
+    )
+    .get() as BacktestRow | undefined;
+
+  if (!raw) {
+    return null;
+  }
+
+  return {
+    run_date: raw.run_date,
+    strategy: raw.strategy,
+    cagr: raw.cagr / 100,
+    sharpe: raw.sharpe_ratio,
+    max_drawdown: raw.max_drawdown / 100,
+    expectancy: raw.expectancy / 100,
+    win_rate: raw.win_rate / 100,
+    total_trades: raw.total_trades,
+  };
 }
 
 export interface LivePerformanceSummary {
@@ -222,6 +265,7 @@ export function getLivePerformanceSummary(db: CueDatabase): LivePerformanceSumma
       WHERE status != 'OPEN'
         AND exit_price IS NOT NULL
         AND exit_price > 0
+        AND exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
     `,
     )
     .get() as LivePerformanceSummary | undefined;
@@ -246,6 +290,7 @@ export function getLivePerformanceByConfidence(db: CueDatabase): LivePerformance
       WHERE p.status != 'OPEN'
         AND p.exit_price IS NOT NULL
         AND p.exit_price > 0
+        AND p.exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
       GROUP BY e.confidence
       ORDER BY avg_pnl_pct DESC
     `,
@@ -262,15 +307,6 @@ export interface DashboardPayload {
   sector_allocation: { sector: string; count: number }[];
   live_performance_summary: LivePerformanceSummary;
   live_performance_by_confidence: LivePerformanceByConfidenceRow[];
-}
-
-interface BacktestRow {
-  run_date: string;
-  cagr: number;
-  sharpe_ratio: number;
-  max_drawdown: number;
-  expectancy: number;
-  total_trades: number;
 }
 
 interface RegimeRow {
@@ -353,28 +389,7 @@ export function extractDashboardPayload(): DashboardPayload {
       )
       .all() as RecentSignal[];
 
-    const rawBacktest = db
-      .prepare(
-        `
-      SELECT run_date, cagr, sharpe_ratio, max_drawdown, expectancy, total_trades
-      FROM backtest_runs
-      ORDER BY run_date DESC
-      LIMIT 1
-    `,
-      )
-      .get() as BacktestRow | undefined;
-
-    let backtest_summary: BacktestSummary | null = null;
-    if (rawBacktest) {
-      backtest_summary = {
-        run_date: rawBacktest.run_date,
-        cagr: rawBacktest.cagr / 100,
-        sharpe: rawBacktest.sharpe_ratio,
-        max_drawdown: rawBacktest.max_drawdown / 100,
-        expectancy: rawBacktest.expectancy / 100,
-        total_trades: rawBacktest.total_trades,
-      };
-    }
+    const backtest_summary = getMomentumBacktestSummary(db);
 
     const regimeRow = db
       .prepare(

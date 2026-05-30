@@ -149,7 +149,7 @@ describe("db queries", () => {
   it("mapLiveExitReason maps all strategy exit reasons", () => {
     expect(mapLiveExitReason("TRAILING_STOP")).toBe("TRAILING_STOP");
     expect(mapLiveExitReason("MAX_HOLD")).toBe("TIME_EXIT");
-    expect(mapLiveExitReason("REBALANCE_DROP")).toBe("MANUAL");
+    expect(mapLiveExitReason("REBALANCE_DROP")).toBe("REBALANCE_DROP");
     expect(mapLiveExitReason("FORCED_CLOSE")).toBe("MANUAL");
   });
 });
