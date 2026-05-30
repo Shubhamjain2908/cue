@@ -43,7 +43,7 @@ export function upsertFundamentalsCache(ticker: string, asOfDate: string, payloa
   upsertFundamentalsStmt.run(ticker.toUpperCase(), asOfDate, payloadJson);
 }
 
-export type SignalSide = "BUY" | "SELL" | "HOLD";
+export type SignalSide = "BUY" | "SELL" | "HOLD" | "WATCHLIST";
 
 export type PositionStatus = "OPEN" | "CLOSED";
 
@@ -107,7 +107,21 @@ export interface BuySignalForEnrichmentRow {
   universeRankedCount: number;
   momentum12_1Return: number;
   atr14: number;
-  initialAtrStop: number;
+  initialAtrStop: number | null;
+}
+
+/** WATCHLIST bench row for Telegram "Next in Rank" message. */
+export interface WatchlistBriefingRow {
+  id: number;
+  ticker: string;
+  momentumRank: number;
+  price: number;
+  atr14: number | null;
+  momentum12_1Return: number;
+  sentiment: string | null;
+  confidence: string | null;
+  sector: string | null;
+  rationale: string | null;
 }
 
 /** BUY + enrichment for Telegram (one row per signal). */
@@ -183,11 +197,29 @@ function requireBuyMomentum(row: SignalInsert): void {
   }
 }
 
+function requireWatchlistMomentum(row: SignalInsert): void {
+  if (row.signal !== "WATCHLIST") {
+    return;
+  }
+  const fields: Array<[string, unknown]> = [
+    ["momentumRank", row.momentumRank],
+    ["universeRankedCount", row.universeRankedCount],
+    ["momentum12_1Return", row.momentum12_1Return],
+    ["atr14", row.atr14],
+  ];
+  for (const [name, v] of fields) {
+    if (v === null || v === undefined || (typeof v === "number" && Number.isNaN(v))) {
+      throw new Error(`WATCHLIST signal requires non-null ${name} (denormalized momentum context)`);
+    }
+  }
+}
+
 export function insertSignal(
   db: SqliteConnection,
   row: SignalInsert,
 ): { changes: number; lastInsertRowid: bigint } {
   requireBuyMomentum(row);
+  requireWatchlistMomentum(row);
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO signals (
       ticker, date, signal, signal_type, price, alerted,
@@ -225,6 +257,52 @@ export function listUnenrichedBuySignals(db: SqliteConnection): Array<{
     ORDER BY s.date ASC, s.ticker ASC
   `);
   return stmt.all() as Array<{ id: number; ticker: string; date: string }>;
+}
+
+export function listUnenrichedWatchlistSignals(db: SqliteConnection): Array<{
+  id: number;
+  ticker: string;
+  date: string;
+}> {
+  const stmt = db.prepare(`
+    SELECT s.id AS id, s.ticker AS ticker, s.date AS date
+    FROM signals s
+    LEFT JOIN enrichments e ON e.signal_id = s.id
+    WHERE s.signal = 'WATCHLIST' AND e.id IS NULL
+    ORDER BY s.date ASC, s.momentum_rank ASC
+  `);
+  return stmt.all() as Array<{ id: number; ticker: string; date: string }>;
+}
+
+export function listWatchlistSignalsForBriefing(
+  db: SqliteConnection,
+  asOf: string,
+  limit: number,
+): WatchlistBriefingRow[] {
+  if (limit <= 0) {
+    return [];
+  }
+  const stmt = db.prepare(`
+    SELECT
+      s.id AS id,
+      s.ticker AS ticker,
+      s.momentum_rank AS momentumRank,
+      s.price AS price,
+      s.atr14 AS atr14,
+      s.momentum_12_1_return AS momentum12_1Return,
+      e.sentiment AS sentiment,
+      e.confidence AS confidence,
+      e.sector AS sector,
+      e.rationale AS rationale
+    FROM signals s
+    LEFT JOIN enrichments e ON e.signal_id = s.id
+    WHERE s.signal = 'WATCHLIST'
+      AND s.date = @asOf
+      AND s.alerted = 0
+    ORDER BY s.momentum_rank ASC
+    LIMIT @limit
+  `);
+  return stmt.all({ asOf, limit }) as WatchlistBriefingRow[];
 }
 
 /** BUY rows with enrichment persisted and not yet Telegram-alerted. */
@@ -273,7 +351,7 @@ export function getBuySignalForEnrichment(
       s.atr14 AS atr14,
       s.initial_atr_stop AS initialAtrStop
     FROM signals s
-    WHERE s.id = @id AND s.signal = 'BUY'
+    WHERE s.id = @id AND s.signal IN ('BUY', 'WATCHLIST')
   `);
   return stmt.get({ id: signalId }) as BuySignalForEnrichmentRow | undefined;
 }
@@ -327,6 +405,14 @@ export function insertEnrichment(db: SqliteConnection, row: EnrichmentInsert): {
 export function markSignalAlerted(db: SqliteConnection, signalId: number): void {
   const stmt = db.prepare(`UPDATE signals SET alerted = 1 WHERE id = @id`);
   stmt.run({ id: signalId });
+}
+
+export function markWatchlistSignalsAlerted(db: SqliteConnection, signalIds: readonly number[]): void {
+  if (signalIds.length === 0) {
+    return;
+  }
+  const placeholders = signalIds.map(() => "?").join(", ");
+  db.prepare(`UPDATE signals SET alerted = 1 WHERE id IN (${placeholders})`).run(...signalIds);
 }
 
 export function insertPosition(
