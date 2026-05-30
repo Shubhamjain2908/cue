@@ -178,6 +178,7 @@ export interface RecentSignal {
 export interface BacktestSummary {
   run_date: string;
   strategy: string;
+  window_label: string | null;
   cagr: number;
   sharpe: number;
   max_drawdown: number;
@@ -189,6 +190,7 @@ export interface BacktestSummary {
 interface BacktestRow {
   run_date: string;
   strategy: string;
+  window_label: string | null;
   cagr: number;
   sharpe_ratio: number;
   max_drawdown: number;
@@ -202,9 +204,9 @@ export function getMomentumBacktestSummary(db: CueDatabase): BacktestSummary | n
   const raw = db
     .prepare(
       `
-      SELECT run_date, strategy, cagr, sharpe_ratio, max_drawdown, expectancy, win_rate, total_trades
+      SELECT run_date, strategy, window_label, cagr, sharpe_ratio, max_drawdown, expectancy, win_rate, total_trades
       FROM backtest_runs
-      WHERE strategy = 'MOMENTUM'
+      WHERE strategy = 'MOMENTUM' AND locked = 1
       ORDER BY run_date DESC
       LIMIT 1
     `,
@@ -218,6 +220,7 @@ export function getMomentumBacktestSummary(db: CueDatabase): BacktestSummary | n
   return {
     run_date: raw.run_date,
     strategy: raw.strategy,
+    window_label: raw.window_label,
     cagr: raw.cagr / 100,
     sharpe: raw.sharpe_ratio,
     max_drawdown: raw.max_drawdown / 100,

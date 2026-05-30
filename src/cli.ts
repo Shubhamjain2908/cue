@@ -81,6 +81,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
   run-all              Run full pipeline once (subprocess chain, same as scheduled window)
   schedule             Long-running ET window scheduler (16:05–16:15)
+  healthcheck          Post-pipeline verification + Telegram alert (17:00 ET cron)
   doctor               Config + DB + env presence diagnostics
   pipeline             Legacy alias: \`--now\` = one-shot run-all; no flag = same as schedule
 `,
@@ -314,6 +315,26 @@ program
     wrap("schedule", async () => {
       const { runScheduleDaemonCli } = await import("./agents/scheduler.js");
       runScheduleDaemonCli();
+    }),
+  );
+
+program
+  .command("healthcheck")
+  .description("Verify ingest, pipeline output, and PM2 logs; alert via Telegram (post 16:15 ET window)")
+  .action(
+    wrap("healthcheck", async () => {
+      const config = getConfig();
+      const { openCueDb } = await import("./db/provider.js");
+      const { runHealthcheck } = await import("./agents/healthcheck.js");
+      const db = openCueDb(config.DB_PATH);
+      try {
+        const code = await runHealthcheck(db, config, cueLogger);
+        if (code !== 0) {
+          process.exitCode = 1;
+        }
+      } finally {
+        db.close();
+      }
     }),
   );
 

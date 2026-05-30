@@ -44,5 +44,28 @@ module.exports = {
       error_file: path.join(logDir, 'pm2-cue.log'),
       time: true,
     },
+  // PM2 `cron_restart` uses the HOST system timezone (not `TZ` env).
+  // Oracle Cloud VMs are usually UTC: use `0 21 * * 1-5` for 17:00 America/New_York (EDT).
+  // If the host clock is set to America/New_York, use `0 17 * * 1-5` instead.
+    {
+      name: 'cue-healthcheck',
+      cwd: root,
+      script: 'node_modules/.bin/tsx',
+      args: 'src/cli.ts healthcheck',
+      interpreter: 'none',
+      instances: 1,
+      autorestart: false,
+      cron_restart: '0 21 * * 1-5',
+      watch: false,
+      env_file: path.join(root, '.env'),
+      env: {
+        NODE_ENV: 'production',
+      },
+      merge_logs: true,
+      combine_logs: true,
+      out_file: path.join(logDir, 'healthcheck-out.log'),
+      error_file: path.join(logDir, 'healthcheck-error.log'),
+      time: true,
+    },
   ],
 };
