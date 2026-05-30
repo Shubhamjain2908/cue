@@ -106,7 +106,8 @@ export function renderHtml(payload: DashboardPayload): string {
       const sharpe = bt.sharpe.toFixed(2);
       const maxDd = (bt.max_drawdown * 100).toFixed(2);
       const exp = (bt.expectancy * 100).toFixed(2);
-      return '<p class="meta" style="margin-top:12px;margin-bottom:0"><strong>Backtest ref (' + bt.strategy + ' · ' + bt.run_date + '):</strong><br>' +
+      const windowPart = bt.window_label ? ' · ' + bt.window_label : '';
+      return '<p class="meta" style="margin-top:12px;margin-bottom:0"><strong>Backtest ref (' + bt.strategy + windowPart + ' · ' + bt.run_date + '):</strong><br>' +
         'CAGR ' + cagr + '% · Sharpe ' + sharpe + ' · MaxDD ' + maxDd + '% · Expectancy +' + exp + '%</p>';
     }
 
