@@ -4,9 +4,9 @@
 
 **Repo-accurate behaviour and CLI:** **`.cursor/rules/cue-sou.md`**.
 
-**Phase record:** **`spec/cue-phase7-complete.md`**.
+**Phase record:** **`spec/cue-phase8-complete.md`**.
 
-**SQLite schema (migrations `001`–`009`):** **`.cursor/rules/cue-db-schema.md`**.
+**SQLite schema (migrations `001`–`011`):** **`.cursor/rules/cue-db-schema.md`**.
 
 **Hard constraints:** **`.cursor/rules/cue-guardrails.md`**.
 

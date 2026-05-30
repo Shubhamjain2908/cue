@@ -11,7 +11,13 @@ import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
 import { atr, sma } from "../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
-import type { ClosedBacktestTrade, EquityPoint, RunBacktestResult } from "./types.js";
+import type {
+  ClosedBacktestTrade,
+  EquityPoint,
+  MomentumBacktestOptions,
+  RunBacktestResult,
+  VixRegimeGate,
+} from "./types.js";
 import {
   BACKTEST_MAX_CONCURRENT_POSITIONS,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
@@ -392,12 +398,31 @@ function rankingConfigFromDefaults(): RankingConfig {
 }
 
 /**
+ * P7-G stacked gate: allow new BUYs when VIX close <= ceiling.
+ * Missing ^VIX session → gate OPEN (warn, do not throw).
+ */
+export function allowNewBuysForVixSession(sessionDate: string, vixGate?: VixRegimeGate): boolean {
+  if (vixGate === undefined) {
+    return true;
+  }
+  const vixClose = vixGate.vixByDate.get(sessionDate);
+  if (vixClose === undefined) {
+    console.warn(
+      `runBacktest: no ^VIX close for session ${sessionDate}; VIX gate OPEN (allow BUYs)`,
+    );
+    return true;
+  }
+  return vixClose <= vixGate.maxVix;
+}
+
+/**
  * Weekly rebalance cross-sectional momentum (§6.2) with ATR trailing stops (§6.3).
  */
 export function runBacktest(
   db: SqliteConnection,
   fromDate: string,
   toDate: string,
+  options?: MomentumBacktestOptions,
 ): RunBacktestResult {
   if (compareIsoDate(fromDate, toDate) > 0) {
     throw new Error(`runBacktest: fromDate ${fromDate} is after toDate ${toDate}`);
@@ -575,9 +600,9 @@ export function runBacktest(
       const qqqSlice = sliceBarsThrough(qqqBars, date);
       const qqqCloses = qqqSlice?.map((b) => b.close) ?? [];
       const smaRegime = sma(cfg.smaPeriod, qqqCloses);
-      const regimeOk = smaRegime !== null && qqqBar.close > smaRegime;
+      const qqqRegimeOk = smaRegime !== null && qqqBar.close > smaRegime;
 
-      if (regimeOk) {
+      if (qqqRegimeOk) {
         const priceMap = new Map<string, number[]>();
         for (const t of universe) {
           const series = byTicker.get(t);
@@ -604,29 +629,32 @@ export function runBacktest(
           }
         }
 
-        for (const t of ranked.slice(0, cfg.topN)) {
-          if (positions.size + pendingBuys.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
-            break;
+        const allowNewBuys = allowNewBuysForVixSession(date, options?.vixGate);
+        if (allowNewBuys) {
+          for (const t of ranked.slice(0, cfg.topN)) {
+            if (positions.size + pendingBuys.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
+              break;
+            }
+            if (positions.has(t.ticker) || pendingBuys.has(t.ticker)) {
+              continue;
+            }
+            const series = byTicker.get(t.ticker);
+            if (!series) {
+              continue;
+            }
+            const slice = sliceBarsThrough(series, date);
+            if (!slice || slice.length < cfg.lookbackDays) {
+              continue;
+            }
+            const highs = slice.map((b) => b.high);
+            const lows = slice.map((b) => b.low);
+            const closes = slice.map((b) => b.close);
+            const entryAtrVal = atr(highs, lows, closes, cfg.atrPeriod);
+            if (entryAtrVal === null) {
+              continue;
+            }
+            pendingBuys.set(t.ticker, { entryAtr: entryAtrVal });
           }
-          if (positions.has(t.ticker) || pendingBuys.has(t.ticker)) {
-            continue;
-          }
-          const series = byTicker.get(t.ticker);
-          if (!series) {
-            continue;
-          }
-          const slice = sliceBarsThrough(series, date);
-          if (!slice || slice.length < cfg.lookbackDays) {
-            continue;
-          }
-          const highs = slice.map((b) => b.high);
-          const lows = slice.map((b) => b.low);
-          const closes = slice.map((b) => b.close);
-          const entryAtrVal = atr(highs, lows, closes, cfg.atrPeriod);
-          if (entryAtrVal === null) {
-            continue;
-          }
-          pendingBuys.set(t.ticker, { entryAtr: entryAtrVal });
         }
       }
     }
@@ -713,11 +741,11 @@ export function runBacktest(
 function parseCli(): {
   from: string;
   to: string;
-  strategy: "momentum" | "quality-garp";
+  strategy: "momentum" | "quality-garp" | "vix-momentum";
 } {
   let from = "2021-01-01";
   let to = "2023-12-31";
-  let strategy: "momentum" | "quality-garp" = "momentum";
+  let strategy: "momentum" | "quality-garp" | "vix-momentum" = "momentum";
   let fromExplicit = false;
   let toExplicit = false;
   const argv = process.argv.slice(2);
@@ -733,6 +761,8 @@ function parseCli(): {
       const s = argv[++i]!;
       if (s === "quality-garp") {
         strategy = "quality-garp";
+      } else if (s === "vix-momentum") {
+        strategy = "vix-momentum";
       } else {
         strategy = "momentum";
       }
@@ -741,6 +771,14 @@ function parseCli(): {
   if (strategy === "quality-garp") {
     if (!fromExplicit) {
       from = "2023-01-01";
+    }
+    if (!toExplicit) {
+      to = "2025-12-31";
+    }
+  }
+  if (strategy === "vix-momentum") {
+    if (!fromExplicit) {
+      from = "2022-01-01";
     }
     if (!toExplicit) {
       to = "2025-12-31";
@@ -774,7 +812,7 @@ function backtestTradesTableExists(db: SqliteConnection): boolean {
   return row !== undefined;
 }
 
-function persistBacktestArtifacts(
+export function persistBacktestArtifacts(
   db: SqliteConnection,
   from: string,
   to: string,
@@ -835,6 +873,7 @@ const isMain =
   path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
 
 if (isMain) {
+  void (async () => {
   const { from, to, strategy } = parseCli();
   const config = getConfig();
   const db = new Database(config.DB_PATH);
@@ -863,6 +902,9 @@ if (isMain) {
       console.log(
         `Saved backtest run to SQLite (id=${runId.toString()}, trades=${tradesInserted}, file=${dbAbsPath}).`,
       );
+    } else if (strategy === "vix-momentum") {
+      const { runVixMomentumSweep } = await import("./strategies/vix-momentum.js");
+      await runVixMomentumSweep(db, from, to);
     } else {
       const result = runBacktest(db, from, to);
       const expectancyPctPerTrade = mean(
@@ -890,4 +932,5 @@ if (isMain) {
   } finally {
     db.close();
   }
+  })();
 }

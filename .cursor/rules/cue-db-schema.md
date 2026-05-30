@@ -206,7 +206,7 @@ Aggregated metrics for a labeled historical run (`src/backtest/runner.ts`).
 |--------|--------|
 | `run_date`, `from_date`, `to_date` | ISO strings |
 | `cagr`, `max_drawdown`, `win_rate`, `sharpe_ratio`, `total_trades`, `benchmark_cagr`, `expectancy` | REAL metrics |
-| `strategy` | TEXT — e.g. `MOMENTUM`, `GARP_RESEARCH`, `SWEEP` (`007`) |
+| `strategy` | TEXT — e.g. `MOMENTUM`, `GARP_RESEARCH`, `VIX_MOMENTUM_RESEARCH` (P7-G research archive), `SWEEP` (`007`) |
 | `window_label` | TEXT — human label for dashboard (`009`) |
 | `locked` | INTEGER **NOT NULL** default **0** — `1` pins a run as the dashboard reference (`009`) |
 
