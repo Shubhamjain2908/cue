@@ -19,9 +19,11 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `006_rebalance_drop_exit_reason` | Rebuild `positions`; CHECK adds **`REBALANCE_DROP`**; backfill flat same-day rotation exits |
 | `007_backtest_runs_strategy` | `backtest_runs.strategy` |
 | `008_corporate_actions` | `corporate_actions` (splits / reverse splits) |
-| `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked` |
+| `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked`; backfill locks bull-window runs **73, 74** (`2023-2025 (bull)`), labels extended run **80** (`2022-2025 (extended)`, unlocked) |
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
+
+**Post-migrate data note (`009`):** `locked = 1` is set only by migration backfill or a deliberate ceremony — new `pnpm run backtest` rows default to `locked = 0`. The dashboard backtest reference (`getMomentumBacktestSummary`) selects the latest **`strategy = 'MOMENTUM' AND locked = 1`** row, not the newest run by `run_date`.
 
 ---
 
@@ -150,7 +152,11 @@ Aggregated metrics for a labeled historical run (`src/backtest/runner.ts`).
 | `cagr`, `max_drawdown`, `win_rate`, `sharpe_ratio`, `total_trades`, `benchmark_cagr`, `expectancy` | REAL metrics |
 | `strategy` | TEXT — e.g. `MOMENTUM`, `GARP_RESEARCH`, `SWEEP` (`007`) |
 | `window_label` | TEXT — human label for dashboard (`009`) |
-| `locked` | INTEGER 0/1 — briefing prefers latest **locked** `MOMENTUM` run (`009`) |
+| `locked` | INTEGER **NOT NULL** default **0** — `1` pins a run as the dashboard reference (`009`) |
+
+**Read by:** `getMomentumBacktestSummary()` in `src/briefing/queries.ts` — `WHERE strategy = 'MOMENTUM' AND locked = 1 ORDER BY run_date DESC LIMIT 1`.
+
+**Written by:** `insertBacktestRun()` / `persistBacktestArtifacts()` in `src/backtest/runner.ts` (optional `windowLabel`, `locked`; defaults unlocked).
 
 ### `backtest_trades`
 
@@ -168,7 +174,19 @@ Granular trades per backtest run (`004`).
 
 ## Indexes
 
-Migrations **001**–**003**, **005**–**008** rely on PK/UNIQUE only. **`004`** adds backtest trade indexes. Consider new migrations for hot paths (e.g. `signals(date, signal)`) if profiling warrants.
+Migrations **001**–**003**, **005**–**009** rely on PK/UNIQUE only (no extra indexes on `corporate_actions` at current scale). **`004`** adds `idx_bt_trades_ticker`, `idx_bt_trades_run`. Consider new migrations for hot paths (e.g. `signals(date, signal)`) if profiling warrants.
+
+---
+
+## Post-pipeline health (no table)
+
+**`cue healthcheck`** (`src/agents/healthcheck.ts`) verifies operational state after the **16:05–16:15 ET** scheduler window — typically via PM2 cron **`cue-healthcheck`** at **17:00 ET** (see `deploy/ecosystem.config.cjs`). Checks:
+
+1. **`daily_prices` currency** — `MAX(date)` vs `resolveLastETSession()` (same session rule as `cue ingest`).
+2. **Pipeline output** — Friday: `signals` rows for today’s ET date; Mon–Thu: OPEN positions and/or non-`REBALANCE_DROP` closes today.
+3. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in the last 90 minutes; **SKIP** if the log file is missing.
+
+Results are sent via **`TELEGRAM_BOT_TOKEN`** / **`TELEGRAM_CHAT_ID`** (no separate alerts table).
 
 ---
 

@@ -15,6 +15,8 @@ not be bypassed without an explicit gate override (documented in
 | **Top-N hard cap** | At most **3** momentum BUY entries per rebalance pass (`topN = 3` contract). | `src/analysers/momentum-screener.ts` (portfolio cap also tied to `MAX_POSITIONS` in config) |
 | **Watchlist bench — no positions** | Ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` persist as `signals.signal = WATCHLIST` on rebalance only; **no** `positions` insert. Depth `0` disables bench end-to-end. | `momentum-screener.ts`, `WATCHLIST_BENCH_DEPTH` in `src/config/index.ts` |
 | **Rebalance vs stop** | Full **BUY** ranking on **`rebalance`** / Friday scheduler path; **stop** path runs maintenance (`execute-stops`) without Friday-style screen. | `src/agents/scheduler.ts`, `src/agents/daily-workflow.ts` (`detectRunMode`) |
+| **Split adjustment before evaluation** | `adjust-splits` runs after **ingest**, before **screen** / **execute-stops**. Non-critical — Yahoo failure must not abort stop evaluation. | `corporate-actions.ts`, `daily-workflow.ts`, `scheduler.ts` |
+| **Locked backtest reference** | Dashboard / briefing backtest metrics use latest **`MOMENTUM` + `locked = 1`** run, not newest `run_date`. New backtests default **unlocked**. | `briefing/queries.ts`, migration `009` |
 | **Momentum formula locked** | `(close[today-21] - close[today-252]) / close[today-252]`. Any change requires backtest re-validation against Phase 1 gate metrics. | `src/enrichers/momentum-technical.ts` (and backtest) |
 | **ATR multipliers locked** | Base: 4.0×. Tight: 1.5×. Tight trigger: ≥ 25% unrealized. | `src/analysers/momentum-screener.ts` — constants / config as designed |
 | **ATR golden rule** | `current_stop_loss` never decreases. `new_stop = MAX(candidate, current_stop_loss)`. | Stop evaluation in `momentum-screener.ts` |
@@ -56,7 +58,8 @@ not be bypassed without an explicit gate override (documented in
 | Guardrail | Rule | Enforced in |
 |---|---|---|
 | **Critical step abort** | Non-zero exit on critical step aborts chain. | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
-| **Non-critical continuation** | enrich / brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
+| **Non-critical continuation** | **adjust-splits**, enrich, brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
+| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the 16:05–16:15 chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. | `src/agents/healthcheck.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window. | `src/agents/scheduler.ts` (`lastRunDate`) |
 | **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
 | **Mode / flag orthogonality** | `--force-rebalance` vs calendar Friday; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |

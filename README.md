@@ -16,8 +16,9 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 
 - Pulls **EOD OHLCV** for the configured universe and stores it in SQLite.
 - **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
-- On **Friday rebalance** path: fundamentals prefetch (cache), full screen with `--force-rebalance`, LLM enrich for pending BUYs and **WATCHLIST** bench rows, then brief (BUY Telegram alerts + optional **Next in Rank** bench message).
-- On **Mon–Thu stop** path: price refresh, **execute-stops** maintenance, then brief (no full rebalance screen).
+- On **Friday rebalance** path: **split adjustment** (Yahoo), fundamentals prefetch (cache), full screen with `--force-rebalance`, LLM enrich for pending BUYs and **WATCHLIST** bench rows, then brief (BUY Telegram alerts + optional **Next in Rank** bench message).
+- On **Mon–Thu stop** path: price refresh, **split adjustment**, **execute-stops** maintenance, then brief (no full rebalance screen).
+- After the **16:05–16:15 ET** pipeline window: optional **`cue healthcheck`** (~17:00 ET cron) verifies ingest currency, pipeline output, and PM2 error logs, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
 Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/project-spec.md`**. Table-by-table schema notes: **`.cursor/rules/db-schema.md`**.
@@ -34,7 +35,8 @@ flowchart LR
     CLI["pnpm run cue …"]
   end
   CLI --> Ingest["ingest\nMassive EOD"]
-  Ingest --> DB[("SQLite\ndaily_prices, signals,\npositions, enrichments")]
+  Ingest --> Splits["adjust-splits\nYahoo splits"]
+  Splits --> DB[("SQLite\ndaily_prices, signals,\npositions, corporate_actions")]
   DB --> Screen["screen\nmomentum + regime"]
   Screen --> DB
   DB --> Fund["enrich-fundamentals\nYahoo → cache"]
@@ -46,14 +48,17 @@ flowchart LR
   DB --> Brief["brief\ndashboard + Telegram"]
   Brief --> Out["dist/*.html\nTelegram API"]
   Sched["scheduler.ts\n60s poll, ET window"] -.->|"subprocess chain"| CLI
+  HC["healthcheck.ts\n~17:00 ET cron"] -.->|"post-window verify"| DB
+  HC -.-> Out
 ```
 
 **Two orchestration paths:**
 
 | Path | Entry | Behaviour |
 |------|--------|-----------|
-| **Registry pipeline** | `cue run-all`, `cue pipeline --now` | `daily-workflow.ts`: `detectRunMode()` from ET weekday + `PIPELINE_STEPS` — ingest → screen → enrich (Fri only) → brief. |
-| **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | `scheduler.ts`: **16:05–16:15 ET** window, once per ET day, **`isRunning`** lock; **Friday** runs ingest → enrich-fundamentals → screen → enrich → brief; **Mon–Thu** runs ingest → execute-stops → brief; **Sat/Sun** idle. |
+| **Registry pipeline** | `cue run-all`, `cue pipeline --now` | `daily-workflow.ts`: **Friday** — ingest → adjust-splits → screen → enrich → brief; **Mon–Thu** — ingest → adjust-splits → execute-stops → brief. |
+| **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | **16:05–16:15 ET**, once per ET day; **Friday** adds enrich-fundamentals before screen; same adjust-splits placement as registry. |
+| **Healthcheck** | `cue healthcheck` | Post-window verification + Telegram (PM2 cron **`cue-healthcheck`**, typically **17:00 ET**). |
 
 **LLM:** `src/llm/provider.ts` chooses **Anthropic**, **OpenAI**, **Google AI**, or **Vertex AI** from `LLM_PROVIDER`. The runtime contract is `LLMProvider.complete(messages, maxTokens)`; structured outputs are validated with **Zod** after parsing JSON from the model.
 
@@ -128,6 +133,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | Command | Description |
 |---------|-------------|
 | `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: previous ET weekday session, T-1; Mon → Fri), `--ticker SYM`, `--force` refetches that session |
+| `pnpm run cue -- adjust-splits` | Adjust OPEN `positions` / linked `signals` for recent Yahoo split events; idempotent via `corporate_actions` |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache (`--ticker`, `--limit`, `--force`, `--date` reserved) |
 | `pnpm run cue -- screen` | Momentum screener / ranking. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
@@ -150,6 +156,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- pipeline --now` | Same as `run-all` (explicit one-shot) |
 | `pnpm run cue -- pipeline` | **No `--now`:** same daemon as **`pnpm run cue -- schedule`** |
 | `pnpm run cue -- schedule` | Scheduler daemon (`pnpm schedule`) |
+| `pnpm run cue -- healthcheck` | Post-pipeline checks (`daily_prices`, signals/stops, PM2 log) + Telegram alert |
 
 ### Other scripts (`package.json`)
 
@@ -193,8 +200,10 @@ Defined in **`src/config/cue-timezone.ts`** and used from ingest date helpers, `
 
 ## Deployment notes
 
-- **PM2:** `deploy/ecosystem.config.cjs` runs `tsx` on `src/cli.ts pipeline` (no `--now` → same scheduler as **`cue schedule`**). Prefer `args: 'src/cli.ts schedule'` if you want the explicit subcommand in logs.
-- **systemd:** run `cue schedule` (or `cue pipeline`) as a `Type=simple` long-lived service; send `SIGTERM` for clean shutdown (scheduler closes its readonly DB handle).
+- **PM2:** `deploy/ecosystem.config.cjs` defines:
+  - **`cue`** — long-lived scheduler (`src/cli.ts pipeline` or **`src/cli.ts schedule`**); logs `logs/pm2-cue.log`.
+  - **`cue-healthcheck`** — cron-only `src/cli.ts healthcheck` (`autorestart: false`). Default cron **`0 21 * * 1-5`** = **17:00 America/New_York** when the **host uses UTC**; use **`0 17 * * 1-5`** if the VM clock is set to ET (PM2 cron follows **system** timezone).
+- **systemd:** run `cue schedule` (or `cue pipeline`) as a `Type=simple` long-lived service; send `SIGTERM` for clean shutdown (scheduler closes its readonly DB handle). Schedule `cue healthcheck` separately (cron or second unit) if not using PM2 for the healthcheck app.
 
 ---
 
@@ -205,14 +214,14 @@ cue/
   data/
     universe/       `nasdaq100.json` (constituents) + `_meta.json` (as-of, counts, QQQ note)
   src/
-    agents/           thesis-generator, daily-workflow (registry), scheduler.ts (daemon)
+    agents/           thesis-generator, daily-workflow (registry), scheduler.ts, healthcheck.ts
     analysers/        momentum-screener (screen, execute-stops CLI)
     briefing/         dashboard HTML, Telegram dispatcher
     cli/              doctor, llm-smoke, shared CLI helpers (`ymd-arg.ts`)
     config/           env (zod), cue-timezone.ts
     db/               migrations/, queries.ts, provider.ts, schema.ts
     enrichers/        momentum types / math used by screener
-    ingestors/        Massive price ingest, enrich-fundamentals CLI
+    ingestors/        Massive price ingest, corporate-actions (splits), enrich-fundamentals CLI
     universe/         shared `load-universe.ts` (tickers + `_meta.json`)
     llm/              provider adapters, enricher, prompt, yahooContext
     backtest/         historical runner (separate tsx entry)

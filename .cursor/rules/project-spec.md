@@ -2,7 +2,7 @@
 
 *Living document for this repository. **Do not edit** `spec/cue-architecture-v1.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 6 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity, live instrumentation).*
 
-**Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`spec/cue-db-schema.md`** (SQL snippets + read patterns + deferred items), **`.cursor/rules/db-schema.md`** (short table aligned to applied `src/db/migrations/*.sql`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
+**Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`.cursor/rules/db-schema.md`** (tables + migrations `001`–`009` aligned to applied SQL), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
 ---
 
@@ -86,8 +86,9 @@ The **architecture v1** doc describes modes as `fetch → screen → …`. In **
 
 | Mechanism | Source | When used | Steps (subprocess = `pnpm run cue -- …`) |
 |---|---|---|---|
-| **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: Friday → **`rebalance`**: ingest → screen → enrich → brief; else **`stop`**: ingest → screen → brief. |
-| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **ET window 16:05–16:15**, **`America/New_York`**, once per ET calendar day, **`isRunning`** + **`LOCK_PATH`** PID lock. **Friday:** ingest → enrich-fundamentals → screen → enrich → brief (mode **`rebalance`** for `forwardArgs`). **Mon–Thu:** ingest → execute-stops → brief (mode **`stop`**). **Sat/Sun:** no chain. |
+| **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: Friday → **`rebalance`**: ingest → **adjust-splits** → screen → enrich → brief; else **`stop`**: ingest → **adjust-splits** → **execute-stops** → brief. |
+| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **ET window 16:05–16:15**, **`America/New_York`**, once per ET calendar day, **`isRunning`** + **`LOCK_PATH`** PID lock. **Friday:** ingest → **adjust-splits** → enrich-fundamentals → screen → enrich → brief. **Mon–Thu:** ingest → **adjust-splits** → execute-stops → brief. **Sat/Sun:** no chain. |
+| **Healthcheck cron** | `src/agents/healthcheck.ts` | `pnpm run cue -- healthcheck`; PM2 **`cue-healthcheck`** | **~17:00 ET** (45m after window); verifies `daily_prices`, pipeline output, PM2 error log; Telegram ✅/⚠️. |
 
 `pnpmRunArgs` / `resolvedForwardArgs` add **`--force-rebalance`** to **screen** when pipeline mode is `rebalance`, and **`--mode`** to **brief**.
 
@@ -104,7 +105,7 @@ interface PipelineStep {
 }
 ```
 
-**Criticality (today):** **ingest** + **screen** = critical; **enrich** = non-critical; **brief** = non-critical (dashboard/alerts should not hard-block each other).
+**Criticality (today):** **ingest** + **screen** (rebalance) or **execute-stops** (stop) = critical; **adjust-splits** = non-critical (Yahoo outage must not block stops/screen); **enrich** = non-critical; **brief** = non-critical (dashboard/alerts should not hard-block each other).
 
 ### 4.4 Scheduler tick sequence (`scheduler.ts`)
 
@@ -137,13 +138,15 @@ interface PipelineStep {
 | Env | `src/config/index.ts` | `getConfig()` |
 | Universe files | `data/universe/*.json`, `data/universe/_meta.json` | `UNIVERSE` env key; loader `src/universe/load-universe.ts` |
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
+| Corporate actions | `src/ingestors/corporate-actions.ts` | `cue adjust-splits` (Yahoo `chart` split events; adjusts OPEN `positions` + linked `signals`) |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
 | LLM | `src/llm/factory.ts`, `src/llm/types.ts`, `src/llm/json.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
 | Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` (pending **BUY**, then pending **WATCHLIST**; watchlist failures are warn-only) |
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
-| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts`, `src/briefing/template.ts` (`formatWatchlistBench`) | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + watchlist bench; stop-path Daily Pulse; dashboard Live Performance section)* |
+| Healthcheck | `src/agents/healthcheck.ts` | `cue healthcheck` |
+| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts`, `src/briefing/template.ts` (`formatWatchlistBench`, `formatBacktestRef` + `window_label`) | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + watchlist bench; stop-path Daily Pulse; dashboard Live Performance + **locked** MOMENTUM backtest ref)* |
 | DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
@@ -174,12 +177,14 @@ interface PipelineStep {
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `001_initial_schema.sql` + `002_create_fundamental_cache.sql` + `003_positions_signals_upgrade.sql` + `004_create_backtest_trades.sql` + `005_positions_pnl_exit_reason.sql`; ledger **`_migrations`**.
-- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** with default **`signal_type = 'MOMENTUM'`**; `positions` includes **`highest_close_since_entry`**, **`current_stop_loss`**, **`pnl_pct`**, and **`exit_reason`**; `backtest_trades` is live and populated by `persistBacktestArtifacts()` in `src/backtest/runner.ts`.
-- **Backtest trade exit mapping:** internal `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` remains reserved in the table constraint but is not emitted by the current runner.
-- **`fundamentals_cache`:** `cue enrich-fundamentals` writes disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`). As of Phase 6 the table grows organically from run dates; historical backfill remains backlog work.
-- **Next migration ID:** **`006`**.
-- **Reference:** see **`cue-db-schema.md`** for deeper schema narrative and SQL examples.
+- **Applied DDL:** `001`–`009` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/db-schema.md`**.
+- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`**; `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`).
+- **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (bull window **2023–2025** pinned in `009` backfill); newer unlocked research runs (e.g. extended **2022–2025**) do not displace it.
+- **Split adjustment:** `corporate_actions` idempotency + price-level updates on OPEN book before screen/stops (`cue adjust-splits`).
+- **Backtest trade exit mapping:** internal `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; `REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`. `INITIAL_STOP` reserved in `backtest_trades` CHECK but not emitted by the current runner.
+- **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`).
+- **Next migration ID:** **`010`**.
+- **Reference:** **`.cursor/rules/db-schema.md`** (repo agent summary tied to applied migrations).
 
 ---
 
@@ -187,8 +192,10 @@ interface PipelineStep {
 
 - **VM:** Oracle Cloud (e.g. `VM.Standard.E2.1.Micro`, Ubuntu) — same *class* of host as arch doc; **independent** PM2 process from Market Pulse.
 - **Repo layout on server:** e.g. `/opt/cue`; secrets **`chmod 600`** `.env`; PM2 **`env_file`**.
-- **Process:** `deploy/ecosystem.config.cjs` uses **`node_modules/.bin/tsx`** with args **`src/cli.ts pipeline`** (no `--now` → **scheduler**). Prefer **`src/cli.ts schedule`** in args for clarity.
-- **Logs:** PM2 `out_file` / `error_file` under `logs/` (see ecosystem).
+- **Processes:** `deploy/ecosystem.config.cjs` defines two apps:
+  - **`cue`** — long-lived scheduler (`src/cli.ts pipeline` or prefer **`src/cli.ts schedule`**); logs **`logs/pm2-cue.log`** (merged out/error).
+  - **`cue-healthcheck`** — cron-only (`src/cli.ts healthcheck`, **`autorestart: false`**). Default cron **`0 21 * * 1-5`** = **17:00 ET** when the **host clock is UTC**; use **`0 17 * * 1-5`** if the VM timezone is **`America/New_York`** (PM2 cron uses **system** timezone, not `TZ` env).
+- **Logs:** scheduler → `logs/pm2-cue.log`; healthcheck → `logs/healthcheck-out.log` / `logs/healthcheck-error.log`.
 
 ---
 
@@ -222,6 +229,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 4 — Infrastructure + universe | Grouped fetcher, lockfile, stop dashboard, full universe, fundamentals wiring, Quality-GARP research (closed) | ✅ Complete |
 | 5 — Alert enrichment + intra-week visibility | Enriched BUY Telegram message, `brief --mode stop` Daily Pulse, S6 writer verification | ✅ Complete |
 | 6 — Live performance instrumentation | Stop proximity warning, ATR position sizer, live expectancy dashboard, positions `pnl_pct` + `exit_reason` (migration 005) | ✅ Complete |
+| 7 — Capital safety & ops | Corporate split adjuster (`008`, `adjust-splits`); locked backtest ref + `window_label` (`009`); post-pipeline **`healthcheck`** + PM2 cron | ✅ P7-C / P7-D shipped |
 
 
 ---
@@ -250,6 +258,9 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Task | Status / Priority | Notes |
 |---|---|---|
+| **Corporate split adjustment (P7-B)** | ✅ Shipped | `008_corporate_actions`, `cue adjust-splits`, non-critical pipeline step after ingest |
+| **Locked backtest reference + window label (P7-C)** | ✅ Shipped | `009`; dashboard uses `locked = 1` MOMENTUM run; extended research runs stay unlocked |
+| **Post-pipeline healthcheck (P7-D)** | ✅ Shipped | `cue healthcheck`, Telegram pass/fail, PM2 `cue-healthcheck` cron |
 | **Stop proximity warning (P6-A)** | ✅ Shipped | `⚠️ NEAR STOP` now renders inline on the Daily Pulse |
 | **ATR position sizer (P6-B)** | ✅ Shipped | `PORTFOLIO_VALUE_USD` env var supported; fallback to `POSITION_SIZE_USD` retained |
 | **signal_outcomes table + `cue measure-signals`** | LOW | Directional accuracy tracking independent of position management; next natural instrumentation step |
@@ -268,8 +279,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | Document | Role |
 |---|---|
 | `spec/cue-architecture-v1.md` | **Frozen** narrative SoU + Phase 4 plan wording — **do not edit in Cursor tasks unless the user explicitly asks** |
-| `spec/cue-db-schema.md` | Deep schema narrative, example queries, deferred migrations |
-| `.cursor/rules/db-schema.md` | Short agent summary tied to **applied** migrations |
+| `.cursor/rules/db-schema.md` | Schema summary tied to **applied** migrations (`001`–`009`) |
 | `.cursor/rules/cue-guardrails.md` | Hard constraints (**paths aligned to this repo** in v1.1) |
 | `README.md` | Operator-facing commands + quickstart |
 | `.cursor/rules/project-spec.md` | **This file** — repo-accurate engineering spec |
