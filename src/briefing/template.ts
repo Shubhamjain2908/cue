@@ -1,18 +1,7 @@
 import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import type { DashboardPayload } from "./queries.js";
 
-export interface LivePerfBacktestRefs {
-  cagrPct: number;
-  sharpe: number;
-  maxDdPct: number;
-  expectancyPct: number;
-  winRatePct: number;
-}
-
-export function renderHtml(
-  payload: DashboardPayload,
-  livePerfBacktestRefs: LivePerfBacktestRefs,
-): string {
+export function renderHtml(payload: DashboardPayload): string {
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
   const atrTighten = DEFAULT_RANKING_CONFIG.atrTightenThresholdPct;
   const atrMultBase = DEFAULT_RANKING_CONFIG.atrMultiplierBase;
@@ -101,7 +90,7 @@ export function renderHtml(
     </div>
   </div>
 
-  <h2 class="section-title">Backtest (Latest Run)</h2>
+  <h2 class="section-title" id="backtest-section-title">Backtest (Latest Run)</h2>
   <div class="grid-4" id="backtest-row"></div>
 
   <script>
@@ -109,11 +98,17 @@ export function renderHtml(
     const ATR_TIGHTEN_PCT = ${atrTighten};
     const ATR_MULT_BASE = ${atrMultBase};
     const ATR_MULT_TIGHT = ${atrMultTight};
-    const BT_CAGR_PCT = ${livePerfBacktestRefs.cagrPct};
-    const BT_SHARPE = ${livePerfBacktestRefs.sharpe};
-    const BT_MAXDD_PCT = ${livePerfBacktestRefs.maxDdPct};
-    const BT_EXPECTANCY_PCT = ${livePerfBacktestRefs.expectancyPct};
-    const BT_WIN_RATE_PCT = ${livePerfBacktestRefs.winRatePct};
+    function formatBacktestRef(bt) {
+      if (!bt) {
+        return '<p class="meta" style="margin-top:12px;margin-bottom:0">No momentum backtest on file.</p>';
+      }
+      const cagr = (bt.cagr * 100).toFixed(2);
+      const sharpe = bt.sharpe.toFixed(2);
+      const maxDd = (bt.max_drawdown * 100).toFixed(2);
+      const exp = (bt.expectancy * 100).toFixed(2);
+      return '<p class="meta" style="margin-top:12px;margin-bottom:0"><strong>Backtest ref (' + bt.strategy + ' · ' + bt.run_date + '):</strong><br>' +
+        'CAGR ' + cagr + '% · Sharpe ' + sharpe + ' · MaxDD ' + maxDd + '% · Expectancy +' + exp + '%</p>';
+    }
 
     // Meta
     document.getElementById('meta').innerHTML =
@@ -173,18 +168,22 @@ export function renderHtml(
     const fmtPctPlain = v => v == null ? '—' : v.toFixed(2) + '%';
     const fmtWinRate = v => v == null ? '—' : v.toFixed(1) + '%';
 
+    const btRef = d.backtest_summary;
+    const btExpRef = btRef ? '+' + (btRef.expectancy * 100).toFixed(2) + '%' : '—';
+    const btWinRef = btRef ? (btRef.win_rate * 100).toFixed(1) + '%' : '—';
+
     let livePerfHtml;
     if (lp.closed_trades === 0) {
       livePerfHtml =
         '<p style="color:var(--muted);margin:0">No strategy exits recorded yet.</p>' +
-        '<p class="meta" style="margin-top:12px;margin-bottom:0">Backtest ref: CAGR ' + BT_CAGR_PCT.toFixed(2) + '% · Sharpe ' + BT_SHARPE.toFixed(2) + ' · Expectancy +' + BT_EXPECTANCY_PCT.toFixed(2) + '% · MaxDD ' + BT_MAXDD_PCT.toFixed(2) + '%</p>';
+        formatBacktestRef(btRef);
     } else {
       livePerfHtml =
         '<h3 style="font-size:0.9rem;font-weight:600;margin:0 0 12px">Overall</h3>' +
         '<table><thead><tr><th>Metric</th><th>Live</th><th>Backtest (ref)</th></tr></thead><tbody>' +
-        '<tr><td>Closed trades</td><td>' + lp.closed_trades + '</td><td>—</td></tr>' +
-        '<tr><td>Expectancy</td><td>' + fmtPct(lp.avg_pnl_pct) + '</td><td>+' + BT_EXPECTANCY_PCT.toFixed(2) + '%</td></tr>' +
-        '<tr><td>Win rate</td><td>' + fmtWinRate(lp.win_rate_pct) + '</td><td>' + BT_WIN_RATE_PCT.toFixed(1) + '%</td></tr>' +
+        '<tr><td>Closed trades</td><td>' + lp.closed_trades + '</td><td>' + (btRef ? btRef.total_trades : '—') + '</td></tr>' +
+        '<tr><td>Expectancy</td><td>' + fmtPct(lp.avg_pnl_pct) + '</td><td>' + btExpRef + '</td></tr>' +
+        '<tr><td>Win rate</td><td>' + fmtWinRate(lp.win_rate_pct) + '</td><td>' + btWinRef + '</td></tr>' +
         '<tr><td>Worst trade</td><td>' + fmtPctPlain(lp.worst_trade_pct) + '</td><td>—</td></tr>' +
         '<tr><td>Best trade</td><td>' + fmtPctPlain(lp.best_trade_pct) + '</td><td>—</td></tr>' +
         '</tbody></table>';
@@ -238,6 +237,10 @@ export function renderHtml(
 
     // Backtest KPIs
     const bt = d.backtest_summary;
+    if (bt) {
+      document.getElementById('backtest-section-title').textContent =
+        'Backtest (' + bt.strategy + ' · ' + bt.run_date + ')';
+    }
     const btKpis = bt ? [
       { label: 'CAGR',         value: (bt.cagr * 100).toFixed(2) + '%',         cls: bt.cagr > 0.12 ? 'green' : 'red' },
       { label: 'Sharpe',       value: bt.sharpe.toFixed(3),                      cls: bt.sharpe > 1.0 ? 'green' : 'red' },
