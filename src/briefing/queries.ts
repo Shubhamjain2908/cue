@@ -76,6 +76,93 @@ export function computeNextRebalanceFriday(etToday: string): string {
   return addCalendarDays(etToday, daysUntil);
 }
 
+/** QQQ session dates in `[from, to]` (inclusive), ascending. */
+function loadQqqTradingDates(db: CueDatabase, from: string, to: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT date FROM daily_prices WHERE ticker = 'QQQ' AND date >= @from AND date <= @to ORDER BY date ASC`,
+    )
+    .all({ from, to }) as { date: string }[];
+  return rows.map((r) => r.date);
+}
+
+/** Count QQQ sessions strictly after `fromExclusive` through `asOfInclusive`. */
+function countQqqTradingSessionsAfter(
+  sortedTradingDates: readonly string[],
+  fromExclusive: string,
+  asOfInclusive: string,
+): number {
+  let count = 0;
+  for (const d of sortedTradingDates) {
+    if (d <= fromExclusive) {
+      continue;
+    }
+    if (d > asOfInclusive) {
+      break;
+    }
+    count++;
+  }
+  return count;
+}
+
+export interface StaleOpenPositionRow {
+  ticker: string;
+  lastPriceDate: string | null;
+  /** QQQ sessions between last bar and `asOf` (exclusive of last bar date). */
+  sessionsBehind: number;
+}
+
+const STALE_OPEN_POSITION_SESSION_THRESHOLD = 3;
+
+/**
+ * OPEN positions whose latest `daily_prices` bar is more than three QQQ sessions
+ * behind `asOf` (orphaned price feed / missing vendor bar).
+ */
+export function getStaleOpenPositions(db: CueDatabase, asOf: string): StaleOpenPositionRow[] {
+  const rows = db
+    .prepare(
+      `
+      SELECT sig.ticker AS ticker, MAX(dp.date) AS lastPriceDate
+      FROM positions p
+      INNER JOIN signals sig ON sig.id = p.signal_id
+      LEFT JOIN daily_prices dp ON dp.ticker = sig.ticker
+      WHERE p.status = 'OPEN'
+      GROUP BY sig.ticker
+      ORDER BY sig.ticker ASC
+    `,
+    )
+    .all() as { ticker: string; lastPriceDate: string | null }[];
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const calendarFrom = addCalendarDays(asOf, -400);
+  const sortedTradingDates = loadQqqTradingDates(db, calendarFrom, asOf);
+  const stale: StaleOpenPositionRow[] = [];
+
+  for (const row of rows) {
+    if (row.lastPriceDate === null) {
+      stale.push({ ticker: row.ticker, lastPriceDate: null, sessionsBehind: 999 });
+      continue;
+    }
+    const sessionsBehind = countQqqTradingSessionsAfter(
+      sortedTradingDates,
+      row.lastPriceDate,
+      asOf,
+    );
+    if (sessionsBehind > STALE_OPEN_POSITION_SESSION_THRESHOLD) {
+      stale.push({
+        ticker: row.ticker,
+        lastPriceDate: row.lastPriceDate,
+        sessionsBehind,
+      });
+    }
+  }
+
+  return stale;
+}
+
 /** OPEN positions with `daily_prices.close` on `asOf` (null when bar missing). */
 export function getOpenPositionsWithLastClose(
   db: CueDatabase,

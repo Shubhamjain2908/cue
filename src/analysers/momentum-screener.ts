@@ -91,6 +91,25 @@ function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] |
   return bars.slice(0, ub + 1);
 }
 
+/** As-of bar from day map, else last bar on or before `asOf` in the ticker series. */
+function resolveAsOfBar(
+  ticker: string,
+  dayMap: Map<string, DailyBar>,
+  byTicker: Map<string, DailyBar[]>,
+  asOf: string,
+): DailyBar | undefined {
+  const direct = dayMap.get(ticker);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const series = byTicker.get(ticker);
+  if (series === undefined) {
+    return undefined;
+  }
+  const ub = upperBoundInclusiveByDate(series, asOf);
+  return ub >= 0 ? series[ub] : undefined;
+}
+
 function tradingDaysHeld(
   sortedDates: readonly string[],
   entryDate: string,
@@ -224,6 +243,10 @@ function replayExitReason(
   asOf: string,
   cfg: RankingConfig,
 ): ExitReason | null {
+  if (tradingDaysHeld(sortedTradingDates, pos.entryDate, asOf) >= cfg.maxHoldDays) {
+    return "MAX_HOLD";
+  }
+
   const series = byTicker.get(pos.ticker);
   if (!series) {
     return null;
@@ -269,9 +292,6 @@ function replayExitReason(
     );
   }
 
-  if (tradingDaysHeld(sortedTradingDates, pos.entryDate, asOf) >= cfg.maxHoldDays) {
-    return "MAX_HOLD";
-  }
   return null;
 }
 
@@ -384,8 +404,11 @@ export function runLiveScreen(
       if (reason === undefined) {
         continue;
       }
-      const bar = dayMap.get(pos.ticker);
-      if (!bar) {
+      const bar = resolveAsOfBar(pos.ticker, dayMap, byTicker, asOf);
+      if (bar === undefined) {
+        cueLogger.warn(
+          `screen: skip close ${pos.ticker} reason=${reason} — no price bar on or before asOf=${asOf}`,
+        );
         continue;
       }
       const sellRow: SignalInsert = {

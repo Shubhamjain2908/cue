@@ -8,9 +8,10 @@ import { REBALANCE_DAY_OF_WEEK, weekdayUtcForNyCalendarDate } from "./daily-work
 import type { AppConfig } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE, getExchangeDateString } from "../config/cue-timezone.js";
 import type { CueDatabase } from "../db/provider.js";
+import { getStaleOpenPositions } from "../briefing/queries.js";
 import { resolveLastETSession } from "../ingestors/massive-price-ingestor.js";
 
-export type CheckStatus = "PASS" | "FAIL" | "SKIP";
+export type CheckStatus = "PASS" | "FAIL" | "WARN" | "SKIP";
 
 export interface CheckResult {
   name: string;
@@ -59,6 +60,114 @@ function formatEtTime(now: Date): string {
 
 function compareYmd(a: string, b: string): number {
   return a.localeCompare(b);
+}
+
+function countQqqSessionsAfter(
+  db: CueDatabase,
+  fromExclusive: string,
+  asOfInclusive: string,
+): number {
+  const rows = db
+    .prepare(
+      `
+      SELECT date FROM daily_prices
+      WHERE ticker = 'QQQ' AND date > @from AND date <= @to
+      ORDER BY date ASC
+    `,
+    )
+    .all({ from: fromExclusive, to: asOfInclusive }) as { date: string }[];
+  return rows.length;
+}
+
+/** Prior Mon–Fri ET session immediately before `sessionYmd`. */
+function priorEtTradingSessionYmd(sessionYmd: string): string {
+  const [y, m, d] = sessionYmd.split("-").map(Number);
+  let civil = new Date(Date.UTC(y!, m! - 1, d!, 12, 0, 0));
+  civil.setUTCDate(civil.getUTCDate() - 1);
+  for (let i = 0; i < 5; i++) {
+    const yy = civil.getUTCFullYear();
+    const mo = civil.getUTCMonth() + 1;
+    const da = civil.getUTCDate();
+    const dow = new Date(Date.UTC(yy, mo - 1, da, 12, 0, 0)).getUTCDay();
+    if (dow !== 0 && dow !== 6) {
+      const ys = String(yy).padStart(4, "0");
+      const ms = String(mo).padStart(2, "0");
+      const ds = String(da).padStart(2, "0");
+      return `${ys}-${ms}-${ds}`;
+    }
+    civil.setUTCDate(civil.getUTCDate() - 1);
+  }
+  throw new Error(`priorEtTradingSessionYmd: could not resolve session before ${sessionYmd}`);
+}
+
+export function checkStalePositions(db: CueDatabase, now: Date): CheckResult {
+  const name = "stale_positions";
+  const asOf = resolveLastETSession(now);
+  const stale = getStaleOpenPositions(db, asOf);
+  if (stale.length === 0) {
+    return {
+      name,
+      status: "PASS",
+      message: `no OPEN positions with price data >3 QQQ sessions behind ${asOf}`,
+    };
+  }
+  const detail = stale
+    .map((s) =>
+      s.lastPriceDate === null
+        ? `${s.ticker}(no bars)`
+        : `${s.ticker}(last=${s.lastPriceDate}, lag=${String(s.sessionsBehind)} sessions)`,
+    )
+    .join(", ");
+  return {
+    name,
+    status: "FAIL",
+    message: `orphaned OPEN positions vs asOf=${asOf}: ${detail}`,
+  };
+}
+
+export function checkQqqLag(db: CueDatabase, now: Date): CheckResult {
+  const name = "qqq_lag";
+  const expectedSession = resolveLastETSession(now);
+  const row = db
+    .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = 'QQQ'`)
+    .get() as { d: string | null };
+  const qqqMax = row.d;
+
+  if (qqqMax === null) {
+    return {
+      name,
+      status: "FAIL",
+      message: "QQQ has no rows in daily_prices; regime gate cannot be trusted",
+    };
+  }
+  if (compareYmd(qqqMax, expectedSession) >= 0) {
+    return {
+      name,
+      status: "PASS",
+      message: `QQQ current to ${qqqMax} (expected ${expectedSession})`,
+    };
+  }
+
+  const sessionsBehind = countQqqSessionsAfter(db, qqqMax, expectedSession);
+  if (sessionsBehind > 1) {
+    return {
+      name,
+      status: "FAIL",
+      message: `QQQ stale: max=${qqqMax}, expected ${expectedSession} (${String(sessionsBehind)} sessions behind)`,
+    };
+  }
+  if (sessionsBehind === 1 || qqqMax === priorEtTradingSessionYmd(expectedSession)) {
+    return {
+      name,
+      status: "WARN",
+      message: `QQQ lagging by 1 session: max=${qqqMax}, expected ${expectedSession} (weekend regime gate may use stale SMA)`,
+    };
+  }
+  return {
+    name,
+    status: "FAIL",
+    message: `QQQ stale: max=${qqqMax}, expected ${expectedSession} (regime data materially behind)`,
+  };
 }
 
 export function checkDailyPricesCurrency(db: CueDatabase, now: Date): CheckResult {
@@ -204,23 +313,33 @@ export function checkPm2Logs(
 
 function buildTelegramMessage(todayEt: string, timeEt: string, results: CheckResult[]): string {
   const failed = results.filter((r) => r.status === "FAIL");
-  const passedOrSkipped = results.filter((r) => r.status !== "FAIL");
+  const warned = results.filter((r) => r.status === "WARN");
+  const passedOrSkipped = results.filter((r) => r.status !== "FAIL" && r.status !== "WARN");
   const bullet = (r: CheckResult) => `• ${r.name}: ${r.message}`;
 
   if (failed.length === 0) {
-    return [
-      `✅ Cue healthcheck passed — ${todayEt} ${timeEt} ET`,
-      ...passedOrSkipped.map(bullet),
-    ].join("\n");
+    const header =
+      warned.length > 0
+        ? `⚠️ Cue healthcheck passed with warnings — ${todayEt} ${timeEt} ET`
+        : `✅ Cue healthcheck passed — ${todayEt} ${timeEt} ET`;
+    const lines = [header];
+    if (warned.length > 0) {
+      lines.push("WARNINGS:", ...warned.map(bullet));
+    }
+    lines.push(...passedOrSkipped.map(bullet));
+    return lines.join("\n");
   }
 
-  return [
+  const lines = [
     `⚠️ Cue healthcheck FAILED — ${todayEt} ${timeEt} ET`,
     "FAILED:",
     ...failed.map(bullet),
-    "PASSED:",
-    ...passedOrSkipped.map(bullet),
-  ].join("\n");
+  ];
+  if (warned.length > 0) {
+    lines.push("WARNINGS:", ...warned.map(bullet));
+  }
+  lines.push("PASSED:", ...passedOrSkipped.map(bullet));
+  return lines.join("\n");
 }
 
 async function defaultSendTelegram(text: string, config: AppConfig): Promise<void> {
@@ -261,6 +380,8 @@ export async function runHealthcheck(
 
   const results: CheckResult[] = [
     checkDailyPricesCurrency(db, now),
+    checkQqqLag(db, now),
+    checkStalePositions(db, now),
     checkPipelineRanToday(db, now),
     checkPm2Logs(logPath, now, deps.readLogTail, logger),
   ];

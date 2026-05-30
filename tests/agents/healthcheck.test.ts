@@ -6,7 +6,12 @@ import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import winston from "winston";
 
-import { checkPm2Logs, runHealthcheck } from "../../src/agents/healthcheck.js";
+import {
+  checkPm2Logs,
+  checkQqqLag,
+  checkStalePositions,
+  runHealthcheck,
+} from "../../src/agents/healthcheck.js";
 import type { AppConfig } from "../../src/config/index.js";
 import { insertDailyPrices, insertPosition, insertSignal } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
@@ -36,10 +41,11 @@ function silentLogger(): winston.Logger {
   return winston.createLogger({ silent: true });
 }
 
-function seedDailyPrices(db: SqliteConnection, sessionDate: string): void {
-  insertDailyPrices(db, "QQQ", [
-    { date: sessionDate, open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 },
-  ]);
+function seedDailyPrices(db: SqliteConnection, sessionDate: string, tickers: string[] = ["QQQ"]): void {
+  const bar = { date: sessionDate, open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 };
+  for (const ticker of tickers) {
+    insertDailyPrices(db, ticker, [bar]);
+  }
 }
 
 describe("runHealthcheck", () => {
@@ -133,7 +139,8 @@ describe("runHealthcheck", () => {
   it("fails when recent error-level log lines are present", async () => {
     const db = openMemoryDb();
     const now = MONDAY_HEALTHCHECK;
-    seedDailyPrices(db, resolveLastETSession(now));
+    const session = resolveLastETSession(now);
+    seedDailyPrices(db, session, ["QQQ", "AAPL"]);
     insertSignal(db, {
       ticker: "AAPL",
       date: "2026-01-02",
@@ -175,7 +182,8 @@ describe("runHealthcheck", () => {
   it("skips missing log file without failing overall", async () => {
     const db = openMemoryDb();
     const now = MONDAY_HEALTHCHECK;
-    seedDailyPrices(db, resolveLastETSession(now));
+    const session = resolveLastETSession(now);
+    seedDailyPrices(db, session, ["QQQ", "AAPL"]);
     insertSignal(db, {
       ticker: "AAPL",
       date: "2026-01-02",
@@ -213,7 +221,8 @@ describe("runHealthcheck", () => {
   it("returns 1 when Telegram delivery fails", async () => {
     const db = openMemoryDb();
     const now = MONDAY_HEALTHCHECK;
-    seedDailyPrices(db, resolveLastETSession(now));
+    const session = resolveLastETSession(now);
+    seedDailyPrices(db, session, ["QQQ", "AAPL"]);
     insertSignal(db, {
       ticker: "AAPL",
       date: "2026-01-02",
@@ -254,5 +263,67 @@ describe("checkPm2Logs", () => {
     const missing = path.join(os.tmpdir(), `cue-healthcheck-skip-${process.pid}.log`);
     const result = checkPm2Logs(missing, new Date());
     expect(result.status).toBe("SKIP");
+  });
+});
+
+describe("checkStalePositions", () => {
+  it("fails when OPEN position has no recent daily_prices bar", () => {
+    const db = openMemoryDb();
+    const now = MONDAY_HEALTHCHECK;
+    const session = resolveLastETSession(now);
+    seedDailyPrices(db, session, ["QQQ"]);
+    insertSignal(db, {
+      ticker: "AAPL",
+      date: "2026-01-02",
+      signal: "BUY",
+      price: 100,
+      momentumRank: 1,
+      universeRankedCount: 50,
+      momentum12_1Return: 0.1,
+      atr14: 2,
+      initialAtrStop: 90,
+    });
+    const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
+    insertPosition(db, {
+      signalId,
+      entryDate: "2026-01-02",
+      entryPrice: 100,
+      status: "OPEN",
+    });
+
+    const result = checkStalePositions(db, now);
+    expect(result.status).toBe("FAIL");
+    expect(result.message).toContain("AAPL");
+    db.close();
+  });
+});
+
+describe("checkQqqLag", () => {
+  it("warns when QQQ is exactly one session behind expected", () => {
+    const db = openMemoryDb();
+    const now = MONDAY_HEALTHCHECK;
+    const expected = resolveLastETSession(now);
+    const [y, m, d] = expected.split("-").map(Number);
+    const prior = resolveLastETSession(new Date(Date.UTC(y!, m! - 1, d!, 20, 0, 0)));
+    insertDailyPrices(db, "QQQ", [
+      { date: prior, open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 },
+    ]);
+
+    const result = checkQqqLag(db, now);
+    expect(result.status).toBe("WARN");
+    expect(result.message).toContain("1 session");
+    expect(prior).not.toBe(expected);
+    db.close();
+  });
+
+  it("fails when QQQ is more than one session behind expected", () => {
+    const db = openMemoryDb();
+    const now = MONDAY_HEALTHCHECK;
+    seedDailyPrices(db, "2020-01-02");
+
+    const result = checkQqqLag(db, now);
+    expect(result.status).toBe("FAIL");
+    expect(result.message).toContain("materially behind");
+    db.close();
   });
 });
