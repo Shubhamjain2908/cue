@@ -780,6 +780,8 @@ function persistBacktestArtifacts(
   to: string,
   result: RunBacktestResult,
   strategy: string,
+  windowLabel?: string,
+  locked = 0,
 ): { runId: bigint; tradesInserted: number } {
   const expectancyPctPerTrade = mean(
     result.closedTrades.map((t) =>
@@ -801,6 +803,8 @@ function persistBacktestArtifacts(
     benchmarkCagr: realOrZero(result.benchmarkCagrPct),
     expectancy: realOrZero(expectancyPctPerTrade),
     strategy,
+    windowLabel,
+    locked,
   });
 
   let tradesInserted = 0;
