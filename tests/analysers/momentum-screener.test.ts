@@ -211,6 +211,10 @@ describe("runLiveScreen WATCHLIST bench", () => {
   });
 });
 
+// position_notes: no automated write path yet — REFRESH_THESIS inserts land in P7-F once
+// runRefreshCli clears the 15+ genuine-closed-trades gate. Table exists (011); stop-mode
+// coverage above is the P7-H audit path only.
+
 describe("runLiveScreen stop mode", () => {
   beforeEach(() => {
     envBase();
