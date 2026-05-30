@@ -47,7 +47,7 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 
 - **Universe:** tickers from `data/universe/nasdaq100.json` (resolved via env **`UNIVERSE`**, default `nasdaq100`) plus **`data/universe/_meta.json`** for human-readable as-of / count checks; **QQQ** added at runtime for regime / ingest (see `_meta.json` → `system_additions`).
 - **Entry:** top **3** names by momentum rank on rebalance.
-- **Rebalance cadence:** **Friday** EOD in ET civil calendar (`REBALANCE_DAY_OF_WEEK = 5` in `daily-workflow.ts`).
+- **Rebalance cadence:** **Saturday morning** ET (`REBALANCE_DAY_OF_WEEK = 6` in `daily-workflow.ts`) using **Friday** session OHLCV (Massive availability); **Mon–Fri** runs **execute-stops** at **16:05–16:15 ET**.
 - **Regime filter:** **QQQ close > SMA(200)**. If false → **suppress new BUYs**; SELL / stop paths still run.
 
 ### 3.2 ATR trailing stop (close-based)
@@ -86,9 +86,9 @@ The **architecture v1** doc describes modes as `fetch → screen → …`. In **
 
 | Mechanism | Source | When used | Steps (subprocess = `pnpm run cue -- …`) |
 |---|---|---|---|
-| **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: Friday → **`rebalance`**: ingest → **adjust-splits** → screen → enrich → brief; else **`stop`**: ingest → **adjust-splits** → **execute-stops** → brief. |
-| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **ET window 16:05–16:15**, **`America/New_York`**, once per ET calendar day, **`isRunning`** + **`LOCK_PATH`** PID lock. **Friday:** ingest → **adjust-splits** → enrich-fundamentals → screen → enrich → brief. **Mon–Thu:** ingest → **adjust-splits** → execute-stops → brief. **Sat/Sun:** no chain. |
-| **Healthcheck cron** | `src/agents/healthcheck.ts` | `pnpm run cue -- healthcheck`; PM2 **`cue-healthcheck`** | **~17:00 ET** (45m after window); verifies `daily_prices`, pipeline output, PM2 error log; Telegram ✅/⚠️. |
+| **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: **Saturday** → **`rebalance`**; **Mon–Fri** → **`stop`**. Manual `--force-rebalance` overrides any day. |
+| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **Sat 09:05–09:15 ET** rebalance; **Mon–Fri 16:05–16:15 ET** stops; **Sunday** idle. Saturday: ingest → adjust-splits → enrich-fundamentals → screen → enrich → brief. Mon–Fri: ingest → adjust-splits → execute-stops → brief. |
+| **Healthcheck cron** | `src/agents/healthcheck.ts` | `pnpm run cue -- healthcheck`; PM2 **`cue-healthcheck`** + **`cue-healthcheck-sat`** | **~17:00 ET** Mon–Fri; **~10:00 ET** Saturday (UTC host cron in ecosystem). |
 
 `pnpmRunArgs` / `resolvedForwardArgs` add **`--force-rebalance`** to **screen** when pipeline mode is `rebalance`, and **`--mode`** to **brief**.
 
@@ -110,12 +110,12 @@ interface PipelineStep {
 ### 4.4 Scheduler tick sequence (`scheduler.ts`)
 
 1. Resolve ET civil **date** / **time** via `Intl.DateTimeFormat` using **`CUE_LOCALE`** + **`CUE_TIME_ZONE`** from `src/config/cue-timezone.ts`.
-2. If outside **16:05–16:15** ET → return.
+2. If outside the ET execution window (**Sat 09:05–09:15**, **Mon–Fri 16:05–16:15**) → return.
 3. If **`lastRunDate`** already recorded success for this ET **YYYY-MM-DD** → return.
-4. If **weekend** (NY weekday 0 or 6) → return (debug log).
+4. If **Sunday** (NY weekday 0) → return (debug log).
 5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines in one process).
 6. If **`LOCK_PATH`** is held by a **live** PID (`process.kill(pid, 0)`) → warn and return; else acquire PID lock (unlink stale file if PID is dead).
-7. Else run **`runPipelineWithSteps`** for Friday vs Mon–Thu lists; on exit code **0**, set **`lastRunDate`**; always clear **`isRunning`** and release **`LOCK_PATH`** in a `finally` block.
+7. Else run **`runPipelineWithSteps`** for Saturday rebalance vs Mon–Fri stop lists; on exit code **0**, set **`lastRunDate`**; always clear **`isRunning`** and release **`LOCK_PATH`** in a `finally` block.
 
 **Startup / shutdown:** readonly DB **`SELECT 1`** for health; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 

@@ -14,7 +14,7 @@ not be bypassed without an explicit gate override (documented in
 | **Regime gate — BUY suppression** | If QQQ close < SMA(200): suppress all new BUY signals. SELL and stop evaluation run unconditionally. | `src/analysers/momentum-screener.ts` |
 | **Top-N hard cap** | At most **3** momentum BUY entries per rebalance pass (`topN = 3` contract). | `src/analysers/momentum-screener.ts` (portfolio cap also tied to `MAX_POSITIONS` in config) |
 | **Watchlist bench — no positions** | Ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` persist as `signals.signal = WATCHLIST` on rebalance only; **no** `positions` insert. Depth `0` disables bench end-to-end. | `momentum-screener.ts`, `WATCHLIST_BENCH_DEPTH` in `src/config/index.ts` |
-| **Rebalance vs stop** | Full **BUY** ranking on **`rebalance`** / Friday scheduler path; **stop** path runs maintenance (`execute-stops`) without Friday-style screen. | `src/agents/scheduler.ts`, `src/agents/daily-workflow.ts` (`detectRunMode`) |
+| **Rebalance vs stop** | Full **BUY** ranking on **`rebalance`** / **Saturday** scheduler path (09:05–09:15 ET); **Mon–Fri** runs **`execute-stops`** (16:05–16:15 ET), including Friday. | `src/agents/scheduler.ts`, `src/agents/daily-workflow.ts` (`detectRunMode`) |
 | **Split adjustment before evaluation** | `adjust-splits` runs after **ingest**, before **screen** / **execute-stops**. Non-critical — Yahoo failure must not abort stop evaluation. | `corporate-actions.ts`, `daily-workflow.ts`, `scheduler.ts` |
 | **Locked backtest reference** | Dashboard / briefing backtest metrics use latest **`MOMENTUM` + `locked = 1`** run, not newest `run_date`. New backtests default **unlocked**. | `briefing/queries.ts`, migration `009` |
 | **Live performance scope** | Dashboard live P&amp;L aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')`. Rotation drops must not inflate closed-trade counts or show 0% win-rate noise. | `briefing/queries.ts` |
@@ -64,7 +64,7 @@ not be bypassed without an explicit gate override (documented in
 | **Post-pipeline healthcheck** | `cue healthcheck` is independent of the 16:05–16:15 chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. | `src/agents/healthcheck.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window. | `src/agents/scheduler.ts` (`lastRunDate`) |
 | **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
-| **Mode / flag orthogonality** | `--force-rebalance` vs calendar Friday; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
+| **Mode / flag orthogonality** | `--force-rebalance` vs calendar **Saturday**; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
 
 ---
 

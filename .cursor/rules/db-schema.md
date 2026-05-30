@@ -187,7 +187,7 @@ Migrations **001**–**003**, **005**–**009** rely on PK/UNIQUE only (no extra
 **`cue healthcheck`** (`src/agents/healthcheck.ts`) verifies operational state after the **16:05–16:15 ET** scheduler window — typically via PM2 cron **`cue-healthcheck`** at **17:00 ET** (see `deploy/ecosystem.config.cjs`). Checks:
 
 1. **`daily_prices` currency** — `MAX(date)` vs `resolveLastETSession()` (same session rule as `cue ingest`).
-2. **Pipeline output** — Friday: `signals` rows for today’s ET date; Mon–Thu: OPEN positions and/or non-`REBALANCE_DROP` closes today.
+2. **Pipeline output** — **Saturday** rebalance: `signals` rows for today’s ET date; **Mon–Fri**: OPEN positions and/or non-`REBALANCE_DROP` closes today.
 3. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in the last 90 minutes; **SKIP** if the log file is missing.
 
 Results are sent via **`TELEGRAM_BOT_TOKEN`** / **`TELEGRAM_CHAT_ID`** (no separate alerts table).
