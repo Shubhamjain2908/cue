@@ -7,7 +7,11 @@ import { z } from "zod";
 
 import { getConfig } from "../config/index.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
-import { markSignalAlerted } from "../db/queries.js";
+import {
+  listWatchlistSignalsForBriefing,
+  markSignalAlerted,
+  markWatchlistSignalsAlerted,
+} from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
 import {
   computeNextRebalanceFriday,
@@ -17,6 +21,7 @@ import {
   resolvePulseAsOfDate,
   type BuyAlertPendingRow,
 } from "./queries.js";
+import { formatWatchlistBench } from "./template.js";
 
 const isMain =
   path.resolve(fileURLToPath(import.meta.url)) ===
@@ -200,6 +205,28 @@ export function formatDailyPulseMessage(opts: {
   return text;
 }
 
+export async function sendWatchlistBenchAlerts(
+  db: CueDatabase,
+  asOf: string,
+): Promise<void> {
+  const { WATCHLIST_BENCH_DEPTH } = getConfig();
+  if (WATCHLIST_BENCH_DEPTH <= 0) {
+    return;
+  }
+  const rows = listWatchlistSignalsForBriefing(db, asOf, WATCHLIST_BENCH_DEPTH);
+  if (rows.length === 0) {
+    logger.info("No WATCHLIST signals pending bench alert.");
+    return;
+  }
+  const text = formatWatchlistBench(rows, asOf);
+  await sendTelegramMessage(text);
+  markWatchlistSignalsAlerted(
+    db,
+    rows.map((r) => r.id),
+  );
+  logger.info(`Watchlist bench sent (asOf=${asOf}, count=${rows.length})`);
+}
+
 export async function sendDailyPulse(db: CueDatabase): Promise<void> {
   const asOf = resolvePulseAsOfDate(db);
   if (asOf === null) {
@@ -299,16 +326,27 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
     const pending = listBuySignalsReadyToAlert(db);
     if (pending.length === 0) {
       logger.info("No BUY signals pending alert (enriched + not alerted).");
-      return;
+    } else {
+      for (const row of pending) {
+        const text = formatTelegramAlert(row);
+        try {
+          await sendTelegramMessage(text);
+          markSignalAlerted(db, row.id);
+          logger.info(`Alert sent for ${row.ticker} (${row.id})`);
+        } catch (e) {
+          logger.error(`Alert failed for ${row.ticker} (${row.id}): ${String(e)}`);
+        }
+      }
     }
-    for (const row of pending) {
-      const text = formatTelegramAlert(row);
+
+    const asOf = resolvePulseAsOfDate(db);
+    if (asOf === null) {
+      logger.warn("Watchlist bench skipped — no QQQ as-of date in daily_prices");
+    } else if (config.WATCHLIST_BENCH_DEPTH > 0) {
       try {
-        await sendTelegramMessage(text);
-        markSignalAlerted(db, row.id);
-        logger.info(`Alert sent for ${row.ticker} (${row.id})`);
+        await sendWatchlistBenchAlerts(db, asOf);
       } catch (e) {
-        logger.error(`Alert failed for ${row.ticker} (${row.id}): ${String(e)}`);
+        logger.error(`Watchlist bench failed: ${String(e)}`);
       }
     }
   } finally {
