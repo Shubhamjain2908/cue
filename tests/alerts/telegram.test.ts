@@ -51,30 +51,172 @@ describe("parseAlertModeFromArgv", () => {
 });
 
 describe("formatWatchlistBench", () => {
-  it("formats bench lines with sentiment and sector", () => {
+  it("formats enriched bench with confidence, earnings, and rationale", () => {
     const text = formatWatchlistBench(
       [
         {
           id: 1,
-          ticker: "MU",
+          ticker: "AMD",
           momentumRank: 4,
-          price: 100,
+          price: 172.34,
           atr14: 2,
-          momentum12_1Return: 0.89,
+          momentum12_1Return: 2.03,
+          sentiment: "bullish",
+          confidence: "HIGH",
+          sector: "Technology",
+          rationale:
+            "AI accelerator demand recovery; analyst upgrades on data centre GPU attach rate.",
+          earningsFlag: 1,
+          earningsDate: "2026-07-29",
+        },
+      ],
+      "2026-05-29",
+    );
+    expect(text).toContain("📊 Next in Rank — 2026-05-29");
+    expect(text).toContain("#4  AMD");
+    expect(text).toContain("$172.34");
+    expect(text).toContain("12-1: 2.03");
+    expect(text).toContain("BULLISH HIGH");
+    expect(text).toContain("| Technology | Earnings: 2026-07-29");
+    expect(text).toContain("AI accelerator demand recovery");
+    expect(text).toContain("not an entry signal");
+  });
+
+  it("omits rationale line when null and shows no earnings near", () => {
+    const text = formatWatchlistBench(
+      [
+        {
+          id: 2,
+          ticker: "MRVL",
+          momentumRank: 5,
+          price: 98.12,
+          atr14: 1,
+          momentum12_1Return: 1.61,
           sentiment: "bullish",
           confidence: "HIGH",
           sector: "Technology",
           rationale: null,
+          earningsFlag: 0,
+          earningsDate: null,
         },
       ],
-      "2026-05-30",
+      "2026-05-29",
     );
-    expect(text).toContain("📊 Next in Rank — 2026-05-30");
-    expect(text).toContain("#4  MU");
-    expect(text).toContain("12-1: 0.89");
-    expect(text).toContain("BULLISH");
-    expect(text).toContain("Technology");
-    expect(text).toContain("not an entry signal");
+    expect(text).toContain("BULLISH HIGH");
+    expect(text).toContain("No earnings near");
+    expect(text).not.toMatch(/\n  [^\n]+/);
+  });
+
+  it("skips boilerplate opening sentence and uses the next one", () => {
+    const text = formatWatchlistBench(
+      [
+        {
+          id: 3,
+          ticker: "AMD",
+          momentumRank: 4,
+          price: 172.34,
+          atr14: 1,
+          momentum12_1Return: 2.03,
+          sentiment: "bullish",
+          confidence: "HIGH",
+          sector: "Technology",
+          rationale:
+            "The sentiment for AMD is bullish, driven by several highly positive news headlines. Custom silicon wins are accelerating design-ins.",
+          earningsFlag: 0,
+          earningsDate: null,
+        },
+      ],
+      "2026-05-29",
+    );
+    expect(text).toContain("Custom silicon wins");
+    expect(text).not.toContain("The sentiment for AMD");
+  });
+
+  it("truncates long rationale at a word boundary", () => {
+    const long =
+      "Semiconductor capex cycle recovery continues with leading wafer fab equipment exposure and margin expansion across memory and logic.";
+    const text = formatWatchlistBench(
+      [
+        {
+          id: 3,
+          ticker: "AMAT",
+          momentumRank: 6,
+          price: 187.45,
+          atr14: 1,
+          momentum12_1Return: 1.57,
+          sentiment: "bullish",
+          confidence: "HIGH",
+          sector: "Technology",
+          rationale: long,
+          earningsFlag: 1,
+          earningsDate: "2026-08-14",
+        },
+      ],
+      "2026-05-29",
+    );
+    expect(text).toContain("…");
+    expect(text).not.toContain("memory and logic");
+  });
+
+  it("aligns price column for wide tickers and large prices", () => {
+    const text = formatWatchlistBench(
+      [
+        {
+          id: 7,
+          ticker: "KLAC",
+          momentumRank: 7,
+          price: 1921.71,
+          atr14: 1,
+          momentum12_1Return: 1.51,
+          sentiment: "bullish",
+          confidence: "MEDIUM",
+          sector: "Technology",
+          rationale: null,
+          earningsFlag: 0,
+          earningsDate: null,
+        },
+        {
+          id: 8,
+          ticker: "GOOGL",
+          momentumRank: 8,
+          price: 380.34,
+          atr14: 1,
+          momentum12_1Return: 1.08,
+          sentiment: "bullish",
+          confidence: "HIGH",
+          sector: "Communication Services",
+          rationale: null,
+          earningsFlag: 0,
+          earningsDate: null,
+        },
+      ],
+      "2026-05-29",
+    );
+    expect(text).toMatch(/#7\s+KLAC\s+\$1921\.71/);
+    expect(text).toMatch(/#8\s+GOOGL\s+\$380\.34/);
+  });
+
+  it("abbreviates Communication Services sector label", () => {
+    const text = formatWatchlistBench(
+      [
+        {
+          id: 4,
+          ticker: "GOOGL",
+          momentumRank: 8,
+          price: 397.86,
+          atr14: 1,
+          momentum12_1Return: 1.08,
+          sentiment: "bullish",
+          confidence: "HIGH",
+          sector: "Communication Services",
+          rationale: "Cloud re-acceleration.",
+          earningsFlag: 1,
+          earningsDate: "2026-07-23",
+        },
+      ],
+      "2026-05-29",
+    );
+    expect(text).toContain("Comm. Services");
   });
 });
 

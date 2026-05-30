@@ -1,19 +1,105 @@
 import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
-import type { WatchlistBriefingRow } from "../db/queries.js";
-import type { DashboardPayload } from "./queries.js";
+import type { DashboardPayload, WatchlistBriefingRow } from "./queries.js";
 
 const TG_MAX = 4096;
+/** One substantive sentence for bench context (Telegram readability). */
+const WATCHLIST_RATIONALE_MAX = 90;
+const TICKER_COL_WIDTH = 5;
+const PRICE_COL_WIDTH = 9;
+
+const SECTOR_LABEL: Record<string, string> = {
+  "Communication Services": "Comm. Services",
+};
+
+const RATIONALE_BOILERPLATE_RE = /^The sentiment for\b/i;
+
+function formatWatchlistSector(sector: string | null): string {
+  if (sector === null || sector.length === 0) {
+    return "—";
+  }
+  return SECTOR_LABEL[sector] ?? sector;
+}
+
+function formatSentimentWithConfidence(
+  sentiment: string | null,
+  confidence: string | null,
+): string {
+  if (sentiment === null || sentiment.length === 0) {
+    return "—";
+  }
+  const s = sentiment.toUpperCase();
+  if (confidence === null || confidence.length === 0) {
+    return s;
+  }
+  return `${s} ${confidence.toUpperCase()}`;
+}
+
+function formatWatchlistEarnings(earningsFlag: number | null, earningsDate: string | null): string {
+  if (earningsFlag === 1 && earningsDate !== null && earningsDate.length > 0) {
+    return `Earnings: ${earningsDate}`;
+  }
+  return "No earnings near";
+}
+
+function splitSentences(text: string): string[] {
+  return text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [text];
+}
+
+function truncateAtWord(text: string, maxLen: number): string {
+  if (text.length <= maxLen) {
+    return text;
+  }
+  const cut = text.slice(0, maxLen);
+  const wordEnd = cut.lastIndexOf(" ");
+  const base = wordEnd > maxLen * 0.5 ? cut.slice(0, wordEnd) : cut;
+  return `${base.trim()}…`;
+}
+
+/** First non-boilerplate sentence, word-safe cap (avoids mid-word LLM chops). */
+export function formatWatchlistRationale(rationale: string | null): string | null {
+  if (rationale === null) {
+    return null;
+  }
+  const trimmed = rationale.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const sentences = splitSentences(trimmed);
+  const picked =
+    sentences.map((s) => s.trim()).find((s) => s.length > 0 && !RATIONALE_BOILERPLATE_RE.test(s)) ??
+    sentences[0]?.trim() ??
+    "";
+  if (picked.length === 0) {
+    return null;
+  }
+
+  return truncateAtWord(picked, WATCHLIST_RATIONALE_MAX);
+}
+
+function formatWatchlistHeadLine(row: WatchlistBriefingRow): string {
+  const ticker = row.ticker.padEnd(TICKER_COL_WIDTH).slice(0, TICKER_COL_WIDTH);
+  const price = `$${row.price.toFixed(2)}`.padStart(PRICE_COL_WIDTH);
+  const mom = row.momentum12_1Return.toFixed(2);
+  const sentiment = formatSentimentWithConfidence(row.sentiment, row.confidence);
+  const sector = formatWatchlistSector(row.sector);
+  const earnings = formatWatchlistEarnings(row.earningsFlag, row.earningsDate);
+  return `#${row.momentumRank}  ${ticker} ${price}  12-1: ${mom}  ${sentiment} | ${sector} | ${earnings}`;
+}
 
 /** Telegram "Next in Rank" bench — read-only context, not an entry signal. */
 export function formatWatchlistBench(rows: readonly WatchlistBriefingRow[], asOf: string): string {
   const lines = [`📊 Next in Rank — ${asOf}`, ""];
   for (const row of rows) {
-    const rank = row.momentumRank;
-    const ticker = row.ticker.padEnd(6, " ").slice(0, 6);
-    const mom = row.momentum12_1Return.toFixed(2);
-    const sentiment = row.sentiment?.toUpperCase() ?? "—";
-    const sector = row.sector ?? "—";
-    lines.push(`#${rank}  ${ticker}  12-1: ${mom}  ${sentiment}   ${sector}`);
+    lines.push(formatWatchlistHeadLine(row));
+    const rationale = formatWatchlistRationale(row.rationale);
+    if (rationale !== null) {
+      lines.push(`  ${rationale}`);
+    }
+    lines.push("");
+  }
+  if (lines.length > 2 && lines[lines.length - 1] === "") {
+    lines.pop();
   }
   lines.push("", "ⓘ Watch context only — not an entry signal");
   let text = lines.join("\n");

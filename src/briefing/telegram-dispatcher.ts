@@ -7,17 +7,14 @@ import { z } from "zod";
 
 import { getConfig } from "../config/index.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
-import {
-  listWatchlistSignalsForBriefing,
-  markSignalAlerted,
-  markWatchlistSignalsAlerted,
-} from "../db/queries.js";
+import { markSignalAlerted, markWatchlistSignalsAlerted } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
 import {
   computeNextRebalanceFriday,
   getOpenPositionsWithLastClose,
   getRegimeLabel,
   listBuySignalsReadyToAlert,
+  listWatchlistSignalsForBriefing,
   resolvePulseAsOfDate,
   type BuyAlertPendingRow,
 } from "./queries.js";

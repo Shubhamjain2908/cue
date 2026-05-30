@@ -148,6 +148,56 @@ export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[
   return stmt.all() as BuyAlertPendingRow[];
 }
 
+/** WATCHLIST bench row for Telegram "Next in Rank" message. */
+export interface WatchlistBriefingRow {
+  id: number;
+  ticker: string;
+  momentumRank: number;
+  price: number;
+  atr14: number | null;
+  momentum12_1Return: number;
+  sentiment: string | null;
+  confidence: string | null;
+  sector: string | null;
+  rationale: string | null;
+  earningsFlag: number | null;
+  earningsDate: string | null;
+}
+
+/** Unalerted WATCHLIST rows for session `asOf`, with optional enrichment join. */
+export function listWatchlistSignalsForBriefing(
+  db: CueDatabase,
+  asOf: string,
+  limit: number,
+): WatchlistBriefingRow[] {
+  if (limit <= 0) {
+    return [];
+  }
+  const stmt = db.prepare(`
+    SELECT
+      s.id AS id,
+      s.ticker AS ticker,
+      s.momentum_rank AS momentumRank,
+      s.price AS price,
+      s.atr14 AS atr14,
+      s.momentum_12_1_return AS momentum12_1Return,
+      e.sentiment AS sentiment,
+      e.confidence AS confidence,
+      e.sector AS sector,
+      e.rationale AS rationale,
+      e.earnings_flag AS earningsFlag,
+      e.earnings_date AS earningsDate
+    FROM signals s
+    LEFT JOIN enrichments e ON e.signal_id = s.id
+    WHERE s.signal = 'WATCHLIST'
+      AND s.date = @asOf
+      AND s.alerted = 0
+    ORDER BY s.momentum_rank ASC
+    LIMIT @limit
+  `);
+  return stmt.all({ asOf, limit }) as WatchlistBriefingRow[];
+}
+
 export interface OpenPosition {
   ticker: string;
   entry_date: string;
