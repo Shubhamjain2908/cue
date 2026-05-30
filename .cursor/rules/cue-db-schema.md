@@ -20,8 +20,10 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `007_backtest_runs_strategy` | `backtest_runs.strategy`; backfill by id: **73, 74** → `MOMENTUM`; **75–79** → `GARP_RESEARCH`; remaining rows → `SWEEP` |
 | `008_corporate_actions` | `corporate_actions` (splits / reverse splits) |
 | `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked`; backfill locks bull-window runs **73, 74** (`2023-2025 (bull)`), labels extended run **80** (`2022-2025 (extended)`, unlocked) |
+| `010_pipeline_state` | `pipeline_state` — scheduler idempotency key/value store |
+| `011_position_audit` | `stop_movements` (trailing-stop audit log), `position_notes` (thesis snapshots); FK → `positions.id` **without** `ON DELETE CASCADE` (immutable ledger) |
 
-**Next migration:** `010`
+**Next migration:** `012`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
@@ -134,6 +136,50 @@ Open and closed book from **BUY** signals only (not WATCHLIST).
 
 **Dashboard Live Performance** (`src/briefing/queries.ts`): closed-position aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')` so rotation drops do not appear as strategy P&amp;L. Zero-state copy uses **`formatBacktestRef`** from the locked momentum backtest row (see `backtest_runs` below).
 
+### `stop_movements`
+
+Append-only audit log for every trailing-stop ladder mutation during **`cue execute-stops`** (`011_position_audit`).
+
+| Column | Notes |
+|--------|--------|
+| `position_id` | FK → `positions.id` — **no** `ON DELETE CASCADE` (immutable ledger) |
+| `as_of_date` | ISO `YYYY-MM-DD` — session date of evaluation |
+| `previous_stop`, `new_stop` | `current_stop_loss` before / after |
+| `previous_high`, `new_high` | `highest_close_since_entry` before / after |
+| `stop_regime` | CHECK IN (`BASE`, `TIGHT`) — 4.0× vs 1.5× ATR multiplier |
+| `close_price`, `atr14` | Bar close and ATR(14) used for evaluation |
+| `recorded_at` | Default `CURRENT_TIMESTAMP` |
+
+**UNIQUE** `(position_id, as_of_date)` — idempotent `INSERT OR IGNORE`. Rows written only when stop or high-water mark actually changes (no no-op evaluations).
+
+**Written by:** `insertStopMovement()` in `src/db/queries.ts`; called from `momentum-screener.ts` stop-mode path.
+
+### `position_notes`
+
+Operator or LLM thesis snapshots attached to a position (`011_position_audit`).
+
+| Column | Notes |
+|--------|--------|
+| `position_id` | FK → `positions.id` — **no** `ON DELETE CASCADE` |
+| `note_type` | CHECK IN (`ENTRY_THESIS`, `REFRESH_THESIS`, `OPERATOR_NOTE`) |
+| `content` | LLM rationale or operator freetext |
+| `as_of_date` | ISO `YYYY-MM-DD` |
+| `recorded_at` | Default `CURRENT_TIMESTAMP` |
+
+**Written by:** manual inserts today; future **`cue refresh-thesis`** (P7-F, gated on 15+ genuine closed trades).
+
+### `pipeline_state`
+
+Scheduler idempotency key/value store (`010_pipeline_state`).
+
+| Column | Notes |
+|--------|--------|
+| `key` | TEXT PK |
+| `value` | TEXT |
+| `updated_at` | Default `CURRENT_TIMESTAMP` |
+
+**Written by:** `setPipelineState()` / read by `getPipelineState()` in `src/db/queries.ts` (e.g. scheduler `last_successful_run_date`).
+
 ---
 
 ## Fundamentals (Phase 4+)
@@ -205,9 +251,12 @@ Results are sent via **`TELEGRAM_BOT_TOKEN`** / **`TELEGRAM_CHAT_ID`** (no separ
 ```
 signals 1──* enrichments   (BUY and WATCHLIST signal_ids)
 signals 1──* positions     (BUY only)
+positions 1──* stop_movements   (append-only; no CASCADE delete)
+positions 1──* position_notes   (append-only; no CASCADE delete)
 daily_prices (ticker, date)
 corporate_actions (ticker, ex_date)
 backtest_runs 1──* backtest_trades
+pipeline_state (key → value)
 ```
 
 ---
