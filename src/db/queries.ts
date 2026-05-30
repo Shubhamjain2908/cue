@@ -348,19 +348,23 @@ export function insertPosition(
 
 export type BacktestTradeExitReasonDb = "TRAILING_STOP" | "INITIAL_STOP" | "TIME_EXIT" | "MANUAL";
 
+/** Live `positions.exit_reason` — includes rotation drops not stored on `backtest_trades`. */
+export type PositionExitReasonDb = BacktestTradeExitReasonDb | "REBALANCE_DROP";
+
 export type LiveStrategyExitReason =
   | "TRAILING_STOP"
   | "MAX_HOLD"
   | "REBALANCE_DROP"
   | "FORCED_CLOSE";
 
-export function mapLiveExitReason(reason: LiveStrategyExitReason): BacktestTradeExitReasonDb {
+export function mapLiveExitReason(reason: LiveStrategyExitReason): PositionExitReasonDb {
   switch (reason) {
     case "TRAILING_STOP":
       return "TRAILING_STOP";
     case "MAX_HOLD":
       return "TIME_EXIT";
     case "REBALANCE_DROP":
+      return "REBALANCE_DROP";
     case "FORCED_CLOSE":
       return "MANUAL";
   }
@@ -371,7 +375,7 @@ export function closePosition(
   positionId: number,
   exitDate: string,
   exitPrice: number,
-  exitReason: BacktestTradeExitReasonDb,
+  exitReason: PositionExitReasonDb,
 ): void {
   if (exitPrice == null || exitPrice <= 0 || Number.isNaN(exitPrice)) {
     cueLogger.error(
