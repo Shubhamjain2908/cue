@@ -26,6 +26,8 @@ const baseEnvSchema = z.object({
   CACHE_DIR: z.string().default("./data/cache"),
   UNIVERSE: z.string().default("nasdaq100"),
   MAX_POSITIONS: z.coerce.number().int().positive().default(5),
+  /** Friday rebalance bench depth (ranks topN+1 … topN+depth); 0 disables WATCHLIST rows and bench alert. */
+  WATCHLIST_BENCH_DEPTH: z.coerce.number().int().min(0).max(10).default(5),
   POSITION_SIZE_USD: z.coerce.number().positive().default(400),
   /** Total portfolio notional for ATR-normalized BUY alert sizing (optional). */
   PORTFOLIO_VALUE_USD: z.coerce.number().positive().optional(),
