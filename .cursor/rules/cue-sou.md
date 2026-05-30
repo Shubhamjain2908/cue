@@ -1,8 +1,8 @@
 # Cue — Project specification (engineering)
 
-*Living document for this repository. **Do not edit** `spec/cue-sou.md` from here — it is the frozen narrative SoU; this file maps that intent onto **actual paths**, CLI, migrations, and post–Phase 6 behaviour (scheduler, ET constants, `llm-smoke`, registry split, briefing parity, live instrumentation).*
+*Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, and **Phase 7** behaviour (Saturday rebalance, corporate actions, watchlist bench, healthcheck, locked backtest ref).*
 
-**Also read:** root **`README.md`** (operator quickstart + full CLI matrix), **`.cursor/rules/db-schema.md`** (tables + migrations `001`–`009` aligned to applied SQL), **`.cursor/rules/cue-guardrails.md`** (hard rules).
+**Also read:** root **`README.md`** (operator quickstart), **`spec/cue-phase7-complete.md`** (session record), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`009`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
 ---
 
@@ -80,17 +80,22 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 
 All operations: **`pnpm run cue -- <subcommand>`**. Help: **`pnpm run cue -- --help`**. Full matrix: **`README.md`**.
 
-### 4.2 Run modes (registry vs scheduler)
+### 4.2 Pipeline routes (by ET weekday)
 
-The **architecture v1** doc describes modes as `fetch → screen → …`. In **this repo**, the **ingest** step is `cue ingest`, and delivery is **`cue brief`** (dashboard + Telegram). Two orchestration layers exist:
+| Day | Mode | Steps (`pnpm run cue -- …`) |
+|-----|------|-----------------------------|
+| **Friday** | `stop` | ingest → adjust-splits → execute-stops → brief `--mode stop` |
+| **Saturday** | `rebalance` | ingest → adjust-splits → enrich-fundamentals → screen → enrich → brief `--mode rebalance` |
+| **Sunday** | — | skip (no pipeline) |
+| **Mon–Thu** | `stop` | ingest → adjust-splits → execute-stops → brief `--mode stop` |
 
-| Mechanism | Source | When used | Steps (subprocess = `pnpm run cue -- …`) |
-|---|---|---|---|
-| **Registry `PIPELINE_STEPS`** | `src/agents/daily-workflow.ts` | `pnpm run cue -- run-all`, `pnpm run cue -- pipeline --now` | `detectRunMode()`: **Saturday** → **`rebalance`**; **Mon–Fri** → **`stop`**. Manual `--force-rebalance` overrides any day. |
-| **Scheduler daemon** | `src/agents/scheduler.ts` | `pnpm run cue -- schedule`, `pnpm run cue -- pipeline` *(no `--now`)* | **Sat 09:05–09:15 ET** rebalance; **Mon–Fri 16:05–16:15 ET** stops; **Sunday** idle. Saturday: ingest → adjust-splits → enrich-fundamentals → screen → enrich → brief. Mon–Fri: ingest → adjust-splits → execute-stops → brief. |
-| **Healthcheck cron** | `src/agents/healthcheck.ts` | `pnpm run cue -- healthcheck`; PM2 **`cue-healthcheck`** + **`cue-healthcheck-sat`** | **~17:00 ET** Mon–Fri; **~10:00 ET** Saturday (UTC host cron in ecosystem). |
+**Registry** (`daily-workflow.ts`): `detectRunMode()` maps **Saturday** → `rebalance`, **Mon–Fri** → `stop`. **`--force-rebalance`** overrides any day.
 
-`pnpmRunArgs` / `resolvedForwardArgs` add **`--force-rebalance`** to **screen** when pipeline mode is `rebalance`, and **`--mode`** to **brief**.
+**Scheduler** (`scheduler.ts`): runs the same step lists inside ET windows (§4.4).
+
+**Healthcheck** (`healthcheck.ts`): PM2 cron **~17:00 ET** Mon–Fri + **~10:00 ET** Saturday (see `deploy/ecosystem.config.cjs`).
+
+`pnpmRunArgs` / `resolvedForwardArgs` add **`--force-rebalance`** to **screen** when mode is `rebalance`, and **`--mode`** to **brief**.
 
 ### 4.3 Step type (`PipelineStep`)
 
@@ -109,10 +114,18 @@ interface PipelineStep {
 
 ### 4.4 Scheduler tick sequence (`scheduler.ts`)
 
+**Weekend / weekday gate (ET civil calendar, `getETDayOfWeek()`):**
+
+| `dayOfWeek` | Day | Action |
+|-------------|-----|--------|
+| `0` | Sunday | skip |
+| `6` | Saturday | **rebalance** window **09:05–09:15 ET** |
+| `1`–`5` | Mon–Fri | **stop** window **16:05–16:15 ET** |
+
 1. Resolve ET civil **date** / **time** via `Intl.DateTimeFormat` using **`CUE_LOCALE`** + **`CUE_TIME_ZONE`** from `src/config/cue-timezone.ts`.
-2. If outside the ET execution window (**Sat 09:05–09:15**, **Mon–Fri 16:05–16:15**) → return.
+2. If outside the active window for today’s mode → return.
 3. If **`lastRunDate`** already recorded success for this ET **YYYY-MM-DD** → return.
-4. If **Sunday** (NY weekday 0) → return (debug log).
+4. If **Sunday** (`dayOfWeek === 0`) → return (debug log).
 5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines in one process).
 6. If **`LOCK_PATH`** is held by a **live** PID (`process.kill(pid, 0)`) → warn and return; else acquire PID lock (unlink stale file if PID is dead).
 7. Else run **`runPipelineWithSteps`** for Saturday rebalance vs Mon–Fri stop lists; on exit code **0**, set **`lastRunDate`**; always clear **`isRunning`** and release **`LOCK_PATH`** in a `finally` block.
@@ -180,7 +193,7 @@ interface PipelineStep {
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `001`–`009` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/db-schema.md`**.
+- **Applied DDL:** `001`–`009` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/cue-db-schema.md`**.
 - **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`**; `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`).
 - **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (bull window **2023–2025** pinned in `009` backfill); newer unlocked research runs (e.g. extended **2022–2025**) do not displace it.
 - **Split adjustment:** `corporate_actions` idempotency + price-level updates on OPEN book before screen/stops (`cue adjust-splits`).
@@ -189,7 +202,7 @@ interface PipelineStep {
 - **`backtest_trades` exit mapping** (simulator only): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`**. `INITIAL_STOP` reserved in CHECK but not emitted by the current runner.
 - **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`).
 - **Next migration ID:** **`010`**.
-- **Reference:** **`.cursor/rules/db-schema.md`** (repo agent summary tied to applied migrations).
+- **Reference:** **`.cursor/rules/cue-db-schema.md`** (repo agent summary tied to applied migrations).
 
 ---
 
@@ -234,7 +247,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 4 — Infrastructure + universe | Grouped fetcher, lockfile, stop dashboard, full universe, fundamentals wiring, Quality-GARP research (closed) | ✅ Complete |
 | 5 — Alert enrichment + intra-week visibility | Enriched BUY Telegram message, `brief --mode stop` Daily Pulse, S6 writer verification | ✅ Complete |
 | 6 — Live performance instrumentation | Stop proximity warning, ATR position sizer, live expectancy dashboard, positions `pnl_pct` + `exit_reason` (migration 005) | ✅ Complete |
-| 7 — Capital safety & ops | Corporate split adjuster (`008`, `adjust-splits`); locked backtest ref + `window_label` (`009`); post-pipeline **`healthcheck`** + PM2 cron | ✅ P7-C / P7-D shipped |
+| 7 — Bug fixes + capital safety + instrumentation | `REBALANCE_DROP` exit reason; backtest `strategy` discriminator; corporate actions split adjuster; bear backtest extension (Sharpe 0.956 documented); healthcheck cron; watchlist bench #4–#8; **Saturday rebalance** cadence fix | ✅ Complete |
 
 
 ---
@@ -256,26 +269,21 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | — | FIXED (Phase 6)    | No live expectancy visibility on dashboard | ✅ Live Performance section added |
 | — | FIXED (arch S3)    | Scheduler overlap | ✅ **`isRunning`** + **`LOCK_PATH`** in `scheduler.ts`                                                                                             |
 | — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
+| — | BACKTEST | Sharpe 0.956 on 2022–2025 window misses >1.0 gate | Documented — no param change. Gate target for **P7-G** VIX research |
+| — | BACKTEST | Survivorship bias in pre-2024 NDX100 constituent history | Accepted caveat |
 
 ---
 
-## 13. Phase 7 backlog
+## 13. Phase 8 backlog
 
-| Task | Status / Priority | Notes |
-|---|---|---|
-| **Corporate split adjustment (P7-B)** | ✅ Shipped | `008_corporate_actions`, `cue adjust-splits`, non-critical pipeline step after ingest |
-| **Locked backtest reference + window label (P7-C)** | ✅ Shipped | `009`; dashboard uses `locked = 1` MOMENTUM run; extended research runs stay unlocked |
-| **Post-pipeline healthcheck (P7-D)** | ✅ Shipped | `cue healthcheck`, Telegram pass/fail, PM2 `cue-healthcheck` cron |
-| **Stop proximity warning (P6-A)** | ✅ Shipped | `⚠️ NEAR STOP` now renders inline on the Daily Pulse |
-| **ATR position sizer (P6-B)** | ✅ Shipped | `PORTFOLIO_VALUE_USD` env var supported; fallback to `POSITION_SIZE_USD` retained |
-| **signal_outcomes table + `cue measure-signals`** | LOW | Directional accuracy tracking independent of position management; next natural instrumentation step |
-| **Regime 4-state filter (VIX secondary suppression)** | RESEARCH | Backtest question: does `VIX > 25` gating improve Sharpe without CAGR dropping below 12%? |
-| **Volume breakout entry filter** | RESEARCH | Evaluate whether `volume > 1.5× 20d avg` on entry improves expectancy |
-| **`fundamentals_cache` historical backfill** | LOW | Current table grows organically from `enrich-fundamentals` run dates |
-| **systemd unit** | LOW | Deferred; PM2 is currently stable |
-| **Winston file transport** | LOW | Deferred; log volume is negligible |
-| **Quality-GARP as momentum exclusion filter** | RESEARCH | Exclude momentum BUY if `ROE < 15%` or `D/E > 2.0`; requires separate backtest spec + gate clearance before any production code |
-| **New research / strategy improvements** | OPEN | No active thesis; strategy gate discipline still applies |
+| Task | Priority | Gate |
+|------|----------|------|
+| **P7-F** Daily position thesis refresh | LOW | 15+ closed trades |
+| **P7-G** VIX secondary regime (research) | RESEARCH | Backtest Q: does VIX>25 recover Sharpe >1.0 on 2022–2025 without CAGR <12%? No prod code until all four gates clear on extended window. |
+| **P7-H** Trailing stop audit log | LOW | Bundle with P7-F migration (`010+`) |
+| **`fundamentals_cache` historical backfill** | LOW | — |
+| **systemd unit** | LOW | — |
+| **Winston file transport** | LOW | — |
 
 ---
 
@@ -283,9 +291,10 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | Document | Role |
 |---|---|
-| `.cursor/rules/cue-sou.md` | **Frozen** narrative SoU + Phase 4 plan wording — **do not edit in Cursor tasks unless the user explicitly asks** |
-| `.cursor/rules/db-schema.md` | Schema summary tied to **applied** migrations (`001`–`009`) |
-| `.cursor/rules/cue-guardrails.md` | Hard constraints (**paths aligned to this repo** in v1.1) |
+| `spec/cue-phase7-complete.md` | Phase 7 session record + Phase 8 handoff |
+| `.cursor/rules/cue-sou.md` | Living engineering spec (this file) |
+| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`009`) |
+| `.cursor/rules/cue-guardrails.md` | Hard constraints |
 | `README.md` | Operator-facing commands + quickstart |
 
 ---

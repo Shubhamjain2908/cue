@@ -21,6 +21,8 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `008_corporate_actions` | `corporate_actions` (splits / reverse splits) |
 | `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked`; backfill locks bull-window runs **73, 74** (`2023-2025 (bull)`), labels extended run **80** (`2022-2025 (extended)`, unlocked) |
 
+**Next migration:** `010`
+
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
 **Post-migrate data note (`009`):** `locked = 1` is set only by migration backfill or a deliberate ceremony — new `pnpm run backtest` rows default to `locked = 0`. The dashboard backtest reference (`getMomentumBacktestSummary`) selects the latest **`strategy = 'MOMENTUM' AND locked = 1`** row, not the newest run by `run_date`.
@@ -61,12 +63,16 @@ Split / reverse-split events for price adjustment (`008_corporate_actions`).
 
 | Column | Notes |
 |--------|--------|
+| `id` | INTEGER PK AUTOINCREMENT |
 | `ticker`, `ex_date`, `type` | **UNIQUE** composite; `type` CHECK IN (`split`, `reverse_split`) |
-| `factor` | REAL |
+| `ex_date` | ISO `YYYY-MM-DD` |
+| `factor` | REAL — divisor (e.g. `2.0` = 2:1 forward split) |
 | `source` | TEXT, default `yahoo` |
-| `applied_at` | Timestamp |
+| `applied_at` | TEXT, default `CURRENT_TIMESTAMP` |
 
 **Written by:** `cue adjust-splits` (`src/ingestors/corporate-actions.ts`).
+
+**Pipeline position:** after **ingest**, before **screen** / **execute-stops** (`critical: false`).
 
 **Yahoo API:** split events via **`yahoo-finance2` `chart()`** (not `src/llm/yahooContext.ts`, which uses `search` / `quoteSummary` for LLM enrichment only).
 
@@ -82,14 +88,14 @@ Momentum screen outputs: actionable **BUY** / **SELL**, plus rebalance-only **WA
 |--------|--------|
 | `id` | INTEGER PK AUTOINCREMENT |
 | `ticker`, `date`, `signal`, `signal_type` | **UNIQUE** composite (`003`) |
-| `signal` | `BUY` \| `SELL` \| `HOLD` \| `WATCHLIST` — plain TEXT, no DB enum |
+| `signal` | `BUY` \| `SELL` \| `HOLD` \| `WATCHLIST` — plain TEXT, no DB enum. **`WATCHLIST`** = rebalance-only rank context rows (ranks `topN+1`…`topN+depth`); **no** position entry; screener **Saturday rebalance** path only |
 | `signal_type` | Strategy lane; default **`MOMENTUM`** |
 | `price` | REAL at signal |
 | `alerted` | 0/1 — Telegram / brief idempotency (BUY alerts and watchlist bench) |
 | `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context (required for BUY and WATCHLIST at insert) |
 | `atr14`, `initial_atr_stop` | Stop ladder inputs; `initial_atr_stop` set on BUY; optional on WATCHLIST |
 
-**Written by:** `cue screen` (`momentum-screener.ts`). **WATCHLIST** rows: Friday **rebalance** path only, ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` (default depth 5, ranks 4–8 when `topN=3`). No `positions` row. Depth `0` disables WATCHLIST writes and bench Telegram.
+**Written by:** `cue screen` (`momentum-screener.ts`). **WATCHLIST** rows: **Saturday rebalance** path only, ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` (default depth 5 → ranks 4–8 when `topN=3`). No `positions` row. `WATCHLIST_BENCH_DEPTH=0` disables WATCHLIST writes and bench Telegram.
 
 ### `enrichments`
 

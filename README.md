@@ -21,7 +21,7 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 - After the **16:05–16:15 ET** pipeline window: optional **`cue healthcheck`** (~17:00 ET cron) verifies ingest currency, pipeline output, and PM2 error logs, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
-Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/project-spec.md`**. Table-by-table schema notes: **`.cursor/rules/db-schema.md`**.
+Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Phase 7 record: **`spec/cue-phase7-complete.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
 
 ---
 
@@ -183,7 +183,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 4. **`CACHE_DIR`** — Yahoo / ingest caches (default `./data/cache`).
 5. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google` \| `vertex` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
 
-Strategy thresholds (`MAX_POSITIONS`, `WATCHLIST_BENCH_DEPTH`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see `project-spec.md` for **locked** momentum / ATR / regime rules. Set **`WATCHLIST_BENCH_DEPTH=0`** to disable watchlist rows and the rebalance **Next in Rank** Telegram message.
+Strategy thresholds (`MAX_POSITIONS`, `WATCHLIST_BENCH_DEPTH`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see **`.cursor/rules/cue-sou.md`** for **locked** momentum / ATR / regime rules. Set **`WATCHLIST_BENCH_DEPTH=0`** to disable watchlist rows and the rebalance **Next in Rank** Telegram message.
 
 ---
 

@@ -8,7 +8,8 @@ Your stack is **Node.js, TypeScript, and SQLite**. Your objective is to write ma
 ## 📖 Required Context Files & State
 Before planning features, generating code, or answering structural questions, read and adhere to:
 - **`cue-sou.md`** (living repo map, CLI, pipeline)
-- **`cue-db-schema.md`** (SQLite tables + migrations)
+- **`cue-db-schema.md`** (SQLite tables + migrations `001`–`009`)
+- **`spec/cue-phase7-complete.md`** (Phase 7 session record)
 - **`cue-guardrails.md`** (hard rules)
 
 All paths above are under **`.cursor/rules/`** unless noted.
