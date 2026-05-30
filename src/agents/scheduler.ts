@@ -22,6 +22,7 @@ const POLL_MS = 60_000;
 /** Friday EOD: full rebalance path (Spec §3). */
 const SCHEDULER_FRIDAY_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+  { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
   { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
   { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
   { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "both" },
@@ -37,6 +38,7 @@ const SCHEDULER_FRIDAY_STEPS: PipelineStep[] = [
 /** Mon–Thu maintenance: stop path only. */
 const SCHEDULER_MON_THU_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+  { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
   { name: "execute-stops", cueArgs: ["execute-stops"], critical: true, runOn: "both" },
   {
     name: "brief",

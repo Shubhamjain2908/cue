@@ -46,12 +46,18 @@ describe("detectRunMode", () => {
 
 describe("stepsForMode", () => {
   it("excludes enrich for stop mode", () => {
-    expect(stepsForMode("stop").map((s) => s.name)).toEqual(["ingest", "screen", "brief"]);
+    expect(stepsForMode("stop").map((s) => s.name)).toEqual([
+      "ingest",
+      "adjust-splits",
+      "execute-stops",
+      "brief",
+    ]);
   });
 
   it("includes enrich for rebalance mode", () => {
     expect(stepsForMode("rebalance").map((s) => s.name)).toEqual([
       "ingest",
+      "adjust-splits",
       "screen",
       "enrich",
       "brief",
@@ -141,6 +147,7 @@ describe("getNyCalendarWeekday", () => {
 describe("runPipelineWithSteps", () => {
   const schedulerFridayLike: PipelineStep[] = [
     { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
+    { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
     { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
     { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
     { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "both" },
@@ -164,6 +171,7 @@ describe("runPipelineWithSteps", () => {
     const scripts = calls.map((a) => a[3]).filter((s): s is string => s !== undefined);
     expect(scripts).toEqual([
       "ingest",
+      "adjust-splits",
       "enrich-fundamentals",
       "screen",
       "enrich",
@@ -229,6 +237,21 @@ describe("runPipeline", () => {
 
     const code = runPipeline("rebalance", { spawn });
     expect(code).toBe(0);
-    expect(scripts).toEqual(["ingest", "screen", "enrich", "brief"]);
+    expect(scripts).toEqual(["ingest", "adjust-splits", "screen", "enrich", "brief"]);
+  });
+
+  it("runs execute-stops on stop mode instead of screen", () => {
+    const scripts: string[] = [];
+    const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
+      const script = args !== undefined && args.length > 3 ? args[3] : undefined;
+      if (script !== undefined) {
+        scripts.push(script);
+      }
+      return { status: 0 } as SpawnSyncReturns<Buffer>;
+    }) as unknown as typeof spawnSync;
+
+    runPipeline("stop", { spawn });
+    expect(scripts).toEqual(["ingest", "adjust-splits", "execute-stops", "brief"]);
+    expect(scripts).not.toContain("screen");
   });
 });

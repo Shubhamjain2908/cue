@@ -72,6 +72,7 @@ program
 Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for flags):
   db:migrate           Apply SQLite migrations (src/db/migrations/*.sql + _migrations ledger)
   ingest               Nasdaq 100 (+ QQQ) EOD OHLCV via Massive
+  adjust-splits        Adjust open position price levels for recent stock splits (Yahoo)
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUYs
@@ -131,6 +132,23 @@ ingest.action(
     await runFetcher(argv);
   }),
 );
+
+program
+  .command("adjust-splits")
+  .description("Adjust open position and signal price levels for recent stock splits (Yahoo Finance)")
+  .action(
+    wrap("adjust-splits", async () => {
+      const config = getConfig();
+      const { openCueDb } = await import("./db/provider.js");
+      const { adjustSplitsForOpenPositions } = await import("./ingestors/corporate-actions.js");
+      const db = openCueDb(config.DB_PATH);
+      try {
+        await adjustSplitsForOpenPositions(db, undefined, cueLogger);
+      } finally {
+        db.close();
+      }
+    }),
+  );
 
 const enrichFundamentals = program
   .command("enrich-fundamentals")
