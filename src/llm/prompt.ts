@@ -66,9 +66,9 @@ Days Until Earnings (from signal date ${signalDate}): ${daysUntil}
 12-1 Momentum Rank: #${signal.momentumRank} of ${signal.universeRankedCount} (score: ${returnPctDisplay.toFixed(2)}%)
 Current Price: ${signal.price}
 ATR(14): ${signal.atr14}
-Initial Stop: ${signal.initialAtrStop}
+Initial Stop: ${signal.initialAtrStop ?? "N/A"}
 
-Assess sentiment and provide a one-paragraph rationale for this BUY signal.`;
+Assess sentiment and provide a one-paragraph rationale for this ${signal.signal} signal.`;
 
   return { system, user };
 }

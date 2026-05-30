@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getConfig } from "../config/index.js";
-import { listUnenrichedBuySignals } from "../db/queries.js";
+import { listUnenrichedBuySignals, listUnenrichedWatchlistSignals } from "../db/queries.js";
 import { openCueDb } from "../db/provider.js";
 import { runEnrichment } from "../llm/enricher.js";
 
@@ -13,7 +13,6 @@ export async function runEnrichCli(): Promise<void> {
     const pending = listUnenrichedBuySignals(db);
     if (pending.length === 0) {
       console.log("No unenriched BUY signals.");
-      return;
     }
     for (const s of pending) {
       try {
@@ -21,6 +20,19 @@ export async function runEnrichCli(): Promise<void> {
         console.log(`Enriched ${s.ticker} (${s.id}): ${r.sentiment} / ${r.confidence}`);
       } catch (e) {
         console.error(`Enrichment failed for ${s.ticker} (${s.id}):`, e);
+      }
+    }
+
+    const watchlistPending = listUnenrichedWatchlistSignals(db);
+    if (watchlistPending.length === 0) {
+      console.log("No unenriched WATCHLIST signals.");
+    }
+    for (const s of watchlistPending) {
+      try {
+        const r = await runEnrichment(db, s.id);
+        console.log(`Enriched watchlist ${s.ticker} (${s.id}): ${r.sentiment} / ${r.confidence}`);
+      } catch (e) {
+        console.warn(`Watchlist enrichment failed for ${s.ticker} (${s.id}):`, e);
       }
     }
   } finally {
