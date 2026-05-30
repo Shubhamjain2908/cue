@@ -14,8 +14,8 @@ import { resolveLastETSession } from "../../src/ingestors/massive-price-ingestor
 
 type SqliteConnection = InstanceType<typeof Database>;
 
-/** Friday 17:00 ET (EST) — post-pipeline healthcheck window (2026-01-09 is Friday). */
-const FRIDAY_HEALTHCHECK = new Date("2026-01-09T22:00:00.000Z");
+/** Saturday ~10:00 ET (EST) — post-rebalance healthcheck (2026-01-10 is Saturday). */
+const SATURDAY_REBALANCE_HEALTHCHECK = new Date("2026-01-10T15:00:00.000Z");
 
 /** Monday 17:00 ET (EST) — stop-day healthcheck (2026-01-05). */
 const MONDAY_HEALTHCHECK = new Date("2026-01-05T22:00:00.000Z");
@@ -45,9 +45,9 @@ function seedDailyPrices(db: SqliteConnection, sessionDate: string): void {
 describe("runHealthcheck", () => {
   it("sends pass Telegram and returns 0 when all checks pass", async () => {
     const db = openMemoryDb();
-    const now = FRIDAY_HEALTHCHECK;
+    const now = SATURDAY_REBALANCE_HEALTHCHECK;
     const expectedSession = resolveLastETSession(now);
-    const todayEt = "2026-01-09";
+    const todayEt = "2026-01-10";
 
     seedDailyPrices(db, expectedSession);
     insertSignal(db, {
@@ -81,13 +81,13 @@ describe("runHealthcheck", () => {
 
   it("fails ingest when daily_prices is behind expected session", async () => {
     const db = openMemoryDb();
-    const now = FRIDAY_HEALTHCHECK;
+    const now = SATURDAY_REBALANCE_HEALTHCHECK;
     const expectedSession = resolveLastETSession(now);
 
     seedDailyPrices(db, "2020-01-02");
     insertSignal(db, {
       ticker: "AAPL",
-      date: "2026-01-09",
+      date: "2026-01-10",
       signal: "BUY",
       price: 100,
       momentumRank: 1,
@@ -112,9 +112,9 @@ describe("runHealthcheck", () => {
     db.close();
   });
 
-  it("fails on Friday when no signals exist for today_et", async () => {
+  it("fails on Saturday rebalance day when no signals exist for today_et", async () => {
     const db = openMemoryDb();
-    const now = FRIDAY_HEALTHCHECK;
+    const now = SATURDAY_REBALANCE_HEALTHCHECK;
     seedDailyPrices(db, resolveLastETSession(now));
 
     const sendTelegram = vi.fn().mockResolvedValue(undefined);
@@ -126,7 +126,7 @@ describe("runHealthcheck", () => {
 
     expect(code).toBe(1);
     const text = sendTelegram.mock.calls[0]![0] as string;
-    expect(text).toContain("no signals for rebalance session 2026-01-09");
+    expect(text).toContain("no signals for rebalance session 2026-01-10");
     db.close();
   });
 

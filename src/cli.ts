@@ -80,7 +80,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   brief                Static HTML dashboard + Telegram alerts
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
   run-all              Run full pipeline once (subprocess chain, same as scheduled window)
-  schedule             Long-running ET window scheduler (16:05–16:15)
+  schedule             Scheduler daemon (Mon–Fri 16:05–16:15 ET; Sat rebalance 09:05–09:15 ET)
   healthcheck          Post-pipeline verification + Telegram alert (17:00 ET cron)
   doctor               Config + DB + env presence diagnostics
   pipeline             Legacy alias: \`--now\` = one-shot run-all; no flag = same as schedule
@@ -309,7 +309,7 @@ program
 program
   .command("schedule")
   .description(
-    `Start scheduler daemon (${CUE_TIME_ZONE} 16:05–16:15 window; Fri rebalance vs Mon–Thu stops)`,
+    `Start scheduler daemon (${CUE_TIME_ZONE}; Sat 09:05–09:15 rebalance, Mon–Fri 16:05–16:15 stops)`,
   )
   .action(
     wrap("schedule", async () => {

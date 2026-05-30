@@ -1,5 +1,5 @@
 /**
- * Live end-of-day screen: momentum rebalance (Friday ET) vs stop/max-hold evaluation (other days).
+ * Live end-of-day screen: momentum rebalance (Saturday ET) vs stop/max-hold evaluation (Mon–Fri ET).
  * Mirrors `runBacktest` §6.2–6.3 semantics at a single as-of date (last QQQ trading day in DB).
  */
 
