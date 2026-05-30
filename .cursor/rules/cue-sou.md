@@ -124,13 +124,13 @@ interface PipelineStep {
 
 1. Resolve ET civil **date** / **time** via `Intl.DateTimeFormat` using **`CUE_LOCALE`** + **`CUE_TIME_ZONE`** from `src/config/cue-timezone.ts`.
 2. If outside the active window for today’s mode → return.
-3. If **`lastRunDate`** already recorded success for this ET **YYYY-MM-DD** → return.
+3. If **`pipeline_state`** key **`last_successful_run_date`** already equals this ET **YYYY-MM-DD** (SQLite via `getPipelineState`) → return.
 4. If **Sunday** (`dayOfWeek === 0`) → return (debug log).
 5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines in one process).
 6. If **`LOCK_PATH`** is held by a **live** PID (`process.kill(pid, 0)`) → warn and return; else acquire PID lock (unlink stale file if PID is dead).
-7. Else run **`runPipelineWithSteps`** for Saturday rebalance vs Mon–Fri stop lists; on exit code **0**, set **`lastRunDate`**; always clear **`isRunning`** and release **`LOCK_PATH`** in a `finally` block.
+7. Else run **`runPipelineWithSteps`** for Saturday rebalance vs Mon–Fri stop lists; on exit code **0** only, **`setPipelineState`** writes **`last_successful_run_date`** in the `finally` block (failed runs do not update the key, so same-day retry remains possible); always clear **`isRunning`** and release **`LOCK_PATH`** in that `finally` block.
 
-**Startup / shutdown:** readonly DB **`SELECT 1`** for health; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; keep handle until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
+**Startup / shutdown:** parent **`heldDb`** via **`openCueDb`** (read-write, applies migrations) for health **`SELECT 1`**, **`pipeline_state`** reads/writes, and clean shutdown; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; subprocess **`cue`** steps open their own DB handles; keep **`heldDb`** until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 
 ### 4.5 Alert / brief mode gating (Phase 6 behaviour)
 
@@ -219,7 +219,7 @@ interface PipelineStep {
 
 ## 9. Guardrails
 
-Hard rules: **`.cursor/rules/cue-guardrails.md`** (*v1.1+ — enforcement paths match this repo*). Topics: QQQ SMA200 gate, momentum formula lock, ATR golden rule, pipeline criticality, **scheduler `isRunning` + `LOCK_PATH` + `lastRunDate`**, LLM Zod validation, ingest DB currency guard, Telegram `--mode` behaviour.
+Hard rules: **`.cursor/rules/cue-guardrails.md`** (*v1.1+ — enforcement paths match this repo*). Topics: QQQ SMA200 gate, momentum formula lock, ATR golden rule, pipeline criticality, **scheduler `isRunning` + `LOCK_PATH` + `pipeline_state`**, LLM Zod validation, ingest DB currency guard, Telegram `--mode` behaviour.
 
 ## 10. Environment variables
 

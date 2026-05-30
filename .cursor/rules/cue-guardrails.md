@@ -61,7 +61,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **Critical step abort** | Non-zero exit on critical step aborts chain. | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
 | **Non-critical continuation** | **adjust-splits**, enrich, brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
 | **Post-pipeline healthcheck** | `cue healthcheck` is independent of the 16:05–16:15 chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. | `src/agents/healthcheck.ts` |
-| **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window. | `src/agents/scheduler.ts` (`lastRunDate`) |
+| **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window; key set only on pipeline exit **0**. | `pipeline_state` + `src/db/queries.ts` (`getPipelineState` / `setPipelineState`), `src/agents/scheduler.ts` |
 | **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
 | **Mode / flag orthogonality** | `--force-rebalance` vs calendar **Saturday**; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
 
