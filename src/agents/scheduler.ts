@@ -10,6 +10,7 @@ import type { CueDatabase } from "../db/provider.js";
 import { openCueDbReadonly } from "../db/provider.js";
 
 import {
+  executionWindowEtForDate,
   formatEtYmd,
   getNyCalendarWeekday,
   isWithinExecutionWindow,
@@ -19,8 +20,8 @@ import {
 
 const POLL_MS = 60_000;
 
-/** Friday EOD: full rebalance path (Spec §3). */
-const SCHEDULER_FRIDAY_STEPS: PipelineStep[] = [
+/** Saturday morning: full rebalance (Friday session OHLCV). */
+const SCHEDULER_REBALANCE_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
   { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
@@ -35,8 +36,8 @@ const SCHEDULER_FRIDAY_STEPS: PipelineStep[] = [
   },
 ];
 
-/** Mon–Thu maintenance: stop path only. */
-const SCHEDULER_MON_THU_STEPS: PipelineStep[] = [
+/** Mon–Fri maintenance: stop path (includes Friday — no rebalance on Fri). */
+const SCHEDULER_WEEKDAY_STOP_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
   { name: "execute-stops", cueArgs: ["execute-stops"], critical: true, runOn: "both" },
@@ -64,12 +65,12 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
 });
 
-/** NY weekday: Friday → rebalance; Mon–Thu → weekday maintenance; Sat/Sun → idle. */
+/** NY weekday: Saturday → rebalance; Mon–Fri → stop maintenance; Sunday → idle. */
 export function schedulerRunKindForNyWeekday(dow: number): "rebalance" | "weekday" | null {
-  if (dow === 5) {
+  if (dow === 6) {
     return "rebalance";
   }
-  if (dow >= 1 && dow <= 4) {
+  if (dow >= 1 && dow <= 5) {
     return "weekday";
   }
   return null;
@@ -208,7 +209,7 @@ function openAndLogHealth(): void {
         etYmd: formatEtYmd(now),
         etWeekday: getNyCalendarWeekday(now),
         pollMs: POLL_MS,
-        executionWindowEt: "16:05–16:15",
+        executionWindowEt: formatSchedulerWindowEt(now),
         dbPath: cfg.DB_PATH,
         lockPath: cfg.LOCK_PATH,
       })}`,
@@ -237,7 +238,7 @@ function schedulerTick(): void {
   const dow = getNyCalendarWeekday(now);
   const kind = schedulerRunKindForNyWeekday(dow);
   if (kind === null) {
-    logger.debug(`scheduler_skip_weekend_or_idle dow=${dow} etDate=${todayEt}`);
+    logger.debug(`scheduler_skip_sunday dow=${dow} etDate=${todayEt}`);
     return;
   }
 
@@ -257,13 +258,13 @@ function schedulerTick(): void {
   try {
     if (kind === "rebalance") {
       logger.info(`scheduler_fire kind=rebalance etDate=${todayEt} dow=${dow}`);
-      const code = runPipelineWithSteps(SCHEDULER_FRIDAY_STEPS, "rebalance");
+      const code = runPipelineWithSteps(SCHEDULER_REBALANCE_STEPS, "rebalance");
       if (code === 0) {
         lastRunDate = todayEt;
       }
     } else {
       logger.info(`scheduler_fire kind=weekday_stop etDate=${todayEt} dow=${dow}`);
-      const code = runPipelineWithSteps(SCHEDULER_MON_THU_STEPS, "stop");
+      const code = runPipelineWithSteps(SCHEDULER_WEEKDAY_STOP_STEPS, "stop");
       if (code === 0) {
         lastRunDate = todayEt;
       }
@@ -294,8 +295,17 @@ function shutdown(): void {
   process.exit(0);
 }
 
+function formatSchedulerWindowEt(now: Date): string {
+  const { startMin, endMin } = executionWindowEtForDate(now);
+  const sh = String(Math.floor(startMin / 60)).padStart(2, "0");
+  const sm = String(startMin % 60).padStart(2, "0");
+  const eh = String(Math.floor(endMin / 60)).padStart(2, "0");
+  const em = String(endMin % 60).padStart(2, "0");
+  return `${sh}:${sm}–${eh}:${em}`;
+}
+
 /**
- * Long-running scheduler daemon (60s poll, 16:05–16:15 ET window, once per ET calendar day).
+ * Long-running scheduler daemon (60s poll; ET window Mon–Fri 16:05–16:15, Sat 09:05–09:15).
  * Intended for systemd / PM2 alongside `cue schedule`.
  */
 export function runScheduleDaemonCli(): void {
@@ -307,7 +317,7 @@ export function runScheduleDaemonCli(): void {
   process.on("SIGTERM", shutdown);
 
   logger.info(
-    `scheduler_started pollMs=${POLL_MS} windowEt=16:05-16:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
+    `scheduler_started pollMs=${POLL_MS} windowEt=Mon-Fri_16:05-16:15_Sat_09:05-09:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
   );
   pollTimer = setInterval(schedulerTick, POLL_MS);
   schedulerTick();

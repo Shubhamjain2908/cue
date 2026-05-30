@@ -4,11 +4,15 @@ import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 
-/** Friday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 5 Fri). */
-export const REBALANCE_DAY_OF_WEEK = 5;
+/** Saturday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 6 Sat). */
+export const REBALANCE_DAY_OF_WEEK = 6;
 
-const WINDOW_START_MIN = 16 * 60 + 5;
-const WINDOW_END_MIN = 16 * 60 + 15;
+/** Mon–Fri stop path: after US cash close. */
+const WEEKDAY_WINDOW_START_MIN = 16 * 60 + 5;
+const WEEKDAY_WINDOW_END_MIN = 16 * 60 + 15;
+/** Saturday rebalance: morning window (Friday EOD bars available from Massive). */
+const REBALANCE_WINDOW_START_MIN = 9 * 60 + 5;
+const REBALANCE_WINDOW_END_MIN = 9 * 60 + 15;
 
 export interface PipelineStep {
   name: string;
@@ -120,9 +124,19 @@ export function getEtMinutesSinceMidnight(now: Date): number {
   return hour * 60 + minute;
 }
 
+/** ET execution window for scheduler polling (weekday vs Saturday rebalance). */
+export function executionWindowEtForDate(now: Date): { startMin: number; endMin: number } {
+  const dow = getNyCalendarWeekday(now);
+  if (dow === REBALANCE_DAY_OF_WEEK) {
+    return { startMin: REBALANCE_WINDOW_START_MIN, endMin: REBALANCE_WINDOW_END_MIN };
+  }
+  return { startMin: WEEKDAY_WINDOW_START_MIN, endMin: WEEKDAY_WINDOW_END_MIN };
+}
+
 export function isWithinExecutionWindow(now: Date): boolean {
   const m = getEtMinutesSinceMidnight(now);
-  return m >= WINDOW_START_MIN && m <= WINDOW_END_MIN;
+  const { startMin, endMin } = executionWindowEtForDate(now);
+  return m >= startMin && m <= endMin;
 }
 
 export interface DetectRunModeInput {
