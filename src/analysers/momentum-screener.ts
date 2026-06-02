@@ -242,6 +242,14 @@ interface OpenPositionRow {
   highestCloseSinceEntry: number | null;
   currentStop: number;
   initialAtrStop: number;
+  /**
+   * The last date for which stop state was persisted to `stop_movements`.
+   * Falls back to `entry_date` when no movements exist yet.
+   * Used as the replay start anchor in `replayExitReason` — bars on or before
+   * this date have already been evaluated and must not be re-walked with a
+   * ratcheted stop that was only valid AFTER those bars traded.
+   */
+  lastEvaluatedDate: string;
 }
 
 function listOpenPositions(db: SqliteConnection): OpenPositionRow[] {
@@ -256,7 +264,11 @@ function listOpenPositions(db: SqliteConnection): OpenPositionRow[] {
       p.entry_price AS entryPrice,
       p.highest_close_since_entry AS highestCloseSinceEntry,
       COALESCE(p.current_stop_loss, sig.initial_atr_stop) AS currentStop,
-      sig.initial_atr_stop AS initialAtrStop
+      sig.initial_atr_stop AS initialAtrStop,
+      COALESCE(
+        (SELECT MAX(sm.as_of_date) FROM stop_movements sm WHERE sm.position_id = p.id),
+        p.entry_date
+      ) AS lastEvaluatedDate
     FROM positions p
     INNER JOIN signals sig ON sig.id = p.signal_id
     WHERE p.status = 'OPEN'
@@ -281,23 +293,26 @@ function replayExitReason(
   if (!series) {
     return null;
   }
-  const entryUb = upperBoundInclusiveByDate(series, pos.entryDate);
-  if (entryUb < 0) {
-    return null;
-  }
   const asOfUb = upperBoundInclusiveByDate(series, asOf);
   if (asOfUb < 0) {
     return null;
   }
 
-  // Seed from the DB-persisted live state, not the frozen signal values.
-  // Using initialAtrStop here caused false TRAILING_STOP detections on historical
-  // bars that were already safely above the ratcheted current_stop_loss.
-  let currentStop = pos.currentStop;
-  let highestClose =
-    pos.highestCloseSinceEntry ?? Math.max(pos.entryPrice, series[entryUb]!.close);
+  // Start replay from bar AFTER the last date already persisted to stop_movements
+  // (or entry_date when no movements exist yet). Replaying from entry with a
+  // ratcheted currentStop would false-trigger on bars that were valid when they
+  // traded but now appear below the evolved stop.
+  const lastEvalUb = upperBoundInclusiveByDate(series, pos.lastEvaluatedDate);
+  const loopStart = lastEvalUb + 1;
+  if (loopStart > asOfUb) {
+    return null;
+  }
 
-  for (let i = entryUb + 1; i <= asOfUb; i++) {
+  // Seed from DB-persisted live state, not frozen signal values.
+  let currentStop = pos.currentStop;
+  let highestClose = pos.highestCloseSinceEntry ?? pos.entryPrice;
+
+  for (let i = loopStart; i <= asOfUb; i++) {
     const bar = series[i]!;
     if (bar.close <= currentStop) {
       return "TRAILING_STOP";
