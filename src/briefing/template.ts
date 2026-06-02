@@ -2,8 +2,8 @@ import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import type { DashboardPayload, WatchlistBriefingRow } from "./queries.js";
 
 const TG_MAX = 4096;
-/** One substantive sentence for bench context (Telegram readability). */
-const WATCHLIST_RATIONALE_MAX = 90;
+/** Three substantive sentences for bench context (Telegram readability). */
+const WATCHLIST_RATIONALE_MAX = 280;
 const TICKER_COL_WIDTH = 5;
 const PRICE_COL_WIDTH = 9;
 
@@ -66,10 +66,9 @@ export function formatWatchlistRationale(rationale: string | null): string | nul
   }
 
   const sentences = splitSentences(trimmed);
-  const picked =
-    sentences.map((s) => s.trim()).find((s) => s.length > 0 && !RATIONALE_BOILERPLATE_RE.test(s)) ??
-    sentences[0]?.trim() ??
-    "";
+  // Take up to 3 non-boilerplate sentences for richer Telegram context.
+  const nonBoiler = sentences.map((s) => s.trim()).filter((s) => s.length > 0 && !RATIONALE_BOILERPLATE_RE.test(s));
+  const picked = nonBoiler.length > 0 ? nonBoiler.slice(0, 3).join(" ") : (sentences[0]?.trim() ?? "");
   if (picked.length === 0) {
     return null;
   }
@@ -146,7 +145,8 @@ export function renderHtml(payload: DashboardPayload): string {
     .card-value.amber { color: var(--amber); }
     table { width: 100%; border-collapse: collapse; }
     th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-    td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .rationale-cell { max-width: 420px; font-size: 12px; color: var(--muted); line-height: 1.5; word-break: break-word; }
     tr:last-child td { border-bottom: none; }
     .section-title { font-size: 1rem; font-weight: 600; margin: 24px 0 12px; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -313,17 +313,31 @@ export function renderHtml(payload: DashboardPayload): string {
 
     // Signals table
     const sentimentColor = s => s === 'BULLISH' ? 'var(--green)' : s === 'BEARISH' ? 'var(--red)' : 'var(--amber)';
+    const exitReasonLabel = r => ({ TRAILING_STOP: 'Trailing stop', REBALANCE_DROP: 'Rebalance drop', MAX_HOLD: 'Max hold', MANUAL: 'Manual' })[r] ?? (r ?? '—');
     document.getElementById('signals-body').innerHTML = d.recent_signals.map(s => {
-      const rat = s.rationale;
-      const ratCell = !rat ? '—' : (rat.length > 80 ? rat.slice(0, 80) + '…' : rat);
+      let sectorCell, sentimentCell, rationaleCell;
+      if (s.signal_type === 'SELL') {
+        const pnl = s.pnl_pct;
+        const pnlStr = pnl == null ? '—' : (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%';
+        const pnlColor = pnl == null ? 'var(--muted)' : pnl >= 0 ? 'var(--green)' : 'var(--red)';
+        sectorCell = exitReasonLabel(s.exit_reason);
+        sentimentCell = '<span style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</span>';
+        rationaleCell = '';
+      } else {
+        const rat = s.rationale ?? '';
+        sectorCell = s.sector ?? '—';
+        sentimentCell = '<span style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</span>';
+        rationaleCell = rat.length === 0 ? '—'
+          : '<span title="' + rat.replace(/"/g, '&quot;') + '" style="cursor:help">' + rat + '</span>';
+      }
       return (
         '<tr>' +
         '<td>' + s.signal_date + '</td>' +
         '<td class="ticker">' + s.ticker + '</td>' +
         '<td><span class="badge ' + (s.signal_type === 'BUY' ? 'badge-green' : 'badge-red') + '">' + s.signal_type + '</span></td>' +
-        '<td>' + (s.sector ?? '—') + '</td>' +
-        '<td style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</td>' +
-        '<td style="color:var(--muted);font-size:12px">' + ratCell + '</td>' +
+        '<td>' + sectorCell + '</td>' +
+        '<td>' + sentimentCell + '</td>' +
+        '<td class="rationale-cell">' + rationaleCell + '</td>' +
         '</tr>'
       );
     }).join('');
