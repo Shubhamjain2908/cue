@@ -14,9 +14,11 @@ import {
   getOpenPositionsWithLastClose,
   getRegimeLabel,
   listBuySignalsReadyToAlert,
+  listSellSignalsReadyToAlert,
   listWatchlistSignalsForBriefing,
   resolvePulseAsOfDate,
   type BuyAlertPendingRow,
+  type SellAlertPendingRow,
 } from "./queries.js";
 import { formatWatchlistBench } from "./template.js";
 
@@ -113,6 +115,53 @@ function trimRationale(text: string): string {
     out = out.slice(0, 280).trim();
   }
   return out;
+}
+
+export function formatTelegramSellAlert(row: SellAlertPendingRow): string {
+  const pnlPct = ((row.exitPrice - row.entryPrice) / row.entryPrice) * 100;
+  const pnlSign = pnlPct >= 0 ? "+" : "";
+  const pnlStr = `${pnlSign}${pnlPct.toFixed(2)}%`;
+
+  const reasonLabels: Record<string, string> = {
+    TRAILING_STOP: "🛑 TRAILING STOP",
+    MAX_HOLD: "⏱ MAX HOLD",
+    REBALANCE_DROP: "🔄 REBALANCE DROP",
+    MANUAL: "✋ MANUAL",
+  };
+  const reasonLabel = row.exitReason !== null
+    ? (reasonLabels[row.exitReason] ?? row.exitReason)
+    : "EXIT";
+
+  const lines = [
+    `🔴 SELL ${row.ticker}  |  ${reasonLabel}`,
+    RULE,
+    `Entry : $${round2(row.entryPrice)}  (${row.entryDate})`,
+    `Exit  : $${round2(row.exitPrice)}  (${row.exitDate})`,
+    `P&L   : ${pnlStr}`,
+  ];
+
+  let text = lines.join("\n");
+  if (text.length > TG_MAX) {
+    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+  }
+  return text;
+}
+
+export async function sendSellAlerts(db: CueDatabase): Promise<number> {
+  const pending = listSellSignalsReadyToAlert(db);
+  let sent = 0;
+  for (const row of pending) {
+    const text = formatTelegramSellAlert(row);
+    try {
+      await sendTelegramMessage(text);
+      markSignalAlerted(db, row.id);
+      logger.info(`SELL alert sent for ${row.ticker} (signal_id=${row.id}, reason=${row.exitReason ?? "n/a"})`);
+      sent++;
+    } catch (e) {
+      logger.error(`SELL alert failed for ${row.ticker} (${row.id}): ${String(e)}`);
+    }
+  }
+  return sent;
 }
 
 export function formatTelegramAlert(row: BuyAlertPendingRow): string {
@@ -307,6 +356,10 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
     const config = getConfig();
     const db = openCueDb(config.DB_PATH);
     try {
+      const sellCount = await sendSellAlerts(db);
+      if (sellCount === 0) {
+        logger.info("No SELL signals pending alert.");
+      }
       await sendDailyPulse(db);
     } catch (e) {
       logger.error(`Daily pulse failed: ${String(e)}`);
@@ -320,6 +373,13 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
   const config = getConfig();
   const db = openCueDb(config.DB_PATH);
   try {
+    // SELL exits first (rebalance drops + any carry-over stop exits)
+    const sellCount = await sendSellAlerts(db);
+    if (sellCount === 0) {
+      logger.info("No SELL signals pending alert.");
+    }
+
+    // BUY alerts
     const pending = listBuySignalsReadyToAlert(db);
     if (pending.length === 0) {
       logger.info("No BUY signals pending alert (enriched + not alerted).");
