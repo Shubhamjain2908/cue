@@ -207,6 +207,45 @@ export interface BuyAlertPendingRow {
   confidence: string | null;
 }
 
+/** SELL signal row for Telegram exit alerts. */
+export interface SellAlertPendingRow {
+  id: number;
+  ticker: string;
+  exitDate: string;
+  exitPrice: number;
+  entryDate: string;
+  entryPrice: number;
+  exitReason: string | null;
+}
+
+/**
+ * SELL signals not yet alerted, joined to the closed position for entry context.
+ * Matches via `positions.exit_date = signals.date` + ticker cross-check through the BUY signal FK.
+ */
+export function listSellSignalsReadyToAlert(db: CueDatabase): SellAlertPendingRow[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        s.id          AS id,
+        s.ticker      AS ticker,
+        s.date        AS exitDate,
+        s.price       AS exitPrice,
+        p.entry_date  AS entryDate,
+        p.entry_price AS entryPrice,
+        p.exit_reason AS exitReason
+      FROM signals s
+      INNER JOIN positions p ON p.exit_date = s.date
+      INNER JOIN signals buy_sig ON buy_sig.id = p.signal_id AND buy_sig.ticker = s.ticker
+      WHERE s.signal = 'SELL'
+        AND (s.alerted = 0 OR s.alerted IS NULL)
+        AND p.exit_date > p.entry_date
+      ORDER BY s.date ASC, s.ticker ASC
+    `,
+    )
+    .all() as SellAlertPendingRow[];
+}
+
 /** BUY rows not yet Telegram-alerted; enrichments joined when present. */
 export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[] {
   const stmt = db.prepare(`
@@ -310,6 +349,10 @@ export interface RecentSignal {
   sentiment: string | null;
   rationale: string | null;
   sector: string | null;
+  /** Populated for SELL rows only: reason the position was closed. */
+  exit_reason: string | null;
+  /** Populated for SELL rows only: realised P&L % vs entry price. */
+  pnl_pct: number | null;
 }
 
 export interface BacktestSummary {
@@ -405,7 +448,8 @@ export function getLivePerformanceSummary(db: CueDatabase): LivePerformanceSumma
       WHERE status != 'OPEN'
         AND exit_price IS NOT NULL
         AND exit_price > 0
-        AND exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
+        AND exit_reason != 'MANUAL'
+        AND exit_date > entry_date
     `,
     )
     .get() as LivePerformanceSummary | undefined;
@@ -430,7 +474,8 @@ export function getLivePerformanceByConfidence(db: CueDatabase): LivePerformance
       WHERE p.status != 'OPEN'
         AND p.exit_price IS NOT NULL
         AND p.exit_price > 0
-        AND p.exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
+        AND p.exit_reason != 'MANUAL'
+        AND p.exit_date > p.entry_date
       GROUP BY e.confidence
       ORDER BY avg_pnl_pct DESC
     `,
@@ -519,9 +564,21 @@ export function extractDashboardPayload(): DashboardPayload {
         s.momentum_12_1_return AS momentum_12_1_return,
         e.sentiment AS sentiment,
         e.rationale AS rationale,
-        e.sector AS sector
+        e.sector AS sector,
+        closed.exit_reason AS exit_reason,
+        CASE
+          WHEN closed.entry_price IS NOT NULL AND closed.entry_price > 0
+          THEN ROUND((s.price - closed.entry_price) / closed.entry_price * 100, 2)
+          ELSE NULL
+        END AS pnl_pct
       FROM signals s
       LEFT JOIN enrichments e ON e.signal_id = s.id
+      LEFT JOIN (
+        SELECT p.exit_date, p.exit_reason, p.entry_price, bs.ticker
+        FROM positions p
+        JOIN signals bs ON bs.id = p.signal_id
+        WHERE p.status != 'OPEN'
+      ) closed ON s.signal = 'SELL' AND closed.ticker = s.ticker AND closed.exit_date = s.date
       WHERE s.signal IN ('BUY', 'SELL')
       ORDER BY s.date DESC
       LIMIT 20
