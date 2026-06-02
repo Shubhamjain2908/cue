@@ -318,6 +318,34 @@ describe("runLiveScreen stop mode", () => {
     db.close();
   });
 
+  it("does not false-trigger TRAILING_STOP when currentStop is above a bar that only breaches initialAtrStop", () => {
+    // Regression: replayExitReason previously seeded from initialAtrStop (stale).
+    // A bar closing above initialAtrStop but below currentStop (ratcheted higher)
+    // must NOW trigger a close. Conversely, a bar closing above currentStop must not.
+    const db = openTestDb();
+    // Last bar closes at 95 — above initialAtrStop=88 but below currentStopLoss=97
+    const asOf = seedFlatUniverse(db, { AAA: 95 });
+    const entryDate = qqqDateOffset(db, asOf, 30);
+
+    const { positionId } = insertOpenPosition(db, {
+      entryDate,
+      entryPrice: 100,
+      initialAtrStop: 88,   // stale floor — bar(95) is above this
+      currentStopLoss: 97,  // ratcheted higher — bar(95) is below this → should close
+      highestClose: 110,
+    });
+
+    runLiveScreen(db, "stop", { asOf });
+
+    const position = db
+      .prepare(`SELECT status, exit_reason FROM positions WHERE id = ?`)
+      .get(positionId) as { status: string; exit_reason: string | null };
+    expect(position.status).toBe("CLOSED");
+    expect(position.exit_reason).toBe("TRAILING_STOP");
+
+    db.close();
+  });
+
   it("closes on trailing stop without recording a stop_movement for the exit", () => {
     const db = openTestDb();
     const asOf = seedFlatUniverse(db, { AAA: 88 });

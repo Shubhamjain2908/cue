@@ -290,12 +290,12 @@ function replayExitReason(
     return null;
   }
 
-  let currentStop = pos.initialAtrStop;
-  let highestClose = Math.max(pos.entryPrice, series[entryUb]!.close);
-
-  if (series[entryUb]!.close <= currentStop) {
-    return "TRAILING_STOP";
-  }
+  // Seed from the DB-persisted live state, not the frozen signal values.
+  // Using initialAtrStop here caused false TRAILING_STOP detections on historical
+  // bars that were already safely above the ratcheted current_stop_loss.
+  let currentStop = pos.currentStop;
+  let highestClose =
+    pos.highestCloseSinceEntry ?? Math.max(pos.entryPrice, series[entryUb]!.close);
 
   for (let i = entryUb + 1; i <= asOfUb; i++) {
     const bar = series[i]!;
