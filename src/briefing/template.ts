@@ -313,17 +313,30 @@ export function renderHtml(payload: DashboardPayload): string {
 
     // Signals table
     const sentimentColor = s => s === 'BULLISH' ? 'var(--green)' : s === 'BEARISH' ? 'var(--red)' : 'var(--amber)';
+    const exitReasonLabel = r => ({ TRAILING_STOP: 'Trailing stop', REBALANCE_DROP: 'Rebalance drop', MAX_HOLD: 'Max hold', MANUAL: 'Manual' })[r] ?? (r ?? '—');
     document.getElementById('signals-body').innerHTML = d.recent_signals.map(s => {
-      const rat = s.rationale;
-      const ratCell = !rat ? '—' : (rat.length > 80 ? rat.slice(0, 80) + '…' : rat);
+      let sectorCell, sentimentCell, rationaleCell;
+      if (s.signal_type === 'SELL') {
+        const pnl = s.pnl_pct;
+        const pnlStr = pnl == null ? '—' : (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%';
+        const pnlColor = pnl == null ? 'var(--muted)' : pnl >= 0 ? 'var(--green)' : 'var(--red)';
+        sectorCell = exitReasonLabel(s.exit_reason);
+        sentimentCell = '<span style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</span>';
+        rationaleCell = '';
+      } else {
+        const rat = s.rationale;
+        sectorCell = s.sector ?? '—';
+        sentimentCell = '<span style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</span>';
+        rationaleCell = !rat ? '—' : (rat.length > 80 ? rat.slice(0, 80) + '…' : rat);
+      }
       return (
         '<tr>' +
         '<td>' + s.signal_date + '</td>' +
         '<td class="ticker">' + s.ticker + '</td>' +
         '<td><span class="badge ' + (s.signal_type === 'BUY' ? 'badge-green' : 'badge-red') + '">' + s.signal_type + '</span></td>' +
-        '<td>' + (s.sector ?? '—') + '</td>' +
-        '<td style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</td>' +
-        '<td style="color:var(--muted);font-size:12px">' + ratCell + '</td>' +
+        '<td>' + sectorCell + '</td>' +
+        '<td>' + sentimentCell + '</td>' +
+        '<td style="color:var(--muted);font-size:12px">' + rationaleCell + '</td>' +
         '</tr>'
       );
     }).join('');
