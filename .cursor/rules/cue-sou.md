@@ -1,8 +1,8 @@
 # Cue — Project specification (engineering)
 
-*Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, and **Phase 7** behaviour (Saturday rebalance, corporate actions, watchlist bench, healthcheck, locked backtest ref).*
+*Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, and **Phase 9** behaviour (T+0-first ingestor, 20:00 ET pipeline window, stop-replay correctness, SELL Telegram alerts).*
 
-**Also read:** root **`README.md`** (operator quickstart), **`spec/cue-phase8-complete.md`** (session record), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`011`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
+**Also read:** root **`README.md`** (operator quickstart), **`spec/cue-phase9-complete.md`** (current session record), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`011`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
 ---
 
@@ -47,7 +47,7 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 
 - **Universe:** tickers from `data/universe/nasdaq100.json` (resolved via env **`UNIVERSE`**, default `nasdaq100`) plus **`data/universe/_meta.json`** for human-readable as-of / count checks; **QQQ** added at runtime for regime / ingest (see `_meta.json` → `system_additions`).
 - **Entry:** top **3** names by momentum rank on rebalance.
-- **Rebalance cadence:** **Saturday morning** ET (`REBALANCE_DAY_OF_WEEK = 6` in `daily-workflow.ts`) using **Friday** session OHLCV (Massive availability); **Mon–Fri** runs **execute-stops** at **16:05–16:15 ET**.
+- **Rebalance cadence:** **Saturday morning** ET (`REBALANCE_DAY_OF_WEEK = 6` in `daily-workflow.ts`) using **Friday** session OHLCV (Massive availability); **Mon–Fri** runs **execute-stops** at **20:00–20:10 ET** (shifted from 16:05 in Phase 9 to allow T+0 same-day data availability).
 - **Regime filter:** **QQQ close > SMA(200)**. If false → **suppress new BUYs**; SELL / stop paths still run.
 
 ### 3.2 ATR trailing stop (close-based)
@@ -120,7 +120,7 @@ interface PipelineStep {
 |-------------|-----|--------|
 | `0` | Sunday | skip |
 | `6` | Saturday | **rebalance** window **09:05–09:15 ET** |
-| `1`–`5` | Mon–Fri | **stop** window **16:05–16:15 ET** |
+| `1`–`5` | Mon–Fri | **stop** window **20:00–20:10 ET** |
 
 1. Resolve ET civil **date** / **time** via `Intl.DateTimeFormat` using **`CUE_LOCALE`** + **`CUE_TIME_ZONE`** from `src/config/cue-timezone.ts`.
 2. If outside the active window for today’s mode → return.
@@ -132,13 +132,14 @@ interface PipelineStep {
 
 **Startup / shutdown:** parent **`heldDb`** via **`openCueDb`** (read-write, applies migrations) for health **`SELECT 1`**, **`pipeline_state`** reads/writes, and clean shutdown; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; subprocess **`cue`** steps open their own DB handles; keep **`heldDb`** until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 
-### 4.5 Alert / brief mode gating (Phase 6 behaviour)
+### 4.5 Alert / brief mode gating (Phase 9 behaviour)
 
 `src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**.
 
-- **`rebalance`** → send formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`INNER JOIN` for ready-to-alert BUYs in `src/db/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale. Share sizing is ATR-normalized when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`**. Then, when **`WATCHLIST_BENCH_DEPTH` > 0**, send a second Telegram message **“Next in Rank”** for unalerted **`WATCHLIST`** rows on the session `asOf` (rank, 12-1 fraction, sentiment/sector from enrichment when present — `—` if enrich did not run or failed).
-- **`stop`** → suppress **BUY** and **watchlist bench** alerts, but **always** send the **Daily Pulse** for intra-week visibility, even when no SELLs fire. Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealized P&L, labels stops as **BASE** vs **TIGHT**, flags **`⚠️ NEAR STOP`** when stop cushion is under **0.5× ATR(14)**, and shows the next ET Friday rebalance date.
-- Invalid / missing `--mode` should still fail loudly in these code paths.
+- **Both modes:** First dispatch **SELL alerts** (`listSellSignalsReadyToAlert` — `signals` SELL + `alerted=0` + `exit_date > entry_date`, joined to BUY entry context). Formatted with exit reason emoji (🔴 TRAILING_STOP, 🔄 REBALANCE_DROP, ⏱ TIME_EXIT), entry/exit prices, and P&L %. Each marked `alerted=1` after send.
+- **`rebalance`** → SELL alerts → formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`INNER JOIN` for ready-to-alert BUYs in `src/db/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale. Share sizing is ATR-normalised when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`**. Then, when **`WATCHLIST_BENCH_DEPTH` > 0**, send a second Telegram message **"Next in Rank"** for unalerted **`WATCHLIST`** rows on the session `asOf` (rank, 12-1 fraction, sentiment/sector from enrichment — up to 3 sentences / 280 chars).
+- **`stop`** → SELL alerts → **Daily Pulse** (always, even when no SELLs fire). Pulse reads OPEN positions plus latest `daily_prices.close` for the resolved `asOf` session, computes unrealised P&L, labels stops **BASE** vs **TIGHT**, flags **`⚠️ NEAR STOP`** when stop cushion is under **0.5× ATR(14)**, and shows the next ET Friday rebalance date.
+- Invalid / missing `--mode` fails loudly.
 
 ---
 
@@ -170,7 +171,7 @@ interface PipelineStep {
 ### 6.1 Prices — Massive.com
 
 - **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
-- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run for an ET **session** calendar date: default **previous** completed weekday session (T-1 ET civil day, then latest weekday on/before that day — Mon → prior Fri), or **`--date YYYY-MM-DD`**; universe from `data/universe/${UNIVERSE}.json` (default **nasdaq100**) + **QQQ**; **`--force`** refetches that session. Grouped daily endpoint in use as of Phase 4 (4.2). S4 resolved.
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run. **Session date resolution (Phase 9):** tries **T+0** (today's ET weekday) first; if the API returns 0 bars (market holiday or data not yet published) or throws (403/rate-limit), falls back to **T−1** (previous ET weekday). `--date YYYY-MM-DD` bypasses this logic. `--force` refetches regardless of DB currency. After a successful primary insert, **auto-backfill** checks the last 5 ET weekdays for gaps in QQQ's `daily_prices` and fills them (chronological order; market holidays logged and skipped; only dates strictly before `primarySessionDate` attempted to avoid free-tier 403s).
 - **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
@@ -248,6 +249,8 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 5 — Alert enrichment + intra-week visibility | Enriched BUY Telegram message, `brief --mode stop` Daily Pulse, S6 writer verification | ✅ Complete |
 | 6 — Live performance instrumentation | Stop proximity warning, ATR position sizer, live expectancy dashboard, positions `pnl_pct` + `exit_reason` (migration 005) | ✅ Complete |
 | 7 — Bug fixes + capital safety + instrumentation | `REBALANCE_DROP` exit reason; backtest `strategy` discriminator; corporate actions split adjuster; bear backtest extension (Sharpe 0.956 documented); healthcheck cron; watchlist bench #4–#8; **Saturday rebalance** cadence fix | ✅ Complete |
+| 8 — Scheduler reliability + stop audit | Scheduler idempotency (`pipeline_state`); trailing-stop audit log (`stop_movements`); parallel LLM enrichment; P7-G VIX research (falsified) | ✅ Complete |
+| 9 — Stop-replay correctness + ingestor modernisation | `replayExitReason` stale-stop fix; ratchet `nextHigh` over all unevaluated bars; SELL Telegram alerts; same-day artefact filter; T+0-first ingestor + auto-backfill; scheduler 20:00 ET window | ✅ Complete |
 
 
 ---
@@ -271,6 +274,11 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | — | FIXED (arch S1/S2) | Positions columns + signals composite uniqueness | ✅ **`003_positions_signals_upgrade.sql`** (after `001` baseline)                                                                                  |
 | — | BACKTEST | Sharpe 0.956 on 2022–2025 window misses >1.0 gate | **Closed (P7-G falsified)** — not high-VIX entry noise; VIX overlay inactive on rebalance Fridays; no param change |
 | — | BACKTEST | Survivorship bias in pre-2024 NDX100 constituent history | Accepted caveat |
+| — | FIXED (Phase 9) | `replayExitReason` seeded from `initialAtrStop` → false TRAILING_STOP; positions never ratcheted | ✅ Seeds from `currentStop`; loop anchored to `lastEvaluatedDate` |
+| — | FIXED (Phase 9) | Ratchet `nextHigh` used only `asOf` close → missed peaks in gaps | ✅ Scans all bars from `lastEvaluatedDate` through `asOf` |
+| — | FIXED (Phase 9) | SELL signals not sent to Telegram | ✅ `sendSellAlerts` on both modes before BUY/pulse |
+| — | FIXED (Phase 9) | Same-day artefact positions inflated live-perf stats | ✅ `exit_date > entry_date` filter in live-perf + SELL alert queries |
+| OPS | ACTION REQUIRED | Healthcheck cron should fire after 20:00 ET pipeline (~21:00 ET) | Update `deploy/ecosystem.config.cjs` |
 
 ---
 
@@ -293,12 +301,28 @@ Full record: **`spec/cue-phase8-complete.md`**.
 
 ---
 
-## 14. Document index
+## 14b. Phase 9 — complete (June 2026)
+
+| Task | Status |
+|------|--------|
+| **P9-A** `replayExitReason` stale-stop seed fix | ✅ `currentStop` + `lastEvaluatedDate` anchor |
+| **P9-B** Ratchet `nextHigh` over all unevaluated bars | ✅ `slice.filter(b => b.date > lastEvaluatedDate).reduce(max)` |
+| **P9-C** SELL signal Telegram alerts | ✅ Both modes; exit reason emoji + P&L; `alerted=1` after send |
+| **P9-D** Live perf same-day artefact filter | ✅ `exit_date > entry_date` in live-perf + SELL alert queries |
+| **P9-E** Dashboard SELL row + full rationale display | ✅ Exit reason + P&L in SELL row; full text rationale cell |
+| **P9-F** Scheduler 20:00–20:10 ET + T+0-first ingestor + auto-backfill | ✅ Shipped |
+
+**Pending operator action:** Update healthcheck cron to ~21:00 ET (`deploy/ecosystem.config.cjs`).
+
+Full record: **`spec/cue-phase9-complete.md`**.
+
+---
 
 | Document | Role |
 |---|---|
-| `spec/cue-phase8-complete.md` | Phase 8 session record (current) |
-| `spec/cue-phase7-complete.md` | Phase 7 record + Phase 8 handoff (historical) |
+| `spec/cue-phase9-complete.md` | **Phase 9 session record (current)** |
+| `spec/cue-phase8-complete.md` | Phase 8 session record (historical) |
+| `spec/cue-phase7-complete.md` | Phase 7 record (historical) |
 | `.cursor/rules/cue-sou.md` | Living engineering spec (this file) |
 | `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`011`) |
 | `.cursor/rules/cue-guardrails.md` | Hard constraints |
@@ -347,3 +371,5 @@ The strategy underperformed due to anti-momentum factor selection. The valuation
 ----
 
 *End of project-spec — prefer `src/db/migrations` and `src/agents/*.ts` over prose when in doubt.*
+
+

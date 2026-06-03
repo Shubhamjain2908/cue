@@ -236,17 +236,17 @@ Migrations **001**–**003**, **005**–**009** rely on PK/UNIQUE only (no extra
 
 ## Post-pipeline health (no table)
 
-**`cue healthcheck`** (`src/agents/healthcheck.ts`) verifies operational state after the **16:05–16:15 ET** scheduler window — typically via PM2 cron **`cue-healthcheck`** at **17:00 ET** (see `deploy/ecosystem.config.cjs`). Checks:
+**`cue healthcheck`** (`src/agents/healthcheck.ts`) — PM2 cron at **~21:00 ET** Mon–Fri (after the 20:00 ET pipeline window), **~10:00 ET** Saturday. Checks:
 
-1. **`daily_prices` currency** — `MAX(date)` vs `resolveLastETSession()` (same session rule as `cue ingest`).
-2. **Pipeline output** — **Saturday** rebalance: `signals` rows for today’s ET date; **Mon–Fri**: OPEN positions and/or non-`REBALANCE_DROP` closes today.
-3. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in the last 90 minutes; **SKIP** if the log file is missing.
+1. **`daily_prices` currency** — `MAX(date)` vs `resolveLastETSession()`.
+2. **Pipeline output** — Saturday: `signals` rows for today's ET date; Mon–Fri: OPEN positions and/or non-`REBALANCE_DROP` closes today.
+3. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in last 90 minutes.
 
-Results are sent via **`TELEGRAM_BOT_TOKEN`** / **`TELEGRAM_CHAT_ID`** (no separate alerts table).
+Results sent via `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`.
 
 ---
 
-## ER-style relationships (text)
+## ER-style relationships
 
 ```
 signals 1──* enrichments   (BUY and WATCHLIST signal_ids)
@@ -258,13 +258,3 @@ corporate_actions (ticker, ex_date)
 backtest_runs 1──* backtest_trades
 pipeline_state (key → value)
 ```
-
----
-
-## Regenerating this document from a live DB
-
-```bash
-sqlite3 db/cue.db ".schema"
-```
-
-Prefer **migration SQL** as the contract; fold ad-hoc dev `ALTER` into a new numbered migration before sharing.
