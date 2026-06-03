@@ -159,6 +159,87 @@ function previousWeekdayBeforeEtCivil(now: Date): string {
   return resolved;
 }
 
+/**
+ * Return the last `n` ET civil weekdays (Mon–Fri) on or before `now`, newest first.
+ * Used by backfill to detect gaps in `daily_prices`.
+ */
+function recentEtWeekdays(now: Date, n: number): string[] {
+  const results: string[] = [];
+  let { year, month, day } = getEtCalendarParts(now);
+  for (let attempts = 0; attempts < n * 3 && results.length < n; attempts++) {
+    const dow = weekdayUtcForNyCivilDate(year, month, day);
+    if (dow !== 0 && dow !== 6) {
+      const yStr = String(year).padStart(4, "0");
+      const mStr = String(month).padStart(2, "0");
+      const dStr = String(day).padStart(2, "0");
+      results.push(`${yStr}-${mStr}-${dStr}`);
+    }
+    // Step back one calendar day
+    const civil = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    civil.setUTCDate(civil.getUTCDate() - 1);
+    year = civil.getUTCFullYear();
+    month = civil.getUTCMonth() + 1;
+    day = civil.getUTCDate();
+  }
+  return results;
+}
+
+/**
+ * After the primary session ingest, detect and fill any gaps in `daily_prices`
+ * within the last `lookback` weekdays (default 5 ≈ one trading week).
+ * Skips dates that return 0 bars from Massive (market holidays).
+ * Skips dates already present in `daily_prices` for QQQ.
+ */
+async function backfillRecentGaps(input: {
+  db: CueDatabase;
+  apiKey: string;
+  primarySessionDate: string;
+  now: Date;
+  tickerMask: ReadonlySet<string>;
+  expectedMaskCount: number;
+  lookback: number;
+  logger: winston.Logger;
+}): Promise<void> {
+  const { db, apiKey, primarySessionDate, now, tickerMask, expectedMaskCount, lookback, logger } = input;
+
+  const candidates = recentEtWeekdays(now, lookback).filter(
+    // Only backfill dates that have already closed: strictly before the primary session.
+    // This prevents 403s from free-tier same-day restrictions.
+    (d) => d !== primarySessionDate && d < primarySessionDate,
+  );
+  if (candidates.length === 0) return;
+
+  const oldest = candidates[candidates.length - 1]!;
+  const present = new Set(
+    (
+      db
+        .prepare(`SELECT date FROM daily_prices WHERE ticker = 'QQQ' AND date >= ? ORDER BY date ASC`)
+        .all(oldest) as { date: string }[]
+    ).map((r) => r.date),
+  );
+
+  const missing = candidates.filter((d) => !present.has(d));
+  if (missing.length === 0) return;
+
+  logger.info(`ingest: backfilling ${String(missing.length)} gap(s): ${missing.join(", ")}`);
+
+  // Fetch oldest-first so DB is filled in chronological order.
+  for (const date of [...missing].reverse()) {
+    try {
+      const results = await fetchGroupedDaily({ apiKey, dateString: date });
+      if (results.length === 0) {
+        logger.info(`ingest: backfill ${date} — 0 bars (market holiday or weekend), skipping`);
+        continue;
+      }
+      insertGroupedSessionRows({ db, sessionDate: date, tickerMask, expectedMaskCount, rows: results, logger });
+      logger.info(`ingest: backfilled ${date}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`ingest: backfill ${date} failed: ${msg}`);
+    }
+  }
+}
+
 function parseFetchArgs(argv: string[]): {
   ticker?: string;
   force: boolean;
@@ -311,37 +392,126 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   const tickerMask = new Set(tickersForMask.map((t) => t.toUpperCase()));
   const expectedMaskCount = tickerMask.size;
 
-  const sessionDate =
-    explicitSessionDate ?? previousWeekdayBeforeEtCivil(new Date());
-
   const db = openCueDb(config.DB_PATH);
   try {
     const tickersUpper = [...tickerMask];
-    if (!force && isDbCurrentForSession(db, tickersUpper, sessionDate)) {
-      logger.info("daily_prices already current for session; skipping Massive API", {
-        sessionDate,
-        force,
-        tickerCount: tickersUpper.length,
-      });
+    const resolved = await resolveSessionDateAndResults({
+      db,
+      apiKey: config.POLYGON_API_KEY,
+      now: new Date(),
+      explicitDate: explicitSessionDate,
+      force,
+      tickersUpper,
+      logger,
+    });
+
+    if (resolved === null) {
+      // Already current or explicit date resolved to no-op.
       return;
     }
 
-    const results = await fetchGroupedDaily({
-      apiKey: config.POLYGON_API_KEY,
-      dateString: sessionDate,
-    });
-
     insertGroupedSessionRows({
       db,
-      sessionDate,
+      sessionDate: resolved.sessionDate,
       tickerMask,
       expectedMaskCount,
-      rows: results,
+      rows: resolved.results,
       logger,
     });
+
+    // Auto-backfill any gaps within the last 5 weekdays (handles transition day,
+    // missed pipeline runs, etc.). Skipped when --ticker is set (single-ticker probe).
+    if (singleTicker === undefined) {
+      await backfillRecentGaps({
+        db,
+        apiKey: config.POLYGON_API_KEY,
+        primarySessionDate: resolved.sessionDate,
+        now: new Date(),
+        tickerMask,
+        expectedMaskCount,
+        lookback: 5,
+        logger,
+      });
+    }
   } finally {
     db.close();
   }
+}
+
+/**
+ * Resolve which session date to ingest and fetch its grouped bars.
+ *
+ * Strategy (when no `--date` is given):
+ *   1. Try T+0 (today's ET weekday). If the API returns ≥1 bar, use it.
+ *   2. If T+0 returns 0 bars (market holiday, data not yet published, or weekend),
+ *      fall back to T−1 (previous ET weekday).
+ *
+ * Returns `null` when `daily_prices` is already current and `force` is false.
+ */
+async function resolveSessionDateAndResults(input: {
+  db: CueDatabase;
+  apiKey: string;
+  now: Date;
+  explicitDate: string | undefined;
+  force: boolean;
+  tickersUpper: string[];
+  logger: winston.Logger;
+}): Promise<{ sessionDate: string; results: MassiveGroupedBar[] } | null> {
+  const { db, apiKey, now, explicitDate, force, tickersUpper, logger } = input;
+
+  // Explicit --date: single attempt, no T+0/T-1 logic.
+  if (explicitDate !== undefined) {
+    if (!force && isDbCurrentForSession(db, tickersUpper, explicitDate)) {
+      logger.info("daily_prices already current for session; skipping Massive API", {
+        sessionDate: explicitDate,
+        tickerCount: tickersUpper.length,
+      });
+      return null;
+    }
+    const results = await fetchGroupedDaily({ apiKey, dateString: explicitDate });
+    return { sessionDate: explicitDate, results };
+  }
+
+  // T+0: today's ET civil weekday.
+  const { year, month, day } = getEtCalendarParts(now);
+  const t0 = latestWeekdayOnOrBeforeEtCivil(year, month, day);
+
+  if (t0 !== null) {
+    if (!force && isDbCurrentForSession(db, tickersUpper, t0)) {
+      logger.info("daily_prices already current for T+0; skipping Massive API", {
+        sessionDate: t0,
+        tickerCount: tickersUpper.length,
+      });
+      return null;
+    }
+    try {
+      const results = await fetchGroupedDaily({ apiKey, dateString: t0 });
+      if (results.length > 0) {
+        logger.info(`ingest: T+0 data available (${String(results.length)} bars)`, { sessionDate: t0 });
+        return { sessionDate: t0, results };
+      }
+      logger.info(
+        `ingest: T+0 returned 0 bars (market holiday or data not yet published) — falling back to T−1`,
+        { sessionDate: t0 },
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`ingest: T+0 fetch failed — falling back to T−1`, { sessionDate: t0, error: msg });
+    }
+  }
+
+  // T-1 fallback.
+  const t1 = previousWeekdayBeforeEtCivil(now);
+  if (!force && isDbCurrentForSession(db, tickersUpper, t1)) {
+    logger.info("daily_prices already current for T−1; skipping Massive API", {
+      sessionDate: t1,
+      tickerCount: tickersUpper.length,
+    });
+    return null;
+  }
+  logger.info(`ingest: using T−1 fallback`, { sessionDate: t1 });
+  const results = await fetchGroupedDaily({ apiKey, dateString: t1 });
+  return { sessionDate: t1, results };
 }
 
 const isMain =

@@ -45,8 +45,11 @@ module.exports = {
       time: true,
     },
   // PM2 `cron_restart` uses the HOST system timezone (not `TZ` env).
-  // Oracle Cloud VMs are usually UTC: use `0 21 * * 1-5` for 17:00 America/New_York (EDT).
-  // If the host clock is set to America/New_York, use `0 17 * * 1-5` instead.
+  // Pipeline now runs at 20:00–20:10 ET. Healthcheck must fire AFTER it.
+  // Oracle Cloud VMs are usually UTC:
+  //   Weekday: `0 2 * * 2-6` = 02:00 UTC Tue–Sat = 22:00 EDT / 21:00 EST
+  //     (covers Mon–Fri pipelines which finish by ~00:15 UTC)
+  //   If host clock is America/New_York: use `0 22 * * 1-5` instead.
     {
       name: 'cue-healthcheck',
       cwd: root,
@@ -55,7 +58,7 @@ module.exports = {
       interpreter: 'none',
       instances: 1,
       autorestart: false,
-      cron_restart: '0 21 * * 1-5',
+      cron_restart: '0 2 * * 2-6',
       watch: false,
       env_file: path.join(root, '.env'),
       env: {

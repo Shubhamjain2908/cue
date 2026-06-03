@@ -7,9 +7,9 @@ import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 /** Saturday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 6 Sat). */
 export const REBALANCE_DAY_OF_WEEK = 6;
 
-/** Mon–Fri stop path: after US cash close. */
-const WEEKDAY_WINDOW_START_MIN = 16 * 60 + 5;
-const WEEKDAY_WINDOW_END_MIN = 16 * 60 + 15;
+/** Mon–Fri stop path: 20:00–20:10 ET gives Massive free-tier ~4 h to publish T+0 EOD data. */
+const WEEKDAY_WINDOW_START_MIN = 20 * 60;
+const WEEKDAY_WINDOW_END_MIN = 20 * 60 + 10;
 /** Saturday rebalance: morning window (Friday EOD bars available from Massive). */
 const REBALANCE_WINDOW_START_MIN = 9 * 60 + 5;
 const REBALANCE_WINDOW_END_MIN = 9 * 60 + 15;

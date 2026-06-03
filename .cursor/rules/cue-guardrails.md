@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.3 · May 2026 — paths aligned to this repository*
+*v1.4 · June 2026 — Phase 9 (stop-replay fix, T+0 ingestor, SELL alerts, 20:00 ET window)*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
@@ -12,7 +12,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 |---|---|---|
 | **Regime gate — BUY suppression** | If QQQ close < SMA(200): suppress all new BUY signals. SELL and stop evaluation run unconditionally. | `src/analysers/momentum-screener.ts` |
 | **Top-N hard cap** | At most **3** momentum BUY entries per rebalance pass (`topN = 3` contract). | `src/analysers/momentum-screener.ts` (portfolio cap also tied to `MAX_POSITIONS` in config) |
-| **Rebalance cadence** | **Saturday 09:05–09:15 ET** — screener ranks on **Friday** OHLCV (last completed session). **Stop** evaluation runs **Mon–Fri 16:05–16:15 ET**. **Sunday** skips. | `scheduler.ts`, `daily-workflow.ts` |
+| **Rebalance cadence** | **Saturday 09:05–09:15 ET** — screener ranks on **Friday** OHLCV (last completed session). **Stop** evaluation runs **Mon–Fri 20:00–20:10 ET** (shifted Phase 9; allows T+0 same-day data). **Sunday** skips. | `scheduler.ts`, `daily-workflow.ts` |
 | **WATCHLIST bench cap** | `WATCHLIST` rows carry no entry / stop / sizing. **topN BUY cap (3)** is absolute — `WATCHLIST` must never open `positions`. | `momentum-screener.ts`, `telegram-dispatcher.ts`, `WATCHLIST_BENCH_DEPTH` |
 | **Corporate actions** | `cue adjust-splits` after **ingest** on both pipeline routes. **`critical: false`**. Idempotent via `corporate_actions` UNIQUE. | `src/ingestors/corporate-actions.ts`, `daily-workflow.ts` |
 | **Backtest reference** | Dashboard pins to `WHERE strategy = 'MOMENTUM' AND locked = 1`. New runs default **unlocked**. Lock requires explicit migration backfill after gate ceremony. | `src/briefing/queries.ts`, migration `009` |
@@ -32,7 +32,8 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 |---|---|---|
 | **No hallucinated financials** | LLM prompt is bounded; Yahoo DTO + signal row only. | `src/llm/prompt.ts`, `src/llm/enricher.ts` |
 | **Zod output validation** | All LLM enrichment JSON validated before `enrichments` write; retry path in enricher. | `src/llm/enricher.ts`, `src/llm/types.ts` |
-| **Fetcher currency guard** | Per ticker: `MAX(date)` in `daily_prices` vs expected last ET session — not “time since last HTTP request”. `--force` bypasses. | `src/ingestors/massive-price-ingestor.ts` |
+| **Fetcher currency guard** | Per ticker: `MAX(date)` in `daily_prices` vs expected last ET session. `--force` bypasses. | `src/ingestors/massive-price-ingestor.ts` |
+| **T+0-first with T-1 fallback** | Ingestor tries today's ET weekday (T+0) first; falls back to T-1 if API returns 0 bars or throws. `--date` bypasses both. Auto-backfill covers last 5 weekdays after primary insert (universe runs only; only dates `< primarySessionDate` attempted). | `src/ingestors/massive-price-ingestor.ts` |
 | **Data lag accepted** | Massive EOD may lag 1–2 sessions. | Operational assumption |
 | **Yahoo context TTL** | Cache policy in Yahoo bundle fetch. | `src/llm/yahooContext.ts` |
 
@@ -42,6 +43,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 
 | Guardrail | Rule | Enforced in |
 |---|---|---|
+| **SELL alerts fire on both modes** | `brief --mode stop` and `--mode rebalance` both dispatch SELL alerts first (before BUY alerts or Daily Pulse). Same-day artefacts (`exit_date = entry_date`) excluded from `listSellSignalsReadyToAlert`. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **BUY alerts on rebalance-style runs only** | `brief` / dispatcher use `--mode rebalance\|stop`; `stop` runs must not emit BUY alerts. | `src/briefing/telegram-dispatcher.ts` |
 | **BUY message derivation is local-only** | Entry range / stop / 1R come from the `signals` row; share count comes from `getConfig()` (`PORTFOLIO_VALUE_USD` when set, else `POSITION_SIZE_USD`) plus optional `enrichments` join. No new tables or external data sources. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **Stop-path Daily Pulse always fires** | `cue brief --mode stop` sends the Daily Pulse regardless of sell count; rebalance path behavior is unchanged. | `src/briefing/telegram-dispatcher.ts` |
@@ -60,7 +62,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 |---|---|---|
 | **Critical step abort** | Non-zero exit on critical step aborts chain. | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
 | **Non-critical continuation** | **adjust-splits**, enrich, brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
-| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the 16:05–16:15 chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. | `src/agents/healthcheck.ts` |
+| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the 20:00–20:10 chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. Update cron to fire ~21:00 ET after Phase 9 window shift. | `src/agents/healthcheck.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window; key set only on pipeline exit **0**. | `pipeline_state` + `src/db/queries.ts` (`getPipelineState` / `setPipelineState`), `src/agents/scheduler.ts` |
 | **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
 | **Mode / flag orthogonality** | `--force-rebalance` vs calendar **Saturday**; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
@@ -73,6 +75,8 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 |---|---|---|
 | **Max concurrent positions** | Bounded by screener + `MAX_POSITIONS` policy. | `momentum-screener.ts`, config |
 | **Stops persisted** | OPEN rows maintain `current_stop_loss` / `highest_close_since_entry` in DB. | `positions` table + screener / queries |
+| **Stop replay anchored to `lastEvaluatedDate`** | `replayExitReason` seeds `currentStop` from DB-persisted `COALESCE(current_stop_loss, initial_atr_stop)` and starts its loop from the bar **after** `MAX(stop_movements.as_of_date)` (falling back to `entry_date`). Re-walking already-evaluated bars with an evolved stop is forbidden. | `src/analysers/momentum-screener.ts` |
+| **Ratchet `nextHigh` over all unevaluated bars** | The stop-mode ratchet computes `nextHigh` as `max(prevHigh, close)` over **all** bars from `lastEvaluatedDate` (exclusive) through `asOf` (inclusive), not just the single `asOf` bar. Ensures missed peaks are recovered on the next run after a pipeline gap. | `src/analysers/momentum-screener.ts` |
 | **No new BUYs in bear regime** | BUY signals not emitted when QQQ below SMA200 on rebalance path. | `momentum-screener.ts` |
 
 ---
@@ -80,9 +84,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 ## New strategy guardrails
 
 | Guardrail | Rule |
-|---|---|
-| **Backtest before production code** | No new production screener without multi-year backtest gates (see arch doc). |
-| **Signal type isolation** | `signals.signal_type` distinguishes strategies (default **`MOMENTUM`**). |
-| **No surprise data sources** | New data vendors require architecture + reliability review. |
-| **Quality-GARP standalone screen: CLOSED** | Factor falsified on NDX100 2023–2025. Do not reopen as standalone screener. |
-| **Quality as momentum exclusion filter: research-only** | Proposed exclusion rule (`ROE < 15%` or `D/E > 2.0`) is not approved production logic. Requires a separate backtest spec and gate clearance before any code lands in live screening. |
+|-----------|------|
+| **Backtest before production code** | No new production screener without multi-year backtest gates (CAGR>12%, MaxDD<20%, Sharpe>1.0, Expectancy>0). |
+| **Signal type isolation** | `signals.signal_type` distinguishes strategies (default `MOMENTUM`). |
+| **No surprise data sources** | New data vendors require architecture + reliability review before any code lands. |
