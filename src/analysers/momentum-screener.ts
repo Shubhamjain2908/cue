@@ -459,13 +459,18 @@ export function runLiveScreen(
         if (bar === undefined) {
           continue;
         }
-        const prevHigh = pos.highestCloseSinceEntry ?? pos.entryPrice;
-        const nextHigh = Math.max(prevHigh, bar.close);
         const series = byTicker.get(pos.ticker);
         const slice = series ? sliceBarsThrough(series, asOf) : null;
         if (!slice || slice.length === 0) {
           continue;
         }
+        const prevHigh = pos.highestCloseSinceEntry ?? pos.entryPrice;
+        // Compute nextHigh over ALL unevaluated bars (date > lastEvaluatedDate through asOf),
+        // not just today's close. This recovers missed peaks when execute-stops has a gap
+        // (e.g. first catch-up run after the bug fix, or a weekend/holiday skip).
+        const nextHigh = slice
+          .filter((b) => b.date > pos.lastEvaluatedDate)
+          .reduce((m, b) => Math.max(m, b.close), prevHigh);
         const highs = slice.map((b) => b.high);
         const lows = slice.map((b) => b.low);
         const closes = slice.map((b) => b.close);
