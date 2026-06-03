@@ -320,7 +320,7 @@ program
 program
   .command("schedule")
   .description(
-    `Start scheduler daemon (${CUE_TIME_ZONE}; Sat 09:05–09:15 rebalance, Mon–Fri 16:05–16:15 stops)`,
+    `Start scheduler daemon (${CUE_TIME_ZONE}; Sat 09:05–09:15 rebalance, Mon–Fri 20:00–20:10 stops)`,
   )
   .action(
     wrap("schedule", async () => {

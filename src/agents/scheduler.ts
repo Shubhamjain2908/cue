@@ -321,7 +321,7 @@ export function runScheduleDaemonCli(): void {
   process.on("SIGTERM", shutdown);
 
   logger.info(
-    `scheduler_started pollMs=${POLL_MS} windowEt=Mon-Fri_16:05-16:15_Sat_09:05-09:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
+    `scheduler_started pollMs=${POLL_MS} windowEt=Mon-Fri_20:00-20:10_Sat_09:05-09:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
   );
   pollTimer = setInterval(schedulerTick, POLL_MS);
   schedulerTick();
