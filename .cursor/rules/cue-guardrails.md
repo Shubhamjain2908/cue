@@ -61,9 +61,9 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 
 | Guardrail | Rule | Enforced in |
 |---|---|---|
-| **Critical step abort** | Non-zero exit on critical step aborts chain. | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
+| **Critical step abort** | Non-zero exit on critical step aborts chain. Each step's exit code is persisted to `pipeline_state` (`step:{name}:last_exit_code`). | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
 | **Non-critical continuation** | **adjust-splits**, enrich, brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
-| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the morning chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. Cron should fire after 06:00 ET window. | `src/agents/healthcheck.ts` |
+| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the morning chain; reads `pipeline_state` critical-step exit codes (`checkPipelineStepState`), not PM2 logs; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. Cron should fire after 06:00 ET window. | `src/agents/healthcheck.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window; key set only on pipeline exit **0**. | `pipeline_state` + `src/db/queries.ts` (`getPipelineState` / `setPipelineState`), `src/agents/scheduler.ts` |
 | **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false "idle" while another instance holds the pipeline. | `src/agents/scheduler.ts` |
 | **Migration preflight** | Scheduler startup calls `verifyMigrations(heldDb)` and exits 2 if `HEAD_MIGRATION` (`016_signals_alerted_at`) is not in `_migrations`. Run `cue db:migrate` before starting the scheduler. Bump `HEAD_MIGRATION` in `scheduler.ts` whenever a new migration is added. | `src/agents/scheduler.ts` |

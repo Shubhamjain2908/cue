@@ -92,7 +92,7 @@ All operations: **`pnpm run cue -- <subcommand>`**. Help: **`pnpm run cue -- --h
 
 **Scheduler** (`scheduler.ts`): runs the same step lists inside the 06:00–06:10 ET window (§4.4); uses `stepsForMode("rebalance" | "stop")` from the registry — no duplicated step arrays.
 
-**Healthcheck** (`healthcheck.ts`): PM2 cron **~07:00 ET** Sun/Tue–Sat (`0 11 * * 0,2,3,4,5,6` UTC — fires after the 06:00 ET pipeline window).
+**Healthcheck** (`healthcheck.ts`): PM2 cron **~07:00 ET** Sun/Tue–Sat (`0 11 * * 0,2,3,4,5,6` UTC — fires after the 06:00 ET pipeline window). Checks: `daily_prices` currency, `ingest_staleness`, QQQ lag, stale OPEN positions, pipeline output for today's ET session, and **`pipeline_step_state`** (critical step exit codes from `pipeline_state` — not PM2 log grep).
 
 ### 4.3 Step type (`PipelineStep`)
 
@@ -126,7 +126,7 @@ interface PipelineStep {
 5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines in one process).
 6. If **`LOCK_PATH`** is held by a **live** PID (`process.kill(pid, 0)`) → warn and return; else acquire PID lock (unlink stale file if PID is dead).
 7. On startup: `verifyMigrations(heldDb)` checks **`HEAD_MIGRATION = "016_signals_alerted_at"`** is applied — exits 2 if not.
-8. Run **`runPipelineWithSteps(stepsForMode("rebalance" | "stop"), mode)`**; on exit code **0** only, **`setPipelineState`** writes **`last_successful_run_date`**; always clear **`isRunning`** and release **`LOCK_PATH`** in `finally`.
+8. Run **`runPipelineWithSteps(stepsForMode("rebalance" | "stop"), mode, heldDb)`** — after each subprocess step, writes **`step:{name}:last_exit_code`** and **`step:{name}:last_run_at`** to **`pipeline_state`**; on pipeline exit code **0** only, also writes **`last_successful_run_date`**; always clear **`isRunning`** and release **`LOCK_PATH`** in `finally`.
 
 **Startup / shutdown:** parent **`heldDb`** via **`openCueDb`** (read-write, applies WAL + pragmas via `applySqlitePragmas`) for health **`SELECT 1`**, **`pipeline_state`** reads/writes, and clean shutdown; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; subprocess **`cue`** steps open their own DB handles; keep **`heldDb`** until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
 
@@ -200,6 +200,7 @@ interface PipelineStep {
 - **Live Performance dashboard:** `getLivePerformanceSummary` / `getLivePerformanceByConfidence` exclude **`MANUAL`** and **`REBALANCE_DROP`**; backtest comparison metrics come from **`getMomentumBacktestSummary`** (`formatBacktestRef` in `template.ts`), not hardcoded constants.
 - **`backtest_trades` exit mapping** (simulator only, `closedTradeToDbExit` in `runner.ts`): `gapOrStop → TRAILING_STOP`; `maxHoldDays → TIME_EXIT`; `standardTakeProfit → MANUAL`; **`standardTrendBreak → REBALANCE_DROP`** (fixed in PR-6 migration `015`). `INITIAL_STOP` reserved in CHECK but not emitted by the current runner.
 - **T-1 staleness flag:** `massive-price-ingestor.ts` writes `pipeline_state.last_ingest_was_stale = "1"` when the resolved session date was already in `daily_prices`. `healthcheck.ts` check `ingest_staleness` reads this flag and returns FAIL if set.
+- **Pipeline step exit codes:** `runPipelineWithSteps` persists `step:{name}:last_exit_code` / `step:{name}:last_run_at` after every registry step. `healthcheck.ts` **`checkPipelineStepState`** FAILs when critical steps (`ingest`+`screen` on Sunday, `ingest`+`execute-stops` Tue–Sat) last exited non-zero; absent keys warn only.
 - **SQLite pragmas:** `applySqlitePragmas()` in `db/provider.ts` sets WAL, `busy_timeout=5000`, `synchronous=NORMAL`, `cache_size=-64000`, `mmap_size=268435456`, `temp_store=MEMORY` on every read-write connection. `openCueDbReadonly()` applies `busy_timeout=5000` only.
 - **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`).
 - **Next migration ID:** **`017`**.

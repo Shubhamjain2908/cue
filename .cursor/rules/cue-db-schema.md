@@ -196,6 +196,8 @@ Scheduler idempotency key/value store (`010_pipeline_state`).
 |-------------|---------|
 | `last_successful_run_date` | Scheduler idempotency (ET `YYYY-MM-DD`) |
 | `last_ingest_was_stale` | `"1"` if last universe ingest found no new bars (T-1 already in DB); `"0"` on fresh ingest. Read by `cue healthcheck` check `ingest_staleness`. |
+| `step:{name}:last_exit_code` | Last subprocess exit code for pipeline step `{name}` (`"0"` = success; `"-1"` if spawn failed). Written by `runPipelineWithSteps` after every step. |
+| `step:{name}:last_run_at` | ISO timestamp when step `{name}` last completed. |
 | `backfill_split_applied:{ticker}:{ex_date}` | Split replay idempotency for `daily_prices` (`cue backfill-splits` + live `applySplit`) |
 
 ---
@@ -258,8 +260,9 @@ Migrations **001**–**003**, **005**–**009** rely on PK/UNIQUE only (no extra
 
 1. **`daily_prices` currency** — `MAX(date)` vs `resolveLastETSession()`.
 2. **`ingest_staleness`** — reads `pipeline_state.last_ingest_was_stale`; FAIL if `"1"` (T-1 data was already in DB, no fresh bars ingested).
-3. **Pipeline output** — Sunday: `signals` rows for today's ET date; Mon–Sat: OPEN positions and/or non-`REBALANCE_DROP` closes today.
-4. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in last 90 minutes.
+3. **QQQ lag / stale OPEN positions** — regime data freshness and orphaned positions vs latest session.
+4. **Pipeline output** — Sunday: `signals` rows for today's ET date; Mon–Sat: OPEN positions and/or non-`REBALANCE_DROP` closes today.
+5. **`pipeline_step_state`** — reads `step:{name}:last_exit_code` for critical steps (`ingest` + `screen` on rebalance days; `ingest` + `execute-stops` on stop days). FAIL if any present key is non-`"0"`. Missing keys warn only (cold start / first deploy).
 
 Results sent via `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`.
 

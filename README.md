@@ -18,7 +18,7 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 - **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
 - On **Sunday rebalance** path (uses **Friday** EOD bars): **split adjustment**, fundamentals prefetch, full screen with `--force-rebalance`, LLM enrich, then brief (BUY alerts + optional **Next in Rank** bench).
 - On **Tue–Sat stop** path: price refresh, **split adjustment**, **execute-stops**, then brief (no rebalance-style screen).
-- After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, pipeline output, and PM2 error logs, then Telegram ✅/⚠️.
+- After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, pipeline output, and critical-step exit codes in `pipeline_state`, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
 Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
@@ -48,7 +48,7 @@ flowchart LR
   DB --> Brief["brief\ndashboard + Telegram"]
   Brief --> Out["dist/*.html\nTelegram API"]
   Sched["scheduler.ts\n60s poll, ET window"] -.->|"subprocess chain"| CLI
-  HC["healthcheck.ts\n~07:00 ET cron"] -.->|"post-window verify"| DB
+  HC["healthcheck.ts\n~07:00 ET cron"] -.->|"pipeline_state +\nDB checks"| DB
   HC -.-> Out
 ```
 
@@ -58,7 +58,7 @@ flowchart LR
 |------|--------|-----------|
 | **Registry pipeline** | `cue run-all`, `cue pipeline --now` | **Sunday** → rebalance chain; **Tue–Sat** → stop chain (`detectRunMode`); **Monday** idle. |
 | **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | **Sun 06:00–06:10 ET** rebalance; **Tue–Sat 06:00–06:10 ET** stops; **Monday** idle. |
-| **Healthcheck** | `cue healthcheck` | Post-window Telegram check; PM2 **`cue-healthcheck`** on Sun/Tue-Sat. |
+| **Healthcheck** | `cue healthcheck` | Post-window DB checks + Telegram; PM2 **`cue-healthcheck`** on Sun/Tue-Sat. |
 
 **LLM:** `src/llm/provider.ts` chooses **Anthropic**, **OpenAI**, **Google AI**, or **Vertex AI** from `LLM_PROVIDER`. The runtime contract is `LLMProvider.complete(messages, maxTokens)`; structured outputs are validated with **Zod** after parsing JSON from the model.
 
@@ -157,7 +157,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- pipeline --now` | Same as `run-all` (explicit one-shot) |
 | `pnpm run cue -- pipeline` | **No `--now`:** same daemon as **`pnpm run cue -- schedule`** |
 | `pnpm run cue -- schedule` | Scheduler daemon (`pnpm schedule`) |
-| `pnpm run cue -- healthcheck` | Post-pipeline checks (`daily_prices`, signals/stops, PM2 log) + Telegram alert |
+| `pnpm run cue -- healthcheck` | Post-pipeline checks (`daily_prices`, signals/stops, `pipeline_state` step exits) + Telegram alert |
 
 ### Other scripts (`package.json`)
 
