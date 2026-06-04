@@ -798,8 +798,9 @@ function closedTradeToDbExit(reason: ClosedBacktestTrade["exitReason"]): Backtes
     case "maxHoldDays":
       return "TIME_EXIT";
     case "standardTakeProfit":
-    case "standardTrendBreak":
       return "MANUAL";
+    case "standardTrendBreak":
+      return "REBALANCE_DROP";
     default:
       return "MANUAL";
   }

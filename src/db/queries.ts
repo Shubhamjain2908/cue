@@ -431,10 +431,15 @@ export function insertPosition(
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
 
-export type BacktestTradeExitReasonDb = "TRAILING_STOP" | "INITIAL_STOP" | "TIME_EXIT" | "MANUAL";
+export type BacktestTradeExitReasonDb =
+  | "TRAILING_STOP"
+  | "INITIAL_STOP"
+  | "TIME_EXIT"
+  | "MANUAL"
+  | "REBALANCE_DROP";
 
-/** Live `positions.exit_reason` — includes rotation drops not stored on `backtest_trades`. */
-export type PositionExitReasonDb = BacktestTradeExitReasonDb | "REBALANCE_DROP";
+/** Live `positions.exit_reason` — same CHECK set as `backtest_trades` (migration 015). */
+export type PositionExitReasonDb = BacktestTradeExitReasonDb;
 
 export type LiveStrategyExitReason =
   | "TRAILING_STOP"
