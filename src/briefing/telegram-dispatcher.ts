@@ -197,6 +197,9 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
     const sc = [sentiment, confidence].filter((s) => s.length > 0).join(" ");
     header += `  |  ${sc}`;
   }
+  if (row.enrichmentStatus && row.enrichmentStatus !== "OK") {
+    header += `  |  ⚠ ENRICHMENT_${row.enrichmentStatus}`;
+  }
 
   const lines = [
     header,
