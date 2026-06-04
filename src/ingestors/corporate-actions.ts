@@ -48,6 +48,8 @@ export type YahooFinanceHandle = InstanceType<typeof YahooFinance>;
 
 type CorporateActionType = "split" | "reverse_split";
 
+const YAHOO_TIMEOUT_MS = 15_000;
+
 type OpenPositionRow = {
   ticker: string;
   position_id: number;
@@ -58,6 +60,29 @@ type SplitEventLike = {
   numerator: number;
   denominator: number;
 };
+
+type ChartResult = {
+  events?: {
+    splits?: Record<string, SplitEventLike> | SplitEventLike[];
+  };
+};
+
+async function chartWithTimeout(
+  yf: YahooFinanceHandle,
+  ticker: string,
+  options: Parameters<YahooFinanceHandle["chart"]>[1],
+): Promise<ChartResult> {
+  return Promise.race([
+    yf.chart(ticker, options) as Promise<ChartResult>,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(new Error(`Yahoo chart() timed out after ${YAHOO_TIMEOUT_MS}ms for ${ticker}`)),
+        YAHOO_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
 
 function formatIsoDateYmd(value: Date | string | number): string {
   if (value instanceof Date) {
@@ -201,7 +226,7 @@ export async function adjustSplitsForOpenPositions(
 
   for (const [ticker] of byTicker) {
     try {
-      const result = await yf.chart(ticker, {
+      const result = await chartWithTimeout(yf, ticker, {
         period1,
         period2,
         interval: "1d",
@@ -209,9 +234,7 @@ export async function adjustSplitsForOpenPositions(
         return: "object",
       });
 
-      const splits = extractSplitEvents(
-        result.events?.splits as Record<string, SplitEventLike> | SplitEventLike[] | undefined,
-      );
+      const splits = extractSplitEvents(result.events?.splits);
 
       if (splits.length === 0) {
         logger.debug(`[corporate-actions] No split events for ${ticker} in ${period1}..${period2}`);

@@ -6,7 +6,9 @@ import axios from "axios";
 import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
+import { cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
+import { setPipelineState } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
 import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
 import {
@@ -141,6 +143,37 @@ function latestWeekdayOnOrBeforeEtCivil(
     d = civil.getUTCDate();
   }
   return null;
+}
+
+/** Latest Mon–Fri on or before today's ET civil date (T+0 session target). */
+function currentEtWeekdaySession(now: Date): string {
+  const { year, month, day } = getEtCalendarParts(now);
+  const resolved = latestWeekdayOnOrBeforeEtCivil(year, month, day);
+  if (resolved === null) {
+    throw new Error("Could not resolve current ET session date for grouped ingest");
+  }
+  return resolved;
+}
+
+function dailyPricesHasAnyRowOnDate(db: CueDatabase, date: string): boolean {
+  const row = db
+    .prepare<{ date: string }, { count: number }>(
+      "SELECT COUNT(*) as count FROM daily_prices WHERE date = @date LIMIT 1",
+    )
+    .get({ date });
+  return (row?.count ?? 0) > 0;
+}
+
+function markT1IngestStaleness(db: CueDatabase, t1Date: string): void {
+  if (dailyPricesHasAnyRowOnDate(db, t1Date)) {
+    cueLogger.warn(
+      `ingest: T+0 unavailable and T-1 (${t1Date}) already in daily_prices — ` +
+        "pipeline is running on stale data. No new bars ingested.",
+    );
+    setPipelineState(db, "last_ingest_was_stale", "1");
+  } else {
+    setPipelineState(db, "last_ingest_was_stale", "0");
+  }
 }
 
 /** ET civil date one calendar day before `now`, then latest Mon–Fri on or before that day. */
@@ -438,11 +471,17 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
   }
 }
 
+type FetchGroupedDailyFn = (input: {
+  apiKey: string;
+  dateString: string;
+}) => Promise<MassiveGroupedBar[]>;
+
 /**
  * Resolve which session date to ingest and fetch its grouped bars.
  *
- * Strategy (when no `--date` is given): always ingest T-1 (previous ET weekday).
- * This avoids free-tier unauthorized / unpublished same-day grouped bars.
+ * Strategy (when no `--date` is given): try T+0 (current ET weekday) first; if the
+ * API returns 0 bars or throws, fall back to T-1. After a T-1 fallback, set
+ * `pipeline_state.last_ingest_was_stale` when that date already exists in `daily_prices`.
  *
  * Returns `null` when `daily_prices` is already current and `force` is false.
  */
@@ -454,8 +493,10 @@ async function resolveSessionDateAndResults(input: {
   force: boolean;
   tickersUpper: string[];
   logger: winston.Logger;
+  fetchGroupedDailyFn?: FetchGroupedDailyFn;
 }): Promise<{ sessionDate: string; results: MassiveGroupedBar[] } | null> {
   const { db, apiKey, now, explicitDate, force, tickersUpper, logger } = input;
+  const fetchBars = input.fetchGroupedDailyFn ?? fetchGroupedDaily;
 
   // Explicit --date: single attempt, no T+0/T-1 logic.
   if (explicitDate !== undefined) {
@@ -466,21 +507,47 @@ async function resolveSessionDateAndResults(input: {
       });
       return null;
     }
-    const results = await fetchGroupedDaily({ apiKey, dateString: explicitDate });
+    const results = await fetchBars({ apiKey, dateString: explicitDate });
     return { sessionDate: explicitDate, results };
   }
 
-  // Default path: T-1 previous ET weekday.
+  const t0 = currentEtWeekdaySession(now);
   const t1 = previousWeekdayBeforeEtCivil(now);
+
+  if (!force && isDbCurrentForSession(db, tickersUpper, t0)) {
+    setPipelineState(db, "last_ingest_was_stale", "0");
+    logger.info("daily_prices already current for T+0; skipping Massive API", {
+      sessionDate: t0,
+      tickerCount: tickersUpper.length,
+    });
+    return null;
+  }
+
+  try {
+    const t0Results = await fetchBars({ apiKey, dateString: t0 });
+    if (t0Results.length > 0) {
+      setPipelineState(db, "last_ingest_was_stale", "0");
+      logger.info("ingest: using T+0 session", { sessionDate: t0 });
+      return { sessionDate: t0, results: t0Results };
+    }
+    logger.info(`ingest: T+0 (${t0}) returned 0 bars; falling back to T-1`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`ingest: T+0 (${t0}) fetch failed; falling back to T-1: ${msg}`);
+  }
+
   if (!force && isDbCurrentForSession(db, tickersUpper, t1)) {
+    markT1IngestStaleness(db, t1);
     logger.info("daily_prices already current for T-1; skipping Massive API", {
       sessionDate: t1,
       tickerCount: tickersUpper.length,
     });
     return null;
   }
-  logger.info(`ingest: using T-1 session`, { sessionDate: t1 });
-  const results = await fetchGroupedDaily({ apiKey, dateString: t1 });
+
+  logger.info("ingest: using T-1 session", { sessionDate: t1 });
+  const results = await fetchBars({ apiKey, dateString: t1 });
+  markT1IngestStaleness(db, t1);
   return { sessionDate: t1, results };
 }
 
@@ -512,4 +579,9 @@ export function resolveLastETSession(now: Date = new Date()): string {
   return previousWeekdayBeforeEtCivil(now);
 }
 
-export { previousWeekdayBeforeEtCivil };
+export {
+  currentEtWeekdaySession,
+  markT1IngestStaleness,
+  previousWeekdayBeforeEtCivil,
+  resolveSessionDateAndResults,
+};

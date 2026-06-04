@@ -7,6 +7,7 @@ import type { Logger } from "winston";
 import { REBALANCE_DAY_OF_WEEK, weekdayUtcForNyCalendarDate } from "./daily-workflow.js";
 import type { AppConfig } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE, getExchangeDateString } from "../config/cue-timezone.js";
+import { getPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
 import { getStaleOpenPositions } from "../briefing/queries.js";
 import { resolveLastETSession } from "../ingestors/massive-price-ingestor.js";
@@ -167,6 +168,24 @@ export function checkQqqLag(db: CueDatabase, now: Date): CheckResult {
     name,
     status: "FAIL",
     message: `QQQ stale: max=${qqqMax}, expected ${expectedSession} (regime data materially behind)`,
+  };
+}
+
+export function checkIngestStaleness(db: CueDatabase): CheckResult {
+  const name = "ingest_staleness";
+  const staleFlag = getPipelineState(db, "last_ingest_was_stale");
+  if (staleFlag === "1") {
+    return {
+      name,
+      status: "FAIL",
+      message:
+        "Last ingest fell back to T-1 data already in DB — stops evaluated on stale prices",
+    };
+  }
+  return {
+    name,
+    status: "PASS",
+    message: "last ingest did not use stale T-1 fallback",
   };
 }
 
@@ -380,6 +399,7 @@ export async function runHealthcheck(
 
   const results: CheckResult[] = [
     checkDailyPricesCurrency(db, now),
+    checkIngestStaleness(db),
     checkQqqLag(db, now),
     checkStalePositions(db, now),
     checkPipelineRanToday(db, now),

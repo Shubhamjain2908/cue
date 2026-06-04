@@ -262,6 +262,31 @@ describe("adjustSplitsForOpenPositions", () => {
     db.close();
   });
 
+  it("rejects when Yahoo chart hangs past the 15s hard timeout", async () => {
+    vi.useFakeTimers();
+    const db = openMemoryDb();
+    seedOpenPosition(db);
+    const chart = vi.fn(
+      () =>
+        new Promise<never>(() => {
+          /* never resolves */
+        }),
+    );
+    const yf = { chart } as unknown as YahooFinanceHandle;
+    const logger = silentLogger();
+    const warnSpy = vi.spyOn(logger, "warn");
+
+    const run = adjustSplitsForOpenPositions(db, yf, logger);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await run;
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/Yahoo chart failed for AAPL.*timed out after 15000ms/),
+    );
+    vi.useRealTimers();
+    db.close();
+  });
+
   it("continues when one ticker fails and still adjusts another", async () => {
     const db = openMemoryDb();
     const exDate = "2024-06-05";

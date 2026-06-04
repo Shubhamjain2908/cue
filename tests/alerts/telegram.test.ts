@@ -4,12 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BuyAlertPendingRow } from "../../src/briefing/queries.js";
 import {
+  deriveBuyAlertShares,
   formatTelegramAlert,
   parseAlertModeFromArgv,
   sendDailyPulse,
   sendSellAlerts,
   sendWatchlistBenchAlerts,
 } from "../../src/briefing/telegram-dispatcher.js";
+import type { AppConfig } from "../../src/config/index.js";
 import { formatWatchlistBench } from "../../src/briefing/template.js";
 import { resetConfigCache } from "../../src/config/index.js";
 import { insertDailyPrices, insertPosition, insertSignal } from "../../src/db/queries.js";
@@ -76,6 +78,40 @@ function sampleBuyAlertRow(overrides: Partial<BuyAlertPendingRow> = {}): BuyAler
     ...overrides,
   };
 }
+
+describe("deriveBuyAlertShares fallback cap", () => {
+  const row = sampleBuyAlertRow({ price: 50 });
+
+  function fallbackConfig(overrides: Partial<AppConfig>): AppConfig {
+    return {
+      POSITION_SIZE_USD: 10_000,
+      MAX_POSITIONS: 3,
+      PORTFOLIO_VALUE_USD: undefined,
+      ...overrides,
+    } as AppConfig;
+  }
+
+  it("caps shares at 5% of implied book when raw sizing exceeds cap", () => {
+    const { shares } = deriveBuyAlertShares(row, fallbackConfig({ POSITION_SIZE_USD: 10_000 }));
+    expect(shares).toBe(30);
+  });
+
+  it("does not clamp when rawShares is below the 5% cap", () => {
+    const { shares } = deriveBuyAlertShares(
+      row,
+      fallbackConfig({ POSITION_SIZE_USD: 1_000, MAX_POSITIONS: 30 }),
+    );
+    expect(shares).toBe(20);
+  });
+
+  it("floors shares to 1 when entry mid is extreme", () => {
+    const { shares } = deriveBuyAlertShares(
+      sampleBuyAlertRow({ price: 999_999 }),
+      fallbackConfig({ POSITION_SIZE_USD: 1_000 }),
+    );
+    expect(shares).toBe(1);
+  });
+});
 
 describe("formatTelegramAlert", () => {
   beforeEach(() => {
