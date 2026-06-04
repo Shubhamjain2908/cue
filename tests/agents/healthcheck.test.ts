@@ -1,14 +1,10 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import winston from "winston";
 
 import {
   checkIngestStaleness,
-  checkPm2Logs,
+  checkPipelineStepState,
   checkQqqLag,
   checkStalePositions,
   runHealthcheck,
@@ -54,6 +50,27 @@ function seedDailyPrices(db: SqliteConnection, sessionDate: string, tickers: str
   }
 }
 
+function seedStopDayOpenBook(db: SqliteConnection): void {
+  insertSignal(db, {
+    ticker: "AAPL",
+    date: "2026-01-02",
+    signal: "BUY",
+    price: 100,
+    momentumRank: 1,
+    universeRankedCount: 50,
+    momentum12_1Return: 0.1,
+    atr14: 2,
+    initialAtrStop: 90,
+  });
+  const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
+  insertPosition(db, {
+    signalId,
+    entryDate: "2026-01-02",
+    entryPrice: 100,
+    status: "OPEN",
+  });
+}
+
 describe("runHealthcheck", () => {
   it("sends pass Telegram and returns 0 when all checks pass", async () => {
     const db = openMemoryDb();
@@ -73,12 +90,13 @@ describe("runHealthcheck", () => {
       atr14: 2,
       initialAtrStop: 90,
     });
+    setPipelineState(db, "step:ingest:last_exit_code", "0");
+    setPipelineState(db, "step:screen:last_exit_code", "0");
 
     const sendTelegram = vi.fn().mockResolvedValue(undefined);
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
       now: () => now,
       sendTelegram,
-      resolveLogPath: () => path.join(os.tmpdir(), "cue-healthcheck-missing.log"),
     });
 
     expect(code).toBe(0);
@@ -87,7 +105,7 @@ describe("runHealthcheck", () => {
     expect(text).toContain("✅ Cue healthcheck passed");
     expect(text).toContain("daily_prices current to");
     expect(text).toContain(`signals present for ${todayEt}`);
-    expect(text).toContain("log file not found");
+    expect(text).toContain("pipeline_step_state:");
     db.close();
   });
 
@@ -113,7 +131,6 @@ describe("runHealthcheck", () => {
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
       now: () => now,
       sendTelegram,
-      resolveLogPath: () => path.join(os.tmpdir(), "cue-healthcheck-missing.log"),
     });
 
     expect(code).toBe(1);
@@ -133,7 +150,6 @@ describe("runHealthcheck", () => {
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
       now: () => now,
       sendTelegram,
-      resolveLogPath: () => path.join(os.tmpdir(), "cue-healthcheck-missing.log"),
     });
 
     expect(code).toBe(1);
@@ -142,85 +158,46 @@ describe("runHealthcheck", () => {
     db.close();
   });
 
-  it("fails when recent error-level log lines are present", async () => {
+  it("fails when a critical pipeline step last exited non-zero", async () => {
     const db = openMemoryDb();
     const now = MONDAY_HEALTHCHECK;
     const session = resolveLastETSession(now);
     seedDailyPrices(db, session, ["QQQ", "AAPL"]);
-    insertSignal(db, {
-      ticker: "AAPL",
-      date: "2026-01-02",
-      signal: "BUY",
-      price: 100,
-      momentumRank: 1,
-      universeRankedCount: 50,
-      momentum12_1Return: 0.1,
-      atr14: 2,
-      initialAtrStop: 90,
-    });
-    const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
-    insertPosition(db, {
-      signalId,
-      entryDate: "2026-01-02",
-      entryPrice: 100,
-      status: "OPEN",
-    });
-
-    const logPath = path.join(os.tmpdir(), `cue-healthcheck-err-${process.pid}.log`);
-    const errLine = `${now.toISOString()} pipeline error: simulated PM2 failure`;
-    fs.writeFileSync(logPath, `${errLine}\n`, "utf8");
+    seedStopDayOpenBook(db);
+    setPipelineState(db, "step:ingest:last_exit_code", "0");
+    setPipelineState(db, "step:execute-stops:last_exit_code", "1");
+    setPipelineState(db, "step:execute-stops:last_run_at", "2026-01-05T11:00:00.000Z");
 
     const sendTelegram = vi.fn().mockResolvedValue(undefined);
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
       now: () => now,
       sendTelegram,
-      resolveLogPath: () => logPath,
     });
 
     expect(code).toBe(1);
     const text = sendTelegram.mock.calls[0]![0] as string;
-    expect(text).toContain("pm2_logs:");
-    expect(text).toContain("simulated PM2 failure");
-    fs.unlinkSync(logPath);
+    expect(text).toContain("pipeline_step_state:");
+    expect(text).toContain("execute-stops exited 1");
     db.close();
   });
 
-  it("skips missing log file without failing overall", async () => {
+  it("passes pipeline step check on cold DB without failing on missing keys", async () => {
     const db = openMemoryDb();
     const now = MONDAY_HEALTHCHECK;
     const session = resolveLastETSession(now);
     seedDailyPrices(db, session, ["QQQ", "AAPL"]);
-    insertSignal(db, {
-      ticker: "AAPL",
-      date: "2026-01-02",
-      signal: "BUY",
-      price: 100,
-      momentumRank: 1,
-      universeRankedCount: 50,
-      momentum12_1Return: 0.1,
-      atr14: 2,
-      initialAtrStop: 90,
-    });
-    const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
-    insertPosition(db, {
-      signalId,
-      entryDate: "2026-01-02",
-      entryPrice: 100,
-      status: "OPEN",
-    });
+    seedStopDayOpenBook(db);
 
-    const missingLog = path.join(os.tmpdir(), `cue-healthcheck-nolog-${process.pid}.log`);
     const sendTelegram = vi.fn().mockResolvedValue(undefined);
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
       now: () => now,
       sendTelegram,
-      resolveLogPath: () => missingLog,
     });
 
     expect(code).toBe(0);
     const text = sendTelegram.mock.calls[0]![0] as string;
     expect(text).toContain("✅");
-    expect(text).toContain("log file not found");
+    expect(text).toContain("All critical steps exited 0");
     db.close();
   });
 
@@ -229,37 +206,51 @@ describe("runHealthcheck", () => {
     const now = MONDAY_HEALTHCHECK;
     const session = resolveLastETSession(now);
     seedDailyPrices(db, session, ["QQQ", "AAPL"]);
-    insertSignal(db, {
-      ticker: "AAPL",
-      date: "2026-01-02",
-      signal: "BUY",
-      price: 100,
-      momentumRank: 1,
-      universeRankedCount: 50,
-      momentum12_1Return: 0.1,
-      atr14: 2,
-      initialAtrStop: 90,
-    });
-    const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
-    insertPosition(db, {
-      signalId,
-      entryDate: "2026-01-02",
-      entryPrice: 100,
-      status: "OPEN",
-    });
+    seedStopDayOpenBook(db);
 
     const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const sendTelegram = vi.fn().mockRejectedValue(new Error("network down"));
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
       now: () => now,
       sendTelegram,
-      resolveLogPath: () => path.join(os.tmpdir(), "cue-healthcheck-missing.log"),
     });
 
     expect(code).toBe(1);
     expect(stderrSpy).toHaveBeenCalled();
     expect(sendTelegram).toHaveBeenCalledTimes(1);
     stderrSpy.mockRestore();
+    db.close();
+  });
+});
+
+describe("checkPipelineStepState", () => {
+  it("passes when stop-mode critical steps exited 0", () => {
+    const db = openMemoryDb();
+    setPipelineState(db, "step:ingest:last_exit_code", "0");
+    setPipelineState(db, "step:execute-stops:last_exit_code", "0");
+
+    const result = checkPipelineStepState(db, "stop");
+    expect(result.status).toBe("PASS");
+    expect(result.message).toContain("All critical steps exited 0");
+    db.close();
+  });
+
+  it("fails when execute-stops last exited 1", () => {
+    const db = openMemoryDb();
+    setPipelineState(db, "step:ingest:last_exit_code", "0");
+    setPipelineState(db, "step:execute-stops:last_exit_code", "1");
+    setPipelineState(db, "step:execute-stops:last_run_at", "2026-01-05T11:00:00.000Z");
+
+    const result = checkPipelineStepState(db, "stop");
+    expect(result.status).toBe("FAIL");
+    expect(result.message).toContain("execute-stops exited 1");
+    db.close();
+  });
+
+  it("does not fail when step keys are missing (cold start)", () => {
+    const db = openMemoryDb();
+    const result = checkPipelineStepState(db, "stop");
+    expect(result.status).toBe("PASS");
     db.close();
   });
 });
@@ -281,14 +272,6 @@ describe("checkIngestStaleness", () => {
     setPipelineState(db, "last_ingest_was_stale", "0");
     expect(checkIngestStaleness(db).status).toBe("PASS");
     db.close();
-  });
-});
-
-describe("checkPm2Logs", () => {
-  it("returns SKIP when log path is absent", () => {
-    const missing = path.join(os.tmpdir(), `cue-healthcheck-skip-${process.pid}.log`);
-    const result = checkPm2Logs(missing, new Date());
-    expect(result.status).toBe("SKIP");
   });
 });
 
