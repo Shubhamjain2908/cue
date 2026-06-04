@@ -2,9 +2,11 @@
 
 **Role, guardrails, and workflow:** **`.cursor/rules/.cursorrules`**.
 
-**Repo-accurate behaviour and CLI:** **`.cursor/rules/cue-sou.md`**.
+**Repo-accurate behaviour, pipeline, and CLI:** **`spec/cue-reference.md`**.
 
-**Phase record:** **`spec/cue-phase8-complete.md`**.
+**Architecture decisions, migration ledger, and research archive:** **`spec/cue-handoff.md`**.
+
+**Historical long-form spec / legacy background:** **`.cursor/rules/cue-sou.md`**.
 
 **SQLite schema (migrations `001`–`011`):** **`.cursor/rules/cue-db-schema.md`**.
 
