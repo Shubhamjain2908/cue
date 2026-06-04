@@ -105,8 +105,8 @@ function main(): void {
   });
 
   try {
-    runBackfillHistoricalSplitAdjustments(db, logger);
-    process.exit(0);
+    const result = runBackfillHistoricalSplitAdjustments(db, logger);
+    process.exit(result.failed > 0 ? 1 : 0);
   } finally {
     db.close();
   }
