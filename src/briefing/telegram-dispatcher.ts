@@ -209,6 +209,10 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
     `Sector: ${row.sector ?? "N/A"}  |  Earnings: ${row.earningsDate ?? "N/A"}`,
   ];
 
+  if (row.enrichmentStatus !== "OK") {
+    lines.push(`⚠️ enrichment unavailable (${row.enrichmentStatus})`);
+  }
+
   const rationale = row.rationale ? trimRationale(row.rationale) : "";
   if (rationale) {
     lines.push(rationale);

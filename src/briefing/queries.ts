@@ -205,6 +205,7 @@ export interface BuyAlertPendingRow {
   earningsDate: string | null;
   sector: string | null;
   confidence: string | null;
+  enrichmentStatus: string;
 }
 
 /** SELL signal row for Telegram exit alerts. */
@@ -265,7 +266,8 @@ export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[
       e.rationale AS rationale,
       e.earnings_date AS earningsDate,
       e.sector AS sector,
-      e.confidence AS confidence
+      e.confidence AS confidence,
+      COALESCE(e.status, 'OK') AS enrichmentStatus
     FROM signals s
     LEFT JOIN enrichments e ON e.signal_id = s.id
     WHERE s.signal = 'BUY' AND s.alerted = 0
@@ -349,6 +351,7 @@ export interface RecentSignal {
   sentiment: string | null;
   rationale: string | null;
   sector: string | null;
+  enrichmentStatus: string;
   /** Populated for SELL rows only: reason the position was closed. */
   exit_reason: string | null;
   /** Populated for SELL rows only: realised P&L % vs entry price. */
@@ -565,6 +568,7 @@ export function extractDashboardPayload(): DashboardPayload {
         e.sentiment AS sentiment,
         e.rationale AS rationale,
         e.sector AS sector,
+        COALESCE(e.status, 'OK') AS enrichmentStatus,
         closed.exit_reason AS exit_reason,
         CASE
           WHEN closed.entry_price IS NOT NULL AND closed.entry_price > 0
