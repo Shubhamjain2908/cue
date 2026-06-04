@@ -13,7 +13,6 @@ import {
   runPipeline,
   runPipelineWithSteps,
   stepsForMode,
-  type PipelineStep,
   weekdayUtcForNyCalendarDate,
 } from "../src/agents/daily-workflow.js";
 
@@ -63,6 +62,7 @@ describe("stepsForMode", () => {
     expect(stepsForMode("rebalance").map((s) => s.name)).toEqual([
       "ingest",
       "adjust-splits",
+      "enrich-fundamentals",
       "screen",
       "enrich",
       "brief",
@@ -150,22 +150,8 @@ describe("getNyCalendarWeekday", () => {
 });
 
 describe("runPipelineWithSteps", () => {
-  const schedulerFridayLike: PipelineStep[] = [
-    { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
-    { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
-    { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
-    { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
-    { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "both" },
-    {
-      name: "brief",
-      cueArgs: ["brief"],
-      critical: false,
-      runOn: "both",
-      forwardArgs: ["--mode"],
-    },
-  ];
-
   it("runs scheduler Friday order with rebalance screen flags", () => {
+    const schedulerFridayLike = stepsForMode("rebalance");
     const calls: string[][] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       calls.push(args !== undefined ? [...args] : []);
@@ -242,7 +228,14 @@ describe("runPipeline", () => {
 
     const code = runPipeline("rebalance", { spawn });
     expect(code).toBe(0);
-    expect(scripts).toEqual(["ingest", "adjust-splits", "screen", "enrich", "brief"]);
+    expect(scripts).toEqual([
+      "ingest",
+      "adjust-splits",
+      "enrich-fundamentals",
+      "screen",
+      "enrich",
+      "brief",
+    ]);
   });
 
   it("runs execute-stops on stop mode instead of screen", () => {

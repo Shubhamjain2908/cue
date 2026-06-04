@@ -10,13 +10,14 @@ import { getPipelineState, setPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
 import { openCueDb } from "../db/provider.js";
 
+import { cueLogger } from "../cli/cue-logger.js";
 import {
   executionWindowEtForDate,
   formatEtYmd,
   getNyCalendarWeekday,
   isWithinExecutionWindow,
-  type PipelineStep,
   runPipelineWithSteps,
+  stepsForMode,
 } from "./daily-workflow.js";
 
 const POLL_MS = 60_000;
@@ -24,35 +25,9 @@ const POLL_MS = 60_000;
 /** `pipeline_state.key` — ET `YYYY-MM-DD` of last scheduler run that exited 0. */
 const PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE = "last_successful_run_date";
 
-/** Sunday morning: full rebalance (Friday session OHLCV from T-1 ingest). */
-const SCHEDULER_REBALANCE_STEPS: PipelineStep[] = [
-  { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
-  { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
-  { name: "enrich-fundamentals", cueArgs: ["enrich-fundamentals"], critical: false, runOn: "both" },
-  { name: "screen", cueArgs: ["screen"], critical: true, runOn: "both" },
-  { name: "enrich", cueArgs: ["enrich"], critical: false, runOn: "both" },
-  {
-    name: "brief",
-    cueArgs: ["brief"],
-    critical: false,
-    runOn: "both",
-    forwardArgs: ["--mode"],
-  },
-];
-
-/** Tue–Sat maintenance: stop path (Monday idles; no same-day data dependency). */
-const SCHEDULER_WEEKDAY_STOP_STEPS: PipelineStep[] = [
-  { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
-  { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
-  { name: "execute-stops", cueArgs: ["execute-stops"], critical: true, runOn: "both" },
-  {
-    name: "brief",
-    cueArgs: ["brief"],
-    critical: false,
-    runOn: "both",
-    forwardArgs: ["--mode"],
-  },
-];
+// MAINTAINER NOTE: bump this string whenever a new migration is added.
+// verifyMigrations() will exit(2) if the DB is behind HEAD.
+export const HEAD_MIGRATION = "016_signals_alerted_at";
 
 const logger = winston.createLogger({
   defaultMeta: { service: "scheduler" },
@@ -198,12 +173,28 @@ function releaseSchedulerLock(lockPath: string): void {
   }
 }
 
+export function verifyMigrations(db: CueDatabase): void {
+  const row = db
+    .prepare("SELECT id FROM _migrations WHERE id = ? LIMIT 1")
+    .get(HEAD_MIGRATION) as { id: string } | undefined;
+
+  if (!row) {
+    cueLogger.error(
+      `scheduler: migration '${HEAD_MIGRATION}' not applied — ` +
+        "run `cue db:migrate` before starting the scheduler.",
+    );
+    db.close();
+    process.exit(2);
+  }
+}
+
 function openAndLogHealth(): void {
   try {
     const cfg = getConfig();
     const now = new Date();
     heldDb = openCueDb(cfg.DB_PATH);
     heldDb.prepare("SELECT 1 AS ok").get();
+    verifyMigrations(heldDb);
     logger.info(
       `scheduler_health ${JSON.stringify({
         ok: true,
@@ -265,10 +256,10 @@ function schedulerTick(): void {
   try {
     if (kind === "rebalance") {
       logger.info(`scheduler_fire kind=rebalance etDate=${todayEt} dow=${dow}`);
-      exitCode = runPipelineWithSteps(SCHEDULER_REBALANCE_STEPS, "rebalance");
+      exitCode = runPipelineWithSteps(stepsForMode("rebalance"), "rebalance");
     } else {
       logger.info(`scheduler_fire kind=weekday_stop etDate=${todayEt} dow=${dow}`);
-      exitCode = runPipelineWithSteps(SCHEDULER_WEEKDAY_STOP_STEPS, "stop");
+      exitCode = runPipelineWithSteps(stepsForMode("stop"), "stop");
     }
   } finally {
     isRunning = false;

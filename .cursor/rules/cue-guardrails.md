@@ -22,7 +22,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **Momentum formula locked** | `(close[today-21] - close[today-252]) / close[today-252]`. Formula unchanged; **split-adjusted `daily_prices`** required (PR-4). Any strategy change requires backtest re-validation against locked gate metrics (id=82 baseline). | `src/enrichers/momentum-technical.ts`, `corporate-actions.ts` |
 | **ATR multipliers locked** | Base: 4.0×. Tight: 1.5×. Tight trigger: ≥ 25% unrealized. | `src/analysers/momentum-screener.ts` — constants / config as designed |
 | **ATR golden rule** | `current_stop_loss` never decreases. `new_stop = MAX(candidate, current_stop_loss)`. | Stop evaluation in `momentum-screener.ts` |
-| **MAX_HOLD_DAYS** | Forced time exit on stop evaluation when hold ≥ configured days. | `src/config/index.ts` + screener |
+| **MAX_HOLD_DAYS** | Forced time exit on stop evaluation when trading days held (counted as daily_prices rows between entry_date and asOf inclusive) ≥ MAX_HOLD_DAYS. | `src/config/index.ts` + screener |
 | **Backtest gate** | Any strategy parameter change must re-run backtest and clear: CAGR > 12%, MaxDD < 20%, Sharpe > 1.0, Expectancy > 0. | Manual / CI process |
 
 ---

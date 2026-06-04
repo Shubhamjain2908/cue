@@ -150,9 +150,9 @@ export function formatTelegramSellAlert(row: SellAlertPendingRow): string {
   const pnlStr = `${pnlSign}${pnlPct.toFixed(2)}%`;
 
   const reasonLabels: Record<string, string> = {
-    TRAILING_STOP: "🛑 TRAILING STOP",
-    MAX_HOLD: "⏱ MAX HOLD",
-    REBALANCE_DROP: "🔄 REBALANCE DROP",
+    TRAILING_STOP: "🔴 TRAILING_STOP",
+    TIME_EXIT: "⏱ TIME_EXIT",
+    REBALANCE_DROP: "🔄 REBALANCE_DROP",
     MANUAL: "✋ MANUAL",
   };
   const reasonLabel = row.exitReason !== null
@@ -303,18 +303,22 @@ export async function sendWatchlistBenchAlerts(
   logger.info(`Watchlist bench sent (asOf=${asOf}, count=${rows.length})`);
 }
 
-export async function sendDailyPulse(db: CueDatabase): Promise<void> {
+export async function sendDailyPulse(db: CueDatabase, sellCount: number): Promise<void> {
   const asOf = resolvePulseAsOfDate(db);
   if (asOf === null) {
     throw new Error("daily pulse: no QQQ rows in daily_prices — run ingest first");
+  }
+
+  const raw = getOpenPositionsWithLastClose(db, asOf);
+  if (raw.length === 0 && sellCount === 0) {
+    cueLogger.info("Daily Pulse suppressed — no open positions and no sells fired.");
+    return;
   }
 
   const regimeLabel = getRegimeLabel(db);
   const etToday = getExchangeDateString();
   const nextFriday = computeNextRebalanceFriday(etToday);
   const { MAX_POSITIONS } = getConfig();
-
-  const raw = getOpenPositionsWithLastClose(db, asOf);
   const positions: DailyPulsePositionLine[] = [];
 
   for (const row of raw) {
@@ -390,7 +394,7 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
       if (sellCount === 0) {
         logger.info("No SELL signals pending alert.");
       }
-      await sendDailyPulse(db);
+      await sendDailyPulse(db, sellCount);
     } catch (e) {
       logger.error(`Daily pulse failed: ${String(e)}`);
       process.exitCode = 1;

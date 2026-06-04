@@ -3,14 +3,17 @@ import axios from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BuyAlertPendingRow } from "../../src/briefing/queries.js";
+import { cueLogger } from "../../src/cli/cue-logger.js";
 import {
   deriveBuyAlertShares,
   formatTelegramAlert,
+  formatTelegramSellAlert,
   parseAlertModeFromArgv,
   sendDailyPulse,
   sendSellAlerts,
   sendWatchlistBenchAlerts,
 } from "../../src/briefing/telegram-dispatcher.js";
+import type { SellAlertPendingRow } from "../../src/briefing/queries.js";
 import type { AppConfig } from "../../src/config/index.js";
 import { formatWatchlistBench } from "../../src/briefing/template.js";
 import { resetConfigCache } from "../../src/config/index.js";
@@ -29,6 +32,28 @@ function envForTelegram(): void {
   process.env.TELEGRAM_CHAT_ID = "c";
   process.env.WATCHLIST_BENCH_DEPTH = "5";
 }
+
+describe("formatTelegramSellAlert", () => {
+  const baseRow: SellAlertPendingRow = {
+    id: 1,
+    ticker: "AAA",
+    entryDate: "2024-01-02",
+    entryPrice: 100,
+    exitDate: "2024-06-01",
+    exitPrice: 95,
+    exitReason: "TRAILING_STOP",
+  };
+
+  it("labels TRAILING_STOP per cue-reference", () => {
+    const text = formatTelegramSellAlert(baseRow);
+    expect(text).toContain("🔴 TRAILING_STOP");
+  });
+
+  it("labels TIME_EXIT per cue-reference", () => {
+    const text = formatTelegramSellAlert({ ...baseRow, exitReason: "TIME_EXIT" });
+    expect(text).toContain("⏱ TIME_EXIT");
+  });
+});
 
 describe("parseAlertModeFromArgv", () => {
   it("throws when --mode is absent", () => {
@@ -480,7 +505,7 @@ describe("sendAndMark / alert pacing", () => {
     initSchema(db);
     seedQqqForPulse(db);
 
-    insertSignal(db, {
+    const buy = insertSignal(db, {
       ticker: "ZZZ",
       date: "2024-06-01",
       signal: "BUY",
@@ -491,13 +516,49 @@ describe("sendAndMark / alert pacing", () => {
       atr14: 2,
       initialAtrStop: 45,
     });
+    insertPosition(db, {
+      signalId: Number(buy.lastInsertRowid),
+      entryDate: "2024-06-01",
+      entryPrice: 50,
+      status: "OPEN",
+    });
+    insertDailyPrices(db, "ZZZ", barsFromCloses([50, 51, 52], "2024-05-28"));
 
-    await sendDailyPulse(db);
+    await sendDailyPulse(db, 0);
 
     const row = db.prepare(`SELECT alerted FROM signals WHERE ticker = 'ZZZ'`).get() as {
       alerted: number;
     };
     expect(row.alerted).toBe(0);
+    expect(axios.post).toHaveBeenCalledTimes(1);
+    db.close();
+  });
+
+  it("suppresses Daily Pulse when no open positions and no sells", async () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+    seedQqqForPulse(db);
+    const infoSpy = vi.spyOn(cueLogger, "info");
+
+    await sendDailyPulse(db, 0);
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      "Daily Pulse suppressed — no open positions and no sells fired.",
+    );
+    infoSpy.mockRestore();
+    db.close();
+  });
+
+  it("sends Daily Pulse when sellCount > 0 even with no open positions", async () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+    seedQqqForPulse(db);
+
+    await sendDailyPulse(db, 1);
+
     expect(axios.post).toHaveBeenCalledTimes(1);
     db.close();
   });

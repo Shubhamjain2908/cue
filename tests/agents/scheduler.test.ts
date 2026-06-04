@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   detectRunMode,
@@ -6,7 +7,46 @@ import {
   isWithinExecutionWindow,
   REBALANCE_DAY_OF_WEEK,
 } from "../../src/agents/daily-workflow.js";
-import { schedulerRunKindForNyWeekday } from "../../src/agents/scheduler.js";
+import {
+  HEAD_MIGRATION,
+  schedulerRunKindForNyWeekday,
+  verifyMigrations,
+} from "../../src/agents/scheduler.js";
+import { initSchema } from "../../src/db/schema.js";
+
+describe("verifyMigrations", () => {
+  it("exits with code 2 when HEAD migration is not applied", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+    db.prepare("DELETE FROM _migrations WHERE id = ?").run(HEAD_MIGRATION);
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+      // no-op — verifyMigrations calls exit(2)
+    }) as typeof process.exit);
+
+    verifyMigrations(db);
+
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    exitSpy.mockRestore();
+  });
+
+  it("does not exit when HEAD migration is applied", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("unexpected process.exit");
+    }) as typeof process.exit);
+
+    verifyMigrations(db);
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+    db.close();
+  });
+});
 
 describe("schedulerRunKindForNyWeekday", () => {
   it("maps Sunday to rebalance", () => {

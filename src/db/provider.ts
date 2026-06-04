@@ -46,5 +46,7 @@ export function openCueDb(dbPath: string): CueDatabase {
 /** Read-only handle for reporting / briefing queries (no schema writes). */
 export function openCueDbReadonly(dbPath: string): CueDatabase {
   const resolved = resolveDbPath(dbPath);
-  return new Database(resolved, { readonly: true });
+  const db = new Database(resolved, { readonly: true });
+  db.pragma("busy_timeout = 5000");
+  return db;
 }

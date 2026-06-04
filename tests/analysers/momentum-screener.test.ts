@@ -448,6 +448,11 @@ describe("runLiveScreen stop mode", () => {
     expect(position.status).toBe("CLOSED");
     expect(position.exit_reason).toBe("TRAILING_STOP");
 
+    const sell = db
+      .prepare(`SELECT signal_type FROM signals WHERE signal = 'SELL' AND ticker = 'AAA'`)
+      .get() as { signal_type: string };
+    expect(sell.signal_type).toBe("MOMENTUM");
+
     db.close();
   });
 
