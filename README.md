@@ -202,7 +202,7 @@ Defined in **`src/config/cue-timezone.ts`** and used from ingest date helpers, `
 
 - **PM2:** `deploy/ecosystem.config.cjs` defines:
   - **`cue`** — long-lived scheduler (`src/cli.ts pipeline` or **`src/cli.ts schedule`**); logs `logs/pm2-cue.log`.
-  - **`cue-healthcheck`** — post-window check (`0 11 * * 0,2-6` UTC ≈ ~07:00 ET on Sun/Tue-Sat). Use **`0 7 * * 0,2-6`** if host clock is **America/New_York**.
+  - **`cue-healthcheck`** — post-window check (`0 11 * * 0,2,3,4,5,6` UTC ≈ ~07:00 ET on Sun/Tue-Sat). Use **`0 7 * * 0,2,3,4,5,6`** if host clock is **America/New_York** (PM2 7+ rejects `0,2-6` in cron).
 - **systemd:** run `cue schedule` (or `cue pipeline`) as a `Type=simple` long-lived service; send `SIGTERM` for clean shutdown (scheduler closes its readonly DB handle). Schedule `cue healthcheck` separately (cron or second unit) if not using PM2 for the healthcheck app.
 
 ---

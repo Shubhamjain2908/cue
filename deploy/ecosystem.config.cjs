@@ -27,10 +27,10 @@ module.exports = {
     {
       name: 'cue',
       cwd: root,
-      // PM2: script = entry .ts, interpreter = tsx binary (avoid interpreter:'none' on .bin/tsx shims).
-      script: path.join(root, 'src/cli.ts'),
-      args: 'schedule',
-      interpreter: path.join(root, 'node_modules/.bin/tsx'),
+      // node + tsx cli.mjs — reliable under PM2 (no .bin/tsx shell shim).
+      script: path.join(root, 'node_modules/tsx/dist/cli.mjs'),
+      args: 'src/cli.ts schedule',
+      interpreter: 'node',
       instances: 1,
       autorestart: true,
       max_restarts: 10,     // tighter than typical: repeated crashes = config
@@ -49,18 +49,17 @@ module.exports = {
   // PM2 `cron_restart` uses the HOST system timezone (not `TZ` env).
   // Pipeline now runs at 06:00–06:10 ET on Tue–Sun execution days.
   // Oracle Cloud VMs are usually UTC:
-  //   `0 11 * * 0,2-6` = 11:00 UTC on Sun/Tue-Sat (~07:00 EDT, ~06:00 EST)
-  //     which runs after the morning pipeline window.
-  //   If host clock is America/New_York: use `0 7 * * 0,2-6`.
+  //   `0 11 * * 0,2,3,4,5,6` = 11:00 UTC Sun/Tue-Sat (~07:00 EDT). PM2 7+ croner rejects `0,2-6`.
+  //   If host clock is America/New_York: use `0 7 * * 0,2,3,4,5,6`.
     {
       name: 'cue-healthcheck',
       cwd: root,
-      script: path.join(root, 'src/cli.ts'),
-      args: 'healthcheck',
-      interpreter: path.join(root, 'node_modules/.bin/tsx'),
+      script: path.join(root, 'node_modules/tsx/dist/cli.mjs'),
+      args: 'src/cli.ts healthcheck',
+      interpreter: 'node',
       instances: 1,
       autorestart: false,
-      cron_restart: '0 11 * * 0,2-6',
+      cron_restart: '0 11 * * 0,2,3,4,5,6',
       watch: false,
       env_file: path.join(root, '.env'),
       env: {
