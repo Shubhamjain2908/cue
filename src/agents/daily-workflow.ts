@@ -27,6 +27,12 @@ export interface PipelineStep {
 export const PIPELINE_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
+  {
+    name: "enrich-fundamentals",
+    cueArgs: ["enrich-fundamentals"],
+    critical: false,
+    runOn: "rebalance",
+  },
   { name: "screen", cueArgs: ["screen"], critical: true, runOn: "rebalance" },
   {
     name: "execute-stops",
