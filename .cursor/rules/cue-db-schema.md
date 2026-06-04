@@ -25,13 +25,14 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `012_perf_indexes` | Additive query indexes: signals, enrichments, positions, daily_prices, stop_movements |
 | `013_enrichment_status` | ALTER TABLE enrichments ADD COLUMN status (OK/LLM_FAIL/TIMEOUT/SCHEMA_FAIL/YAHOO_FAIL); backfills existing rows to 'OK' |
 | `014_enrichments_signal_id_unique` | `enrichments.signal_id` UNIQUE |
+| `015_backtest_rebalance_drop` | Rebuild `backtest_trades`; CHECK adds **`REBALANCE_DROP`**; re-index ticker + run_id |
 | `016_signals_alerted_at` | ALTER TABLE `signals` ADD COLUMN `alerted_at` TEXT; NULL until alert fires; written by `markSignalAlerted` |
 
 **Next migration:** `017`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
-**Post-migrate data note (`009` + ceremonies):** `locked = 1` is set by migration backfill (ids **73, 74**) or an explicit gate ceremony. Current dashboard pin: **id=81** (2026-06-04, supersedes 74 — `spec/cue-handoff.txt` §2.2). New `pnpm run backtest` rows default `locked = 0`. `getMomentumBacktestSummary` selects latest **`strategy = 'MOMENTUM' AND locked = 1`**, not newest by `run_date`.
+**Post-migrate data note (`009` + ceremonies):** `locked = 1` is set by migration backfill (ids **73, 74**, later cleared) or an explicit gate ceremony. Current dashboard pin: **id=82** (2026-06-04, supersedes 81 — `spec/cue-handoff.txt` §2.2). New `pnpm run backtest` rows default `locked = 0`. `getMomentumBacktestSummary` selects latest **`strategy = 'MOMENTUM' AND locked = 1`**, not newest by `run_date`.
 
 ---
 
@@ -224,9 +225,9 @@ Aggregated metrics for a labeled historical run (`src/backtest/runner.ts`).
 | `cagr`, `max_drawdown`, `win_rate`, `sharpe_ratio`, `total_trades`, `benchmark_cagr`, `expectancy` | REAL metrics |
 | `strategy` | TEXT — e.g. `MOMENTUM`, `GARP_RESEARCH`, `VIX_MOMENTUM_RESEARCH` (P7-G research archive), `SWEEP` (`007`) |
 | `window_label` | TEXT — human label for dashboard (`009`) |
-| `locked` | INTEGER **NOT NULL** default **0** — `1` pins a run as the dashboard reference (`009` backfill: 73–74; ceremony: **id=81** as of 2026-06-04) |
+| `locked` | INTEGER **NOT NULL** default **0** — `1` pins a run as the dashboard reference (`009` backfill: 73–74; ceremony: **id=82** as of 2026-06-04) |
 
-**Read by:** `getMomentumBacktestSummary()` in `src/briefing/queries.ts` — `WHERE strategy = 'MOMENTUM' AND locked = 1 ORDER BY run_date DESC LIMIT 1` (current pin: **id=81**).
+**Read by:** `getMomentumBacktestSummary()` in `src/briefing/queries.ts` — `WHERE strategy = 'MOMENTUM' AND locked = 1 ORDER BY run_date DESC LIMIT 1` (current pin: **id=82**).
 
 **Written by:** `insertBacktestRun()` / `persistBacktestArtifacts()` in `src/backtest/runner.ts` (optional `windowLabel`, `locked`; defaults unlocked).
 
@@ -238,7 +239,7 @@ Granular trades per backtest run (`004`).
 |--------|--------|
 | `run_id` | FK → `backtest_runs.id` |
 | `ticker`, `entry_date`, `entry_price`, `exit_date`, `exit_price`, `pnl_pct` | Trade fields |
-| `exit_reason` | CHECK IN (`TRAILING_STOP`, `INITIAL_STOP`, `TIME_EXIT`, `MANUAL`) — no `REBALANCE_DROP` on this table |
+| `exit_reason` | CHECK IN (`TRAILING_STOP`, `INITIAL_STOP`, `TIME_EXIT`, `MANUAL`, **`REBALANCE_DROP`**) — see `015` |
 
 **Indexes:** `idx_bt_trades_ticker`, `idx_bt_trades_run`.
 
