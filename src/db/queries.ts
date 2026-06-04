@@ -391,7 +391,12 @@ export function deleteEnrichmentForSignal(db: SqliteConnection, signalId: number
 }
 
 export function markSignalAlerted(db: SqliteConnection, signalId: number): void {
-  const stmt = db.prepare(`UPDATE signals SET alerted = 1 WHERE id = @id`);
+  const stmt = db.prepare(`
+    UPDATE signals
+    SET alerted = 1,
+        alerted_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `);
   stmt.run({ id: signalId });
 }
 
@@ -400,7 +405,12 @@ export function markWatchlistSignalsAlerted(db: SqliteConnection, signalIds: rea
     return;
   }
   const placeholders = signalIds.map(() => "?").join(", ");
-  db.prepare(`UPDATE signals SET alerted = 1 WHERE id IN (${placeholders})`).run(...signalIds);
+  db.prepare(`
+    UPDATE signals
+    SET alerted = 1,
+        alerted_at = CURRENT_TIMESTAMP
+    WHERE id IN (${placeholders})
+  `).run(...signalIds);
 }
 
 export function insertPosition(
