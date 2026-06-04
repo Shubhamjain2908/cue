@@ -164,7 +164,10 @@ program
       const { openCueDb } = await import("./db/provider.js");
       const db = openCueDb(config.DB_PATH);
       try {
-        runBackfillHistoricalSplitAdjustments(db, cueLogger);
+        const result = runBackfillHistoricalSplitAdjustments(db, cueLogger);
+        if (result.failed > 0) {
+          process.exitCode = 1;
+        }
       } finally {
         db.close();
       }
