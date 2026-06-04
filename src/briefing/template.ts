@@ -327,8 +327,12 @@ export function renderHtml(payload: DashboardPayload): string {
         const rat = s.rationale ?? '';
         sectorCell = s.sector ?? '—';
         sentimentCell = '<span style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</span>';
-        rationaleCell = rat.length === 0 ? '—'
-          : '<span title="' + rat.replace(/"/g, '&quot;') + '" style="cursor:help">' + rat + '</span>';
+        if (s.enrichmentStatus !== 'OK') {
+          rationaleCell = '<em style="color:var(--amber)">Enrichment unavailable (' + s.enrichmentStatus + ')</em>';
+        } else {
+          rationaleCell = rat.length === 0 ? '—'
+            : '<span title="' + rat.replace(/"/g, '&quot;') + '" style="cursor:help">' + rat + '</span>';
+        }
       }
       return (
         '<tr>' +

@@ -117,11 +117,15 @@ export interface BuyAlertPendingRow extends BuySignalForEnrichmentRow {
   earningsDate: string | null;
   sector: string | null;
   confidence: ConfidenceLevel;
+  enrichmentStatus: string;
 }
+
+export type EnrichmentStatus = "OK" | "LLM_FAIL" | "TIMEOUT" | "SCHEMA_FAIL" | "YAHOO_FAIL";
 
 export interface EnrichmentRow {
   id: number;
   signalId: number;
+  status: EnrichmentStatus;
   sentiment: string;
   rationale: string;
   earningsFlag: number;
@@ -227,6 +231,13 @@ export function insertSignal(
     atr14: row.atr14 ?? null,
     initialAtrStop: row.initialAtrStop ?? null,
   });
+  if (info.changes === 0) {
+    cueLogger.warn(
+      `insertSignal: no-op (UNIQUE collision) ticker=${row.ticker} ` +
+        `date=${row.date} signal=${row.signal} ` +
+        `signalType=${row.signalType ?? "MOMENTUM"}`,
+    );
+  }
   return { changes: info.changes, lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
 
@@ -279,9 +290,10 @@ export function listBuySignalsReadyToAlert(db: SqliteConnection): BuyAlertPendin
       e.rationale AS rationale,
       e.earnings_date AS earningsDate,
       e.sector AS sector,
-      e.confidence AS confidence
+      e.confidence AS confidence,
+      COALESCE(e.status, 'OK') AS enrichmentStatus
     FROM signals s
-    INNER JOIN enrichments e ON e.signal_id = s.id
+    LEFT JOIN enrichments e ON e.signal_id = s.id
     WHERE s.signal = 'BUY' AND s.alerted = 0
     ORDER BY s.date ASC, s.ticker ASC
   `);
@@ -319,6 +331,7 @@ export function getEnrichmentBySignalId(
     SELECT
       e.id AS id,
       e.signal_id AS signalId,
+      e.status AS status,
       e.sentiment AS sentiment,
       e.rationale AS rationale,
       e.earnings_flag AS earningsFlag,
@@ -357,6 +370,26 @@ export function insertEnrichment(db: SqliteConnection, row: EnrichmentInsert): {
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
 
+export function insertEnrichmentStub(
+  db: SqliteConnection,
+  row: { signalId: number; status: EnrichmentStatus },
+): void {
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO enrichments (
+      signal_id, status, sentiment, rationale, confidence,
+      earnings_flag, sector, sector_trend, headlines
+    ) VALUES (
+      @signalId, @status, 'UNKNOWN', '[enrichment unavailable]', 'UNKNOWN',
+      0, 'N/A', 'N/A', '[]'
+    )
+  `);
+  stmt.run({ signalId: row.signalId, status: row.status });
+}
+
+export function deleteEnrichmentForSignal(db: SqliteConnection, signalId: number): void {
+  db.prepare(`DELETE FROM enrichments WHERE signal_id = @signalId`).run({ signalId });
+}
+
 export function markSignalAlerted(db: SqliteConnection, signalId: number): void {
   const stmt = db.prepare(`UPDATE signals SET alerted = 1 WHERE id = @id`);
   stmt.run({ id: signalId });
@@ -374,6 +407,17 @@ export function insertPosition(
   db: SqliteConnection,
   row: PositionInsert,
 ): { lastInsertRowid: bigint } {
+  const tickerRow = db
+    .prepare(`SELECT ticker FROM signals WHERE id = @signalId`)
+    .get({ signalId: row.signalId }) as { ticker: string } | undefined;
+
+  if (tickerRow?.ticker === "QQQ") {
+    throw new Error(
+      `insertPosition: refusing QQQ position — ` +
+        `signalId=${String(row.signalId)} (QQQ is regime benchmark only)`,
+    );
+  }
+
   const stmt = db.prepare(`
     INSERT INTO positions (signal_id, entry_date, entry_price, status)
     VALUES (@signalId, @entryDate, @entryPrice, @status)
@@ -418,9 +462,14 @@ export function closePosition(
   exitPrice: number,
   exitReason: PositionExitReasonDb,
 ): void {
-  if (exitPrice == null || exitPrice <= 0 || Number.isNaN(exitPrice)) {
-    cueLogger.error(
-      `closePosition: invalid exit_price=${String(exitPrice)} for position id=${String(positionId)}; pnl_pct left NULL`,
+  if (
+    typeof exitPrice !== "number" ||
+    !Number.isFinite(exitPrice) ||
+    exitPrice <= 0
+  ) {
+    throw new Error(
+      `closePosition: refusing to persist corrupt exit — ` +
+        `positionId=${String(positionId)} exitPrice=${String(exitPrice)} exitReason=${exitReason}`,
     );
   }
   const stmt = db.prepare(`

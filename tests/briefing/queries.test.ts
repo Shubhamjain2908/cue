@@ -1,7 +1,11 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
-import { getMomentumBacktestSummary } from "../../src/briefing/queries.js";
+import {
+  getMomentumBacktestSummary,
+  listBuySignalsReadyToAlert,
+} from "../../src/briefing/queries.js";
+import { insertEnrichmentStub, insertSignal } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
@@ -51,6 +55,33 @@ function insertBacktestRunRow(
     locked: row.locked ?? 0,
   });
 }
+
+describe("listBuySignalsReadyToAlert", () => {
+  it("returns failed enrichment with literal stub rationale and enrichmentStatus", () => {
+    const db = openMemoryDb();
+    const ins = insertSignal(db, {
+      ticker: "FAIL",
+      date: "2024-06-10",
+      signal: "BUY",
+      price: 100,
+      momentumRank: 1,
+      universeRankedCount: 10,
+      momentum12_1Return: 0.5,
+      atr14: 2.5,
+      initialAtrStop: 90,
+    });
+    const signalId = Number(ins.lastInsertRowid);
+    insertEnrichmentStub(db, { signalId, status: "TIMEOUT" });
+
+    const pending = listBuySignalsReadyToAlert(db);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.id).toBe(signalId);
+    expect(pending[0]!.rationale).toBe("[enrichment unavailable]");
+    expect(pending[0]!.enrichmentStatus).toBe("TIMEOUT");
+
+    db.close();
+  });
+});
 
 describe("getMomentumBacktestSummary", () => {
   it("selects latest locked MOMENTUM run, not a newer unlocked extended run", () => {

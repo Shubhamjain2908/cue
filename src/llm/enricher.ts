@@ -1,14 +1,21 @@
 import type Database from "better-sqlite3";
+import { ZodError } from "zod";
 
+import { cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import {
+  deleteEnrichmentForSignal,
   getBuySignalForEnrichment,
   getEnrichmentBySignalId,
   insertEnrichment,
+  insertEnrichmentStub,
   type EnrichmentRow,
+  type EnrichmentStatus,
 } from "../db/queries.js";
+import { LLMTimeoutError } from "../errors.js";
 import { EnrichmentResultSchema, type EnrichmentResult } from "./enrichment.js";
 import { getLlmProvider } from "./factory.js";
+import { LlmJsonValidationError } from "./json.js";
 import { buildPrompt, calendarDaysBetweenIso } from "./prompt.js";
 import type { LlmProvider } from "./types.js";
 import { fetchYahooEnrichmentDto, type YahooFinanceHandle } from "./yahooContext.js";
@@ -51,6 +58,41 @@ function enrichmentRowToResult(row: EnrichmentRow): EnrichmentResult {
   });
 }
 
+function classifyEnrichmentError(error: unknown): EnrichmentStatus {
+  if (error instanceof LLMTimeoutError) {
+    return "TIMEOUT";
+  }
+  if (error instanceof ZodError) {
+    return "SCHEMA_FAIL";
+  }
+  if (error instanceof LlmJsonValidationError && error.cause instanceof ZodError) {
+    return "SCHEMA_FAIL";
+  }
+  return "LLM_FAIL";
+}
+
+async function generateJsonWithTimeout<T>(
+  signalId: number,
+  timeoutMs: number,
+  run: () => Promise<{ data: T }>,
+): Promise<{ data: T }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new LLMTimeoutError(signalId, timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export interface RunEnrichmentDeps {
   provider?: LlmProvider;
   yahooFinance?: YahooFinanceHandle;
@@ -60,7 +102,7 @@ export interface RunEnrichmentDeps {
 
 /**
  * Fetches Yahoo context, calls the LLM, validates JSON, persists one `enrichments` row.
- * Idempotent: returns existing enrichment if already stored for `signalId`.
+ * Idempotent: returns existing enrichment if already stored for `signalId` with status OK.
  */
 export async function runEnrichment(
   db: SqliteConnection,
@@ -69,7 +111,10 @@ export async function runEnrichment(
 ): Promise<EnrichmentResult> {
   const existing = getEnrichmentBySignalId(db, signalId);
   if (existing !== undefined) {
-    return enrichmentRowToResult(existing);
+    if (existing.status === "OK") {
+      return enrichmentRowToResult(existing);
+    }
+    deleteEnrichmentForSignal(db, signalId);
   }
 
   const row = getBuySignalForEnrichment(db, signalId);
@@ -78,32 +123,45 @@ export async function runEnrichment(
   }
   assertEnrichableMomentumRow(row);
 
-  const yahoo = await (deps.fetchYahoo ?? fetchYahooEnrichmentDto)(row.ticker, deps.yahooFinance);
-  const { system, user } = buildPrompt(row.ticker, yahoo, row);
-  const config = getConfig();
-  const llm = deps.provider ?? getLlmProvider();
+  try {
+    const yahoo = await (deps.fetchYahoo ?? fetchYahooEnrichmentDto)(row.ticker, deps.yahooFinance);
+    const { system, user } = buildPrompt(row.ticker, yahoo, row);
+    const config = getConfig();
+    const llm = deps.provider ?? getLlmProvider();
+    const timeoutMs = config.VERTEX_TIMEOUT_MS;
 
-  const result = await llm.generateJson({
-    system,
-    user,
-    schema: EnrichmentResultSchema,
-    maxOutputTokens: config.LLM_MAX_TOKENS,
-    maxRetries: 1,
-    temperature: 0.2,
-  });
+    const result = await generateJsonWithTimeout(signalId, timeoutMs, () =>
+      llm.generateJson({
+        system,
+        user,
+        schema: EnrichmentResultSchema,
+        maxOutputTokens: config.LLM_MAX_TOKENS,
+        maxRetries: 1,
+        temperature: 0.2,
+      }),
+    );
 
-  const earningsFlag = earningsProximityFlag(row.date, yahoo.nextEarningsDate);
-  insertEnrichment(db, {
-    signalId: row.id,
-    sentiment: result.data.sentiment,
-    rationale: result.data.rationale,
-    earningsFlag,
-    earningsDate: result.data.earningsDate,
-    sector: result.data.sector,
-    sectorTrend: null,
-    headlines: JSON.stringify(yahoo.headlines),
-    confidence: result.data.confidence,
-  });
+    const earningsFlag = earningsProximityFlag(row.date, yahoo.nextEarningsDate);
+    insertEnrichment(db, {
+      signalId: row.id,
+      sentiment: result.data.sentiment,
+      rationale: result.data.rationale,
+      earningsFlag,
+      earningsDate: result.data.earningsDate,
+      sector: result.data.sector,
+      sectorTrend: null,
+      headlines: JSON.stringify(yahoo.headlines),
+      confidence: result.data.confidence,
+    });
 
-  return result.data;
+    return result.data;
+  } catch (error) {
+    const status = classifyEnrichmentError(error);
+    insertEnrichmentStub(db, { signalId: row.id, status });
+    cueLogger.warn(
+      `enrichment failed — signalId=${String(row.id)} ticker=${row.ticker} ` +
+        `status=${status} error=${String(error)}`,
+    );
+    throw error;
+  }
 }
