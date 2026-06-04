@@ -9,7 +9,9 @@
  *   pnpm install
  *   mkdir -p logs
  *   cp .env.example .env && chmod 600 .env  # fill in values
+ *   pm2 delete all   # if recovering from a broken partial start
  *   pm2 start deploy/ecosystem.config.cjs
+ *   pm2 status       # expect: cue (online), cue-healthcheck (stopped until cron)
  *   pm2 save && pm2 startup  # re-run startup only if not already done
  *
  * Subsequent deploys:
@@ -25,10 +27,10 @@ module.exports = {
     {
       name: 'cue',
       cwd: root,
-      // tsx runs the CLI. Prefer `src/cli.ts schedule` (scheduler.ts); `pipeline` without --now is equivalent.
-      script: 'node_modules/.bin/tsx',
-      args: 'src/cli.ts pipeline',
-      interpreter: 'none', // tsx is the interpreter — don't wrap with node
+      // PM2: script = entry .ts, interpreter = tsx binary (avoid interpreter:'none' on .bin/tsx shims).
+      script: path.join(root, 'src/cli.ts'),
+      args: 'schedule',
+      interpreter: path.join(root, 'node_modules/.bin/tsx'),
       instances: 1,
       autorestart: true,
       max_restarts: 10,     // tighter than typical: repeated crashes = config
@@ -53,9 +55,9 @@ module.exports = {
     {
       name: 'cue-healthcheck',
       cwd: root,
-      script: 'node_modules/.bin/tsx',
-      args: 'src/cli.ts healthcheck',
-      interpreter: 'none',
+      script: path.join(root, 'src/cli.ts'),
+      args: 'healthcheck',
+      interpreter: path.join(root, 'node_modules/.bin/tsx'),
       instances: 1,
       autorestart: false,
       cron_restart: '0 11 * * 0,2-6',
