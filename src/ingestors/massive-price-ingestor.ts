@@ -441,10 +441,8 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
 /**
  * Resolve which session date to ingest and fetch its grouped bars.
  *
- * Strategy (when no `--date` is given):
- *   1. Try T+0 (today's ET weekday). If the API returns ≥1 bar, use it.
- *   2. If T+0 returns 0 bars (market holiday, data not yet published, or weekend),
- *      fall back to T−1 (previous ET weekday).
+ * Strategy (when no `--date` is given): always ingest T-1 (previous ET weekday).
+ * This avoids free-tier unauthorized / unpublished same-day grouped bars.
  *
  * Returns `null` when `daily_prices` is already current and `force` is false.
  */
@@ -472,44 +470,16 @@ async function resolveSessionDateAndResults(input: {
     return { sessionDate: explicitDate, results };
   }
 
-  // T+0: today's ET civil weekday.
-  const { year, month, day } = getEtCalendarParts(now);
-  const t0 = latestWeekdayOnOrBeforeEtCivil(year, month, day);
-
-  if (t0 !== null) {
-    if (!force && isDbCurrentForSession(db, tickersUpper, t0)) {
-      logger.info("daily_prices already current for T+0; skipping Massive API", {
-        sessionDate: t0,
-        tickerCount: tickersUpper.length,
-      });
-      return null;
-    }
-    try {
-      const results = await fetchGroupedDaily({ apiKey, dateString: t0 });
-      if (results.length > 0) {
-        logger.info(`ingest: T+0 data available (${String(results.length)} bars)`, { sessionDate: t0 });
-        return { sessionDate: t0, results };
-      }
-      logger.info(
-        `ingest: T+0 returned 0 bars (market holiday or data not yet published) — falling back to T−1`,
-        { sessionDate: t0 },
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`ingest: T+0 fetch failed — falling back to T−1`, { sessionDate: t0, error: msg });
-    }
-  }
-
-  // T-1 fallback.
+  // Default path: T-1 previous ET weekday.
   const t1 = previousWeekdayBeforeEtCivil(now);
   if (!force && isDbCurrentForSession(db, tickersUpper, t1)) {
-    logger.info("daily_prices already current for T−1; skipping Massive API", {
+    logger.info("daily_prices already current for T-1; skipping Massive API", {
       sessionDate: t1,
       tickerCount: tickersUpper.length,
     });
     return null;
   }
-  logger.info(`ingest: using T−1 fallback`, { sessionDate: t1 });
+  logger.info(`ingest: using T-1 session`, { sessionDate: t1 });
   const results = await fetchGroupedDaily({ apiKey, dateString: t1 });
   return { sessionDate: t1, results };
 }

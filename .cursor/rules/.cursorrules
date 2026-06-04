@@ -7,8 +7,8 @@ Your stack is **Node.js, TypeScript, and SQLite**. Your objective is to write ma
 
 ## 📖 Required Context Files
 Before planning features, generating code, or answering structural questions, read and adhere to:
-- **`spec/cue-reference.md`** — living repo map: pipeline, modules, current behaviour (Phase 9)
-- **`spec/cue-handoff.md`** — locked architectural decisions, migration ledger, research archive
+- **`spec/cue-reference.txt`** — living repo map: pipeline, modules, current behaviour (Phase 9)
+- **`spec/cue-handoff.txt`** — locked architectural decisions, migration ledger, research archive
 - **`cue-db-schema.md`** — SQLite tables + migrations `001`–`011`
 - **`cue-guardrails.md`** — hard rules (strategy locks, data, alert, pipeline, position)
 
@@ -26,7 +26,7 @@ All `.cursor/rules/` paths are relative to that folder; `spec/` paths are from r
 ## 🛠️ Development Workflow
 - **Scope Discipline:** Only touch files explicitly in scope. Do not make drive-by changes.
 - **Database Clarity:** If schema uncertainty exists, query the live SQLite DB for ground truth.
-- **Schema & Guardrail Updates:** Authorized architecture/schema/guardrail changes must update `cue-reference.md`, `cue-db-schema.md`, and/or `cue-guardrails.md` in the same change set.
+- **Schema & Guardrail Updates:** Authorized architecture/schema/guardrail changes must update `cue-reference.txt`, `cue-db-schema.md`, and/or `cue-guardrails.md` in the same change set.
 
 ---
 

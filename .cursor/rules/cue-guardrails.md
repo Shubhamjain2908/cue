@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.4 · June 2026 — Phase 9 (stop-replay fix, T+0 ingestor, SELL alerts, 20:00 ET window)*
+*v1.5 · June 2026 — Phase 9b (next-morning scheduler, T-1 ingest, SELL alerts)*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
@@ -12,7 +12,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 |---|---|---|
 | **Regime gate — BUY suppression** | If QQQ close < SMA(200): suppress all new BUY signals. SELL and stop evaluation run unconditionally. | `src/analysers/momentum-screener.ts` |
 | **Top-N hard cap** | At most **3** momentum BUY entries per rebalance pass (`topN = 3` contract). | `src/analysers/momentum-screener.ts` (portfolio cap also tied to `MAX_POSITIONS` in config) |
-| **Rebalance cadence** | **Saturday 09:05–09:15 ET** — screener ranks on **Friday** OHLCV (last completed session). **Stop** evaluation runs **Mon–Fri 20:00–20:10 ET** (shifted Phase 9; allows T+0 same-day data). **Sunday** skips. | `scheduler.ts`, `daily-workflow.ts` |
+| **Rebalance cadence** | **Sunday 06:00–06:10 ET** — screener ranks on **Friday** OHLCV (last completed session). **Stop** evaluation runs **Tue–Sat 06:00–06:10 ET**. **Monday** skips. | `scheduler.ts`, `daily-workflow.ts` |
 | **WATCHLIST bench cap** | `WATCHLIST` rows carry no entry / stop / sizing. **topN BUY cap (3)** is absolute — `WATCHLIST` must never open `positions`. | `momentum-screener.ts`, `telegram-dispatcher.ts`, `WATCHLIST_BENCH_DEPTH` |
 | **Corporate actions** | `cue adjust-splits` after **ingest** on both pipeline routes. **`critical: false`**. Idempotent via `corporate_actions` UNIQUE. | `src/ingestors/corporate-actions.ts`, `daily-workflow.ts` |
 | **Backtest reference** | Dashboard pins to `WHERE strategy = 'MOMENTUM' AND locked = 1`. New runs default **unlocked**. Lock requires explicit migration backfill after gate ceremony. | `src/briefing/queries.ts`, migration `009` |
@@ -33,7 +33,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **No hallucinated financials** | LLM prompt is bounded; Yahoo DTO + signal row only. | `src/llm/prompt.ts`, `src/llm/enricher.ts` |
 | **Zod output validation** | All LLM enrichment JSON validated before `enrichments` write; retry path in enricher. | `src/llm/enricher.ts`, `src/llm/types.ts` |
 | **Fetcher currency guard** | Per ticker: `MAX(date)` in `daily_prices` vs expected last ET session. `--force` bypasses. | `src/ingestors/massive-price-ingestor.ts` |
-| **T+0-first with T-1 fallback** | Ingestor tries today's ET weekday (T+0) first; falls back to T-1 if API returns 0 bars or throws. `--date` bypasses both. Auto-backfill covers last 5 weekdays after primary insert (universe runs only; only dates `< primarySessionDate` attempted). | `src/ingestors/massive-price-ingestor.ts` |
+| **T-1 ingest default** | Ingestor resolves previous ET weekday (`previousWeekdayBeforeEtCivil`) unless `--date` is explicit. Auto-backfill covers last 5 weekdays after primary insert (universe runs only; only dates `< primarySessionDate` attempted). | `src/ingestors/massive-price-ingestor.ts` |
 | **Data lag accepted** | Massive EOD may lag 1–2 sessions. | Operational assumption |
 | **Yahoo context TTL** | Cache policy in Yahoo bundle fetch. | `src/llm/yahooContext.ts` |
 
@@ -62,7 +62,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 |---|---|---|
 | **Critical step abort** | Non-zero exit on critical step aborts chain. | `src/agents/daily-workflow.ts` (`runPipelineWithSteps`) |
 | **Non-critical continuation** | **adjust-splits**, enrich, brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
-| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the 20:00–20:10 chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. Update cron to fire ~21:00 ET after Phase 9 window shift. | `src/agents/healthcheck.ts` |
+| **Post-pipeline healthcheck** | `cue healthcheck` is independent of the morning chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. Cron should fire after 06:00 ET window. | `src/agents/healthcheck.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window; key set only on pipeline exit **0**. | `pipeline_state` + `src/db/queries.ts` (`getPipelineState` / `setPipelineState`), `src/agents/scheduler.ts` |
 | **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
 | **Mode / flag orthogonality** | `--force-rebalance` vs calendar **Saturday**; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
