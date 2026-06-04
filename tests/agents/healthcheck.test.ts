@@ -7,13 +7,19 @@ import { describe, expect, it, vi } from "vitest";
 import winston from "winston";
 
 import {
+  checkIngestStaleness,
   checkPm2Logs,
   checkQqqLag,
   checkStalePositions,
   runHealthcheck,
 } from "../../src/agents/healthcheck.js";
 import type { AppConfig } from "../../src/config/index.js";
-import { insertDailyPrices, insertPosition, insertSignal } from "../../src/db/queries.js";
+import {
+  insertDailyPrices,
+  insertPosition,
+  insertSignal,
+  setPipelineState,
+} from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 import { resolveLastETSession } from "../../src/ingestors/massive-price-ingestor.js";
 
@@ -254,6 +260,26 @@ describe("runHealthcheck", () => {
     expect(stderrSpy).toHaveBeenCalled();
     expect(sendTelegram).toHaveBeenCalledTimes(1);
     stderrSpy.mockRestore();
+    db.close();
+  });
+});
+
+describe("checkIngestStaleness", () => {
+  it("fails when last_ingest_was_stale is set", () => {
+    const db = openMemoryDb();
+    setPipelineState(db, "last_ingest_was_stale", "1");
+    const result = checkIngestStaleness(db);
+    expect(result.status).toBe("FAIL");
+    expect(result.name).toBe("ingest_staleness");
+    expect(result.message).toContain("stale prices");
+    db.close();
+  });
+
+  it("passes when last_ingest_was_stale is unset or 0", () => {
+    const db = openMemoryDb();
+    expect(checkIngestStaleness(db).status).toBe("PASS");
+    setPipelineState(db, "last_ingest_was_stale", "0");
+    expect(checkIngestStaleness(db).status).toBe("PASS");
     db.close();
   });
 });
