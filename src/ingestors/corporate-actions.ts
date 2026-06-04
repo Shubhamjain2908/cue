@@ -5,7 +5,40 @@
 import YahooFinance from "yahoo-finance2";
 import type { Logger } from "winston";
 
+import { cueLogger } from "../cli/cue-logger.js";
+import { setPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
+
+/** Marks daily_prices split adjustment done (live applySplit + one-shot backfill). */
+export function splitDailyPricesPipelineKey(ticker: string, exDate: string): string {
+  return `backfill_split_applied:${ticker}:${exDate}`;
+}
+
+/** Retroactively divide OHLC by split factor for all bars strictly before ex-date. */
+export function adjustDailyPricesBeforeExDate(
+  db: CueDatabase,
+  params: { ticker: string; exDate: string; factor: number },
+): number {
+  const result = db
+    .prepare(
+      `
+      UPDATE daily_prices
+      SET
+        open  = ROUND(open  / @factor, 6),
+        high  = ROUND(high  / @factor, 6),
+        low   = ROUND(low   / @factor, 6),
+        close = ROUND(close / @factor, 6)
+      WHERE ticker = @ticker
+        AND date < @exDate
+    `,
+    )
+    .run({
+      factor: params.factor,
+      ticker: params.ticker,
+      exDate: params.exDate,
+    });
+  return result.changes;
+}
 
 export type YahooFinanceHandle = InstanceType<typeof YahooFinance>;
 
@@ -147,6 +180,18 @@ export async function adjustSplitsForOpenPositions(
         )
       `,
       ).run({ ticker: params.ticker, factor: params.factor });
+
+      const dailyPriceRows = adjustDailyPricesBeforeExDate(db, {
+        ticker: params.ticker,
+        exDate: params.exDate,
+        factor: params.factor,
+      });
+      setPipelineState(db, splitDailyPricesPipelineKey(params.ticker, params.exDate), "1");
+      cueLogger.info(
+        `applySplit: adjusted daily_prices for ${params.ticker} ` +
+          `factor=${params.factor} exDate=${params.exDate} ` +
+          `rows=${dailyPriceRows}`,
+      );
     },
   );
 
