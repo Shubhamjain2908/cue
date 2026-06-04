@@ -21,7 +21,7 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 - After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, pipeline output, and PM2 error logs, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
-Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Phase 7 record: **`spec/cue-phase7-complete.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
+Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
 
 ---
 

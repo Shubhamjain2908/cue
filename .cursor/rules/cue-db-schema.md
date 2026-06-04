@@ -32,7 +32,7 @@ This document summarizes tables, important columns, and how they relate to pipel
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
-**Post-migrate data note (`009` + ceremonies):** `locked = 1` is set by migration backfill (ids **73, 74**, later cleared) or an explicit gate ceremony. Current dashboard pin: **id=82** (2026-06-04, supersedes 81 — `spec/cue-handoff.txt` §2.2). New `pnpm run backtest` rows default `locked = 0`. `getMomentumBacktestSummary` selects latest **`strategy = 'MOMENTUM' AND locked = 1`**, not newest by `run_date`.
+**Post-migrate data note (`009` + ceremonies):** `locked = 1` is set by migration backfill (ids **73, 74**, later cleared) or an explicit gate ceremony. Current dashboard pin: **id=82** (2026-06-04, supersedes 81 — `spec/cue-handoff.md` §2.2). New `pnpm run backtest` rows default `locked = 0`. `getMomentumBacktestSummary` selects latest **`strategy = 'MOMENTUM' AND locked = 1`**, not newest by `run_date`.
 
 ---
 
@@ -99,7 +99,7 @@ Momentum screen outputs: actionable **BUY** / **SELL**, plus rebalance-only **WA
 |--------|--------|
 | `id` | INTEGER PK AUTOINCREMENT |
 | `ticker`, `date`, `signal`, `signal_type` | **UNIQUE** composite (`003`) |
-| `signal` | `BUY` \| `SELL` \| `HOLD` \| `WATCHLIST` — plain TEXT, no DB enum. **`WATCHLIST`** = rebalance-only rank context rows (ranks `topN+1`…`topN+depth`); **no** position entry; screener **Saturday rebalance** path only |
+| `signal` | `BUY` \| `SELL` \| `HOLD` \| `WATCHLIST` — plain TEXT, no DB enum. **`WATCHLIST`** = rebalance-only rank context rows (ranks `topN+1`…`topN+depth`); **no** position entry; screener **Sunday rebalance** path only |
 | `signal_type` | Strategy lane; default **`MOMENTUM`** |
 | `price` | REAL at signal |
 | `alerted` | 0/1 — Telegram / brief idempotency (BUY alerts and watchlist bench) |
@@ -107,7 +107,7 @@ Momentum screen outputs: actionable **BUY** / **SELL**, plus rebalance-only **WA
 | `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context (required for BUY and WATCHLIST at insert) |
 | `atr14`, `initial_atr_stop` | Stop ladder inputs; `initial_atr_stop` set on BUY; optional on WATCHLIST |
 
-**Written by:** `cue screen` (`momentum-screener.ts`). **WATCHLIST** rows: **Saturday rebalance** path only, ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` (default depth 5 → ranks 4–8 when `topN=3`). No `positions` row. `WATCHLIST_BENCH_DEPTH=0` disables WATCHLIST writes and bench Telegram.
+**Written by:** `cue screen` (`momentum-screener.ts`). **WATCHLIST** rows: **Sunday rebalance** path only, ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` (default depth 5 → ranks 4–8 when `topN=3`). No `positions` row. `WATCHLIST_BENCH_DEPTH=0` disables WATCHLIST writes and bench Telegram.
 
 ### `enrichments`
 
@@ -195,6 +195,7 @@ Scheduler idempotency key/value store (`010_pipeline_state`).
 | Key pattern | Purpose |
 |-------------|---------|
 | `last_successful_run_date` | Scheduler idempotency (ET `YYYY-MM-DD`) |
+| `last_ingest_was_stale` | `"1"` if last universe ingest found no new bars (T-1 already in DB); `"0"` on fresh ingest. Read by `cue healthcheck` check `ingest_staleness`. |
 | `backfill_split_applied:{ticker}:{ex_date}` | Split replay idempotency for `daily_prices` (`cue backfill-splits` + live `applySplit`) |
 
 ---
@@ -253,11 +254,12 @@ Migrations **001**–**003**, **005**–**009** rely on PK/UNIQUE only (no extra
 
 ## Post-pipeline health (no table)
 
-**`cue healthcheck`** (`src/agents/healthcheck.ts`) — PM2 cron at **~21:00 ET** Mon–Fri (after the 20:00 ET pipeline window), **~10:00 ET** Saturday. Checks:
+**`cue healthcheck`** (`src/agents/healthcheck.ts`) — PM2 cron at **~07:00 ET** Sun/Tue–Sat (`0 11 * * 0,2,3,4,5,6` UTC — after the 06:00 ET pipeline window). Checks:
 
 1. **`daily_prices` currency** — `MAX(date)` vs `resolveLastETSession()`.
-2. **Pipeline output** — Saturday: `signals` rows for today's ET date; Mon–Fri: OPEN positions and/or non-`REBALANCE_DROP` closes today.
-3. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in last 90 minutes.
+2. **`ingest_staleness`** — reads `pipeline_state.last_ingest_was_stale`; FAIL if `"1"` (T-1 data was already in DB, no fresh bars ingested).
+3. **Pipeline output** — Sunday: `signals` rows for today's ET date; Mon–Sat: OPEN positions and/or non-`REBALANCE_DROP` closes today.
+4. **PM2 error log** — last 100 lines of `logs/pm2-cue.log`; FAIL on `error`-level lines in last 90 minutes.
 
 Results sent via `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`.
 

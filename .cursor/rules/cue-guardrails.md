@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.5 · June 2026 — Phase 9b (next-morning scheduler, T-1 ingest, SELL alerts)*
+*v1.6 · June 2026 — Phase 9b (arch-review gap closure: WAL pragmas, unified registry, pulse suppression, migration preflight)*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
@@ -16,7 +16,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **WATCHLIST bench cap** | `WATCHLIST` rows carry no entry / stop / sizing. **topN BUY cap (3)** is absolute — `WATCHLIST` must never open `positions`. | `momentum-screener.ts`, `telegram-dispatcher.ts`, `WATCHLIST_BENCH_DEPTH` |
 | **Corporate actions** | `cue adjust-splits` after **ingest** on both pipeline routes. **`critical: false`**. Idempotent via `corporate_actions` UNIQUE. Adjusts OPEN book **and** `daily_prices` for `date < ex_date` (OHLC ÷ factor, volume × factor). | `src/ingestors/corporate-actions.ts`, `daily-workflow.ts` |
 | **Split historical replay** | One-shot `cue backfill-splits` replays `corporate_actions` in `ex_date` ASC order; per-row transaction; `pipeline_state` key `backfill_split_applied:{ticker}:{ex_date}`. | `scripts/backfill_historical_split_adjustments.ts` |
-| **Backtest reference** | Dashboard pins to `WHERE strategy = 'MOMENTUM' AND locked = 1`. New runs default **unlocked**. Current lock **id=82** (2026-06-04 ceremony). Lock rotation after gate ceremony when metrics shift >1%. | `src/briefing/queries.ts`, `spec/cue-handoff.txt` §2.2 |
+| **Backtest reference** | Dashboard pins to `WHERE strategy = 'MOMENTUM' AND locked = 1`. New runs default **unlocked**. Current lock **id=82** (2026-06-04 ceremony). Lock rotation after gate ceremony when metrics shift >1%. | `src/briefing/queries.ts`, `spec/cue-handoff.md` §2.2 |
 | **Live performance scope** | Dashboard live P&amp;L aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')`. Rotation drops must not inflate closed-trade counts or show 0% win-rate noise. | `briefing/queries.ts` |
 | **Live `REBALANCE_DROP` fidelity** | Screener rotation closes persist **`REBALANCE_DROP`** on `positions` (not aliased to `MANUAL`). | `006`, `mapLiveExitReason`, `momentum-screener.ts` |
 | **Momentum formula locked** | `(close[today-21] - close[today-252]) / close[today-252]`. Formula unchanged; **split-adjusted `daily_prices`** required (PR-4). Any strategy change requires backtest re-validation against locked gate metrics (id=82 baseline). | `src/enrichers/momentum-technical.ts`, `corporate-actions.ts` |
@@ -47,7 +47,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **SELL alerts fire on both modes** | `brief --mode stop` and `--mode rebalance` both dispatch SELL alerts first (before BUY alerts or Daily Pulse). Same-day artefacts (`exit_date = entry_date`) excluded from `listSellSignalsReadyToAlert`. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **BUY alerts on rebalance-style runs only** | `brief` / dispatcher use `--mode rebalance\|stop`; `stop` runs must not emit BUY alerts. | `src/briefing/telegram-dispatcher.ts` |
 | **BUY message derivation is local-only** | Entry range / stop / 1R come from the `signals` row; share count comes from `getConfig()` (`PORTFOLIO_VALUE_USD` when set, else `POSITION_SIZE_USD`) plus optional `enrichments` join. No new tables or external data sources. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
-| **Stop-path Daily Pulse always fires** | `cue brief --mode stop` sends the Daily Pulse regardless of sell count; rebalance path behavior is unchanged. | `src/briefing/telegram-dispatcher.ts` |
+| **Stop-path Daily Pulse suppression** | `cue brief --mode stop` sends the Daily Pulse **unless** there are 0 OPEN positions **and** `sellCount === 0` — in that case it is suppressed with an info log. Rebalance-path behaviour is unchanged. | `src/briefing/telegram-dispatcher.ts` (`sendDailyPulse`) |
 | **Pulse tolerance for missing bars** | If an OPEN ticker has no `daily_prices` row for the resolved pulse `asOf`, skip that ticker with a warning; do not fail the whole pulse. | `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts` |
 | **Stop proximity threshold** | `STOP_PROXIMITY_ATR_THRESHOLD = 0.5` (hardcoded). `⚠️ NEAR STOP` fires when `(last_close - current_stop_loss) < atr14 * 0.5`. Not configurable at runtime. | `src/briefing/telegram-dispatcher.ts` |
 | **ATR position sizer fallback** | If `PORTFOLIO_VALUE_USD` unset, share count falls back to `floor(POSITION_SIZE_USD / entry_mid)` with a 5% book cap. When `PORTFOLIO_VALUE_USD` is unset, the fallback branch self-caps via implied book size = `POSITION_SIZE_USD × MAX_POSITIONS`. The 5% cap is enforced as: `shares = min(floor(POSITION_SIZE_USD / entry_mid), floor(impliedBook × 0.05 / entry_mid))`. This is a policy default; operators who want uncapped fixed-dollar sizing must set `PORTFOLIO_VALUE_USD` explicitly. `shares` minimum = 1. | `src/briefing/telegram-dispatcher.ts` |
@@ -65,8 +65,10 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **Non-critical continuation** | **adjust-splits**, enrich, brief failures logged; chain policy per step `critical` bit. | `daily-workflow.ts` |
 | **Post-pipeline healthcheck** | `cue healthcheck` is independent of the morning chain; Telegram on pass/fail; exit **1** on any failed check or Telegram delivery failure. Cron should fire after 06:00 ET window. | `src/agents/healthcheck.ts` |
 | **Scheduler idempotency** | At most one **successful** run per ET `YYYY-MM-DD` in window; key set only on pipeline exit **0**. | `pipeline_state` + `src/db/queries.ts` (`getPipelineState` / `setPipelineState`), `src/agents/scheduler.ts` |
-| **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false “idle” while another instance holds the pipeline. | `src/agents/scheduler.ts` |
-| **Mode / flag orthogonality** | `--force-rebalance` vs calendar **Saturday**; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
+| **Concurrency lock** | In-process **`isRunning`** plus **`LOCK_PATH`** PID file (`process.kill(pid, 0)` stale clear) so PM2 restarts cannot leave a false "idle" while another instance holds the pipeline. | `src/agents/scheduler.ts` |
+| **Migration preflight** | Scheduler startup calls `verifyMigrations(heldDb)` and exits 2 if `HEAD_MIGRATION` (`016_signals_alerted_at`) is not in `_migrations`. Run `cue db:migrate` before starting the scheduler. Bump `HEAD_MIGRATION` in `scheduler.ts` whenever a new migration is added. | `src/agents/scheduler.ts` |
+| **SQLite WAL + pragmas** | Every read-write connection applies `applySqlitePragmas()`: WAL journal, `busy_timeout=5000`, `synchronous=NORMAL`, `cache_size=-64000`, `mmap_size=268435456`, `temp_store=MEMORY`. Readonly connections get `busy_timeout=5000` only. | `src/db/provider.ts` |
+| **Mode / flag orthogonality** | `--force-rebalance` vs calendar **Sunday**; `--now` only on `pipeline` for one-shot registry run. | `daily-workflow.ts`, CLI |
 
 ---
 
