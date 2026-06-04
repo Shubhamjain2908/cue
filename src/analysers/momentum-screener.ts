@@ -546,6 +546,7 @@ export function runLiveScreen(
         ticker: pos.ticker,
         date: asOf,
         signal: "SELL",
+        signalType: "MOMENTUM",
         price: exitClose,
       };
       insertSignal(db, sellRow);
