@@ -5,6 +5,7 @@ import axios from "axios";
 import winston from "winston";
 import { z } from "zod";
 
+import { cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
 import { markSignalAlerted, markWatchlistSignalsAlerted } from "../db/queries.js";
@@ -73,7 +74,17 @@ export function deriveBuyAlertShares(
       logger.warn("PORTFOLIO_VALUE_USD not set, using fixed POSITION_SIZE_USD");
       portfolioFallbackWarned = true;
     }
-    shares = Math.floor(config.POSITION_SIZE_USD / entryMid);
+    const impliedBookSize = config.POSITION_SIZE_USD * config.MAX_POSITIONS;
+    const capShares = Math.floor((impliedBookSize * 0.05) / entryMid);
+    const rawShares = Math.floor(config.POSITION_SIZE_USD / entryMid);
+    shares = Math.min(rawShares, capShares);
+    if (shares < rawShares) {
+      cueLogger.debug(
+        `sizer fallback: capped shares from ${String(rawShares)} to ${String(shares)} ` +
+          `(5% cap on implied book ${String(impliedBookSize)})`,
+      );
+    }
+    shares = Math.max(shares, 1);
   }
 
   if (shares === 0) {
