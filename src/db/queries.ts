@@ -1,6 +1,5 @@
 import Database from "better-sqlite3";
 
-import { cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { openCueDb } from "./provider.js";
 
@@ -418,9 +417,14 @@ export function closePosition(
   exitPrice: number,
   exitReason: PositionExitReasonDb,
 ): void {
-  if (exitPrice == null || exitPrice <= 0 || Number.isNaN(exitPrice)) {
-    cueLogger.error(
-      `closePosition: invalid exit_price=${String(exitPrice)} for position id=${String(positionId)}; pnl_pct left NULL`,
+  if (
+    typeof exitPrice !== "number" ||
+    !Number.isFinite(exitPrice) ||
+    exitPrice <= 0
+  ) {
+    throw new Error(
+      `closePosition: refusing to persist corrupt exit — ` +
+        `positionId=${String(positionId)} exitPrice=${String(exitPrice)} exitReason=${exitReason}`,
     );
   }
   const stmt = db.prepare(`

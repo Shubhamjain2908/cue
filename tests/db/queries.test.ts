@@ -126,18 +126,53 @@ describe("db queries", () => {
     db.close();
   });
 
-  it("inserts a position and closes it", () => {
-    const db = openMemoryDb();
+  function openPosition(db: SqliteConnection): number {
     insertSignal(db, sampleSignal);
     const signalId = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
-
     const { lastInsertRowid } = insertPosition(db, {
       signalId,
       entryDate: "2024-06-03",
       entryPrice: 99,
       status: "OPEN",
     });
-    const positionId = Number(lastInsertRowid);
+    return Number(lastInsertRowid);
+  }
+
+  function positionStatus(db: SqliteConnection, positionId: number): string {
+    return (db.prepare(`SELECT status FROM positions WHERE id = ?`).get(positionId) as {
+      status: string;
+    }).status;
+  }
+
+  it.each([
+    { label: "zero", exitPrice: 0 },
+    { label: "NaN", exitPrice: Number.NaN },
+    { label: "negative", exitPrice: -5.0 },
+  ])("closePosition throws on invalid exit price ($label) and leaves position OPEN", ({
+    exitPrice,
+  }) => {
+    const db = openMemoryDb();
+    const positionId = openPosition(db);
+
+    expect(() =>
+      closePosition(db, positionId, "2024-06-10", exitPrice, mapLiveExitReason("TRAILING_STOP")),
+    ).toThrow(/corrupt exit/);
+    expect(positionStatus(db, positionId)).toBe("OPEN");
+    db.close();
+  });
+
+  it("closePosition succeeds with a valid positive finite exit price", () => {
+    const db = openMemoryDb();
+    const positionId = openPosition(db);
+
+    closePosition(db, positionId, "2024-06-10", 105, mapLiveExitReason("TRAILING_STOP"));
+    expect(positionStatus(db, positionId)).toBe("CLOSED");
+    db.close();
+  });
+
+  it("inserts a position and closes it", () => {
+    const db = openMemoryDb();
+    const positionId = openPosition(db);
 
     closePosition(db, positionId, "2024-06-10", 105, mapLiveExitReason("TRAILING_STOP"));
     const row = db
