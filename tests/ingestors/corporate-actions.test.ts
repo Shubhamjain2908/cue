@@ -40,14 +40,14 @@ function silentLogger(): winston.Logger {
 function seedDailyPrices(
   db: SqliteConnection,
   ticker: string,
-  bars: Array<{ date: string; close: number }>,
+  bars: Array<{ date: string; close: number; volume?: number }>,
 ): void {
   const insert = db.prepare(`
     INSERT INTO daily_prices (ticker, date, open, high, low, close, volume)
-    VALUES (@ticker, @date, @close, @close, @close, @close, 1_000_000)
+    VALUES (@ticker, @date, @close, @close, @close, @close, @volume)
   `);
   for (const bar of bars) {
-    insert.run({ ticker, date: bar.date, close: bar.close });
+    insert.run({ ticker, date: bar.date, close: bar.close, volume: bar.volume ?? 1_000_000 });
   }
 }
 
@@ -124,35 +124,38 @@ describe("adjustSplitsForOpenPositions", () => {
       },
     });
     seedDailyPrices(db, "TEST", [
-      { date: "2024-05-30", close: 200 },
-      { date: "2024-05-31", close: 204 },
-      { date: exDate, close: 100 },
-      { date: "2024-06-02", close: 102 },
+      { date: "2024-05-30", close: 200, volume: 1_000_000 },
+      { date: "2024-05-31", close: 204, volume: 2_000_000 },
+      { date: exDate, close: 100, volume: 5_000_000 },
+      { date: "2024-06-02", close: 102, volume: 6_000_000 },
     ]);
     seedOpenPosition(db, { ticker: "TEST", price: 100, entryPrice: 100 });
 
     await adjustSplitsForOpenPositions(db, yf, silentLogger());
 
-    expect(
-      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-05-30'`).get() as {
-        close: number;
-      }).close,
-    ).toBeCloseTo(100, 6);
-    expect(
-      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-05-31'`).get() as {
-        close: number;
-      }).close,
-    ).toBeCloseTo(102, 6);
-    expect(
-      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = ?`).get(exDate) as {
-        close: number;
-      }).close,
-    ).toBe(100);
-    expect(
-      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-06-02'`).get() as {
-        close: number;
-      }).close,
-    ).toBe(102);
+    const preBarA = db
+      .prepare(`SELECT close, volume FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-05-30'`)
+      .get() as { close: number; volume: number };
+    expect(preBarA.close).toBeCloseTo(100, 6);
+    expect(preBarA.volume).toBe(2_000_000); // 2:1 forward → historical volume doubles
+
+    const preBarB = db
+      .prepare(`SELECT close, volume FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-05-31'`)
+      .get() as { close: number; volume: number };
+    expect(preBarB.close).toBeCloseTo(102, 6);
+    expect(preBarB.volume).toBe(4_000_000);
+
+    const exBar = db
+      .prepare(`SELECT close, volume FROM daily_prices WHERE ticker = 'TEST' AND date = ?`)
+      .get(exDate) as { close: number; volume: number };
+    expect(exBar.close).toBe(100);
+    expect(exBar.volume).toBe(5_000_000); // ex-date bar untouched
+
+    const postBar = db
+      .prepare(`SELECT close, volume FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-06-02'`)
+      .get() as { close: number; volume: number };
+    expect(postBar.close).toBe(102);
+    expect(postBar.volume).toBe(6_000_000); // post-ex bar untouched
     db.close();
   });
 

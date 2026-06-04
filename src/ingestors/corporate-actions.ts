@@ -14,7 +14,10 @@ export function splitDailyPricesPipelineKey(ticker: string, exDate: string): str
   return `backfill_split_applied:${ticker}:${exDate}`;
 }
 
-/** Retroactively divide OHLC by split factor for all bars strictly before ex-date. */
+/** Retroactively divide OHLC by split factor for all bars strictly before ex-date.
+ *  Volume is adjusted in the INVERSE direction (multiplied by factor) so that
+ *  `$volume = price × shares` remains continuous across the ex-date boundary.
+ *  Forward 2:1 split → historical volume doubles; 1:10 reverse → historical volume × 0.1. */
 export function adjustDailyPricesBeforeExDate(
   db: CueDatabase,
   params: { ticker: string; exDate: string; factor: number },
@@ -24,10 +27,11 @@ export function adjustDailyPricesBeforeExDate(
       `
       UPDATE daily_prices
       SET
-        open  = ROUND(open  / @factor, 6),
-        high  = ROUND(high  / @factor, 6),
-        low   = ROUND(low   / @factor, 6),
-        close = ROUND(close / @factor, 6)
+        open   = ROUND(open   / @factor, 6),
+        high   = ROUND(high   / @factor, 6),
+        low    = ROUND(low    / @factor, 6),
+        close  = ROUND(close  / @factor, 6),
+        volume = CAST(ROUND(volume * @factor) AS INTEGER)
       WHERE ticker = @ticker
         AND date < @exDate
     `,
