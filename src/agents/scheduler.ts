@@ -256,10 +256,10 @@ function schedulerTick(): void {
   try {
     if (kind === "rebalance") {
       logger.info(`scheduler_fire kind=rebalance etDate=${todayEt} dow=${dow}`);
-      exitCode = runPipelineWithSteps(stepsForMode("rebalance"), "rebalance");
+      exitCode = runPipelineWithSteps(stepsForMode("rebalance"), "rebalance", heldDb);
     } else {
       logger.info(`scheduler_fire kind=weekday_stop etDate=${todayEt} dow=${dow}`);
-      exitCode = runPipelineWithSteps(stepsForMode("stop"), "stop");
+      exitCode = runPipelineWithSteps(stepsForMode("stop"), "stop", heldDb);
     }
   } finally {
     isRunning = false;
