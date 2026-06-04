@@ -41,6 +41,9 @@ import {
 
 type SqliteConnection = InstanceType<typeof Database>;
 
+/** Live rebalance BUY cap — not overridable via MAX_POSITIONS or RankingConfig.topN. */
+const LOCKED_TOP_N = 3 as const;
+
 interface DailyBar {
   ticker: string;
   date: string;
@@ -355,7 +358,7 @@ export function runLiveScreen(
 ): void {
   const cfg: RankingConfig = { ...DEFAULT_RANKING_CONFIG };
   const appCfg = getConfig();
-  const maxConcurrent = appCfg.MAX_POSITIONS;
+  const effectiveTopN = LOCKED_TOP_N;
 
   const asOf = resolveScreenAsOfDate(db, options?.asOf);
   const universe = loadUniverseTickers();
@@ -410,6 +413,13 @@ export function runLiveScreen(
   let fullRanked: RankedTicker[] = [];
 
   if (mode === "rebalance" && regimeOk) {
+    if (appCfg.MAX_POSITIONS > LOCKED_TOP_N) {
+      cueLogger.warn(
+        `MAX_POSITIONS=${String(appCfg.MAX_POSITIONS)} exceeds LOCKED_TOP_N=${String(LOCKED_TOP_N)}. ` +
+          `Clamping to ${String(LOCKED_TOP_N)}. Update MAX_POSITIONS in .env to suppress this warning.`,
+      );
+    }
+
     const priceMap = new Map<string, number[]>();
     for (const t of universe) {
       const series = byTicker.get(t);
@@ -434,7 +444,7 @@ export function runLiveScreen(
         `screen: partial cross-section — ranked ${String(fullRanked.length)} of ${String(universe.length)} universe tickers (12-1 needs full history; quorum ~${String(Math.ceil(quorum))})`,
       );
     }
-    const topSet = new Set(fullRanked.slice(0, cfg.topN).map((r) => r.ticker));
+    const topSet = new Set(fullRanked.slice(0, effectiveTopN).map((r) => r.ticker));
 
     for (const pos of openRows) {
       if (!topSet.has(pos.ticker) && !exitReasonByTicker.has(pos.ticker)) {
@@ -541,10 +551,11 @@ export function runLiveScreen(
       return;
     }
 
+    const openCap = Math.min(appCfg.MAX_POSITIONS, effectiveTopN);
     let openSlots = listOpenPositions(db).length;
     const rankedLen = fullRanked.length;
-    for (const rankEntry of fullRanked.slice(0, cfg.topN)) {
-      if (openSlots >= maxConcurrent) {
+    for (const rankEntry of fullRanked.slice(0, effectiveTopN)) {
+      if (openSlots >= openCap) {
         break;
       }
       const t = rankEntry.ticker;
@@ -610,7 +621,7 @@ export function runLiveScreen(
 
     const benchDepth = appCfg.WATCHLIST_BENCH_DEPTH;
     if (benchDepth > 0) {
-      const benchSlice = fullRanked.slice(cfg.topN, cfg.topN + benchDepth);
+      const benchSlice = fullRanked.slice(effectiveTopN, effectiveTopN + benchDepth);
       for (const rankEntry of benchSlice) {
         const t = rankEntry.ticker;
         const series = byTicker.get(t);
