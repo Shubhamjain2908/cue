@@ -116,11 +116,15 @@ export interface BuyAlertPendingRow extends BuySignalForEnrichmentRow {
   earningsDate: string | null;
   sector: string | null;
   confidence: ConfidenceLevel;
+  enrichmentStatus: string;
 }
+
+export type EnrichmentStatus = "OK" | "LLM_FAIL" | "TIMEOUT" | "SCHEMA_FAIL" | "YAHOO_FAIL";
 
 export interface EnrichmentRow {
   id: number;
   signalId: number;
+  status: EnrichmentStatus;
   sentiment: string;
   rationale: string;
   earningsFlag: number;
@@ -278,9 +282,10 @@ export function listBuySignalsReadyToAlert(db: SqliteConnection): BuyAlertPendin
       e.rationale AS rationale,
       e.earnings_date AS earningsDate,
       e.sector AS sector,
-      e.confidence AS confidence
+      e.confidence AS confidence,
+      COALESCE(e.status, 'OK') AS enrichmentStatus
     FROM signals s
-    INNER JOIN enrichments e ON e.signal_id = s.id
+    LEFT JOIN enrichments e ON e.signal_id = s.id
     WHERE s.signal = 'BUY' AND s.alerted = 0
     ORDER BY s.date ASC, s.ticker ASC
   `);
@@ -318,6 +323,7 @@ export function getEnrichmentBySignalId(
     SELECT
       e.id AS id,
       e.signal_id AS signalId,
+      e.status AS status,
       e.sentiment AS sentiment,
       e.rationale AS rationale,
       e.earnings_flag AS earningsFlag,
@@ -354,6 +360,26 @@ export function insertEnrichment(db: SqliteConnection, row: EnrichmentInsert): {
     confidence: row.confidence,
   });
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
+}
+
+export function insertEnrichmentStub(
+  db: SqliteConnection,
+  row: { signalId: number; status: EnrichmentStatus },
+): void {
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO enrichments (
+      signal_id, status, sentiment, rationale, confidence,
+      earnings_flag, sector, sector_trend, headlines
+    ) VALUES (
+      @signalId, @status, 'UNKNOWN', '[enrichment unavailable]', 'UNKNOWN',
+      0, 'N/A', 'N/A', '[]'
+    )
+  `);
+  stmt.run({ signalId: row.signalId, status: row.status });
+}
+
+export function deleteEnrichmentForSignal(db: SqliteConnection, signalId: number): void {
+  db.prepare(`DELETE FROM enrichments WHERE signal_id = @signalId`).run({ signalId });
 }
 
 export function markSignalAlerted(db: SqliteConnection, signalId: number): void {
