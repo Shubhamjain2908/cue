@@ -19,6 +19,9 @@ SET
 WHERE status = 'OPEN';
 
 -- S2: preserve `id` values so `enrichments` / `positions` FKs remain valid.
+DROP TABLE IF EXISTS signals_dg_tmp;
+DROP INDEX IF EXISTS uk_signals_composite;
+
 CREATE TABLE signals_dg_tmp (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ticker TEXT NOT NULL,
