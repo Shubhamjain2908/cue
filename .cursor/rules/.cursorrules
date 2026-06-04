@@ -9,7 +9,7 @@ Your stack is **Node.js, TypeScript, and SQLite**. Your objective is to write ma
 Before planning features, generating code, or answering structural questions, read and adhere to:
 - **`spec/cue-reference.txt`** — living repo map: pipeline, modules, current behaviour (Phase 9)
 - **`spec/cue-handoff.txt`** — locked architectural decisions, migration ledger, research archive
-- **`cue-db-schema.md`** — SQLite tables + migrations `001`–`011`
+- **`cue-db-schema.md`** — SQLite tables + migrations `001`–`013`
 - **`cue-guardrails.md`** — hard rules (strategy locks, data, alert, pipeline, position)
 
 All `.cursor/rules/` paths are relative to that folder; `spec/` paths are from repo root.

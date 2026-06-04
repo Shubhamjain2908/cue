@@ -8,7 +8,7 @@
 
 **Historical long-form spec / legacy background:** **`.cursor/rules/cue-sou.md`**.
 
-**SQLite schema (migrations `001`–`011`):** **`.cursor/rules/cue-db-schema.md`**.
+**SQLite schema (migrations `001`–`013`):** **`.cursor/rules/cue-db-schema.md`**.
 
 **Hard constraints:** **`.cursor/rules/cue-guardrails.md`**.
 
