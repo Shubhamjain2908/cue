@@ -35,7 +35,7 @@ flowchart LR
     CLI["pnpm run cue …"]
   end
   CLI --> Ingest["ingest\nMassive EOD"]
-  Ingest --> Splits["adjust-splits\nYahoo splits"]
+  Ingest --> Splits["adjust-splits\nYahoo splits →\npositions + daily_prices"]
   Splits --> DB[("SQLite\ndaily_prices, signals,\npositions, corporate_actions")]
   DB --> Screen["screen\nmomentum + regime"]
   Screen --> DB
@@ -133,7 +133,8 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | Command | Description |
 |---------|-------------|
 | `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: previous ET weekday session, T-1; Mon → Fri), `--ticker SYM`, `--force` refetches that session |
-| `pnpm run cue -- adjust-splits` | Adjust OPEN `positions` / linked `signals` for recent Yahoo split events; idempotent via `corporate_actions` |
+| `pnpm run cue -- adjust-splits` | Yahoo split events → `corporate_actions`; adjusts OPEN `positions` / linked `signals` and retroactive `daily_prices` (OHLC ÷ factor, volume × factor) for `date < ex_date`. Idempotent via `corporate_actions` UNIQUE |
+| `pnpm run cue -- backfill-splits` | One-shot: replay existing `corporate_actions` rows against `daily_prices` (idempotent via `pipeline_state`; run once when the ledger has historical splits) |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache (`--ticker`, `--limit`, `--force`, `--date` reserved) |
 | `pnpm run cue -- screen` | Momentum screener / ranking. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |

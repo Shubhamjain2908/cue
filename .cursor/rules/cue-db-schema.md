@@ -24,12 +24,13 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `011_position_audit` | `stop_movements` (trailing-stop audit log), `position_notes` (thesis snapshots); FK → `positions.id` **without** `ON DELETE CASCADE` (immutable ledger) |
 | `012_perf_indexes` | Additive query indexes: signals, enrichments, positions, daily_prices, stop_movements |
 | `013_enrichment_status` | ALTER TABLE enrichments ADD COLUMN status (OK/LLM_FAIL/TIMEOUT/SCHEMA_FAIL/YAHOO_FAIL); backfills existing rows to 'OK' |
+| `014_enrichments_signal_id_unique` | `enrichments.signal_id` UNIQUE |
 
-**Next migration:** `014`
+**Next migration:** `015`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
-**Post-migrate data note (`009`):** `locked = 1` is set only by migration backfill or a deliberate ceremony — new `pnpm run backtest` rows default to `locked = 0`. The dashboard backtest reference (`getMomentumBacktestSummary`) selects the latest **`strategy = 'MOMENTUM' AND locked = 1`** row, not the newest run by `run_date`.
+**Post-migrate data note (`009` + ceremonies):** `locked = 1` is set by migration backfill (ids **73, 74**) or an explicit gate ceremony. Current dashboard pin: **id=81** (2026-06-04, supersedes 74 — `spec/cue-handoff.txt` §2.2). New `pnpm run backtest` rows default `locked = 0`. `getMomentumBacktestSummary` selects latest **`strategy = 'MOMENTUM' AND locked = 1`**, not newest by `run_date`.
 
 ---
 
@@ -61,6 +62,8 @@ End-of-day OHLCV bars (Massive.com ingest).
 
 **Written by:** `cue ingest` (`massive-price-ingestor.ts`); universe list from `data/universe/${UNIVERSE}.json` (see `src/universe/load-universe.ts`, `_meta.json`).
 
+**Split-adjusted (PR-4):** pre–ex-date rows updated by `adjustDailyPricesBeforeExDate()` when `cue adjust-splits` or `cue backfill-splits` applies a `corporate_actions` event (OHLC ÷ `factor`, volume × `factor`).
+
 ### `corporate_actions`
 
 Split / reverse-split events for price adjustment (`008_corporate_actions`).
@@ -75,6 +78,8 @@ Split / reverse-split events for price adjustment (`008_corporate_actions`).
 | `applied_at` | TEXT, default `CURRENT_TIMESTAMP` |
 
 **Written by:** `cue adjust-splits` (`src/ingestors/corporate-actions.ts`).
+
+**Consumed by:** `adjustDailyPricesBeforeExDate()` (live `applySplit` transaction) and **`cue backfill-splits`** (`scripts/backfill_historical_split_adjustments.ts`) for historical replay.
 
 **Pipeline position:** after **ingest**, before **screen** / **execute-stops** (`critical: false`).
 
@@ -181,7 +186,13 @@ Scheduler idempotency key/value store (`010_pipeline_state`).
 | `value` | TEXT |
 | `updated_at` | Default `CURRENT_TIMESTAMP` |
 
-**Written by:** `setPipelineState()` / read by `getPipelineState()` in `src/db/queries.ts` (e.g. scheduler `last_successful_run_date`).
+**Written by:** `setPipelineState()` / read by `getPipelineState()` in `src/db/queries.ts`.
+
+**Keys in use:**
+| Key pattern | Purpose |
+|-------------|---------|
+| `last_successful_run_date` | Scheduler idempotency (ET `YYYY-MM-DD`) |
+| `backfill_split_applied:{ticker}:{ex_date}` | Split replay idempotency for `daily_prices` (`cue backfill-splits` + live `applySplit`) |
 
 ---
 
@@ -211,9 +222,9 @@ Aggregated metrics for a labeled historical run (`src/backtest/runner.ts`).
 | `cagr`, `max_drawdown`, `win_rate`, `sharpe_ratio`, `total_trades`, `benchmark_cagr`, `expectancy` | REAL metrics |
 | `strategy` | TEXT — e.g. `MOMENTUM`, `GARP_RESEARCH`, `VIX_MOMENTUM_RESEARCH` (P7-G research archive), `SWEEP` (`007`) |
 | `window_label` | TEXT — human label for dashboard (`009`) |
-| `locked` | INTEGER **NOT NULL** default **0** — `1` pins a run as the dashboard reference (`009`) |
+| `locked` | INTEGER **NOT NULL** default **0** — `1` pins a run as the dashboard reference (`009` backfill: 73–74; ceremony: **id=81** as of 2026-06-04) |
 
-**Read by:** `getMomentumBacktestSummary()` in `src/briefing/queries.ts` — `WHERE strategy = 'MOMENTUM' AND locked = 1 ORDER BY run_date DESC LIMIT 1`.
+**Read by:** `getMomentumBacktestSummary()` in `src/briefing/queries.ts` — `WHERE strategy = 'MOMENTUM' AND locked = 1 ORDER BY run_date DESC LIMIT 1` (current pin: **id=81**).
 
 **Written by:** `insertBacktestRun()` / `persistBacktestArtifacts()` in `src/backtest/runner.ts` (optional `windowLabel`, `locked`; defaults unlocked).
 
