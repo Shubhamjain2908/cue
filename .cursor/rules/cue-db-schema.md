@@ -22,8 +22,9 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `009_backtest_runs_window_label` | `backtest_runs.window_label`, `backtest_runs.locked`; backfill locks bull-window runs **73, 74** (`2023-2025 (bull)`), labels extended run **80** (`2022-2025 (extended)`, unlocked) |
 | `010_pipeline_state` | `pipeline_state` — scheduler idempotency key/value store |
 | `011_position_audit` | `stop_movements` (trailing-stop audit log), `position_notes` (thesis snapshots); FK → `positions.id` **without** `ON DELETE CASCADE` (immutable ledger) |
+| `012_perf_indexes` | Additive query indexes: signals, enrichments, positions, daily_prices, stop_movements |
 
-**Next migration:** `012`
+**Next migration:** `013`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
