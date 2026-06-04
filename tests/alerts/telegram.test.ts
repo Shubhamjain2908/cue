@@ -136,7 +136,9 @@ describe("formatWatchlistBench", () => {
 
   it("truncates long rationale at a word boundary", () => {
     const long =
-      "Semiconductor capex cycle recovery continues with leading wafer fab equipment exposure and margin expansion across memory and logic.";
+      "Semiconductor capex cycle recovery continues with leading wafer fab equipment exposure and margin expansion. " +
+      "Foundry utilization is improving into the second half as advanced packaging demand accelerates and customers refresh tool sets for next-node ramps. " +
+      "Management commentary points to sustained gross margin leverage as mix shifts toward higher-value inspection and deposition platforms across memory and logic.";
     const text = formatWatchlistBench(
       [
         {
