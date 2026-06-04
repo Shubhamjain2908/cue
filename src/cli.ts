@@ -152,6 +152,28 @@ program
     }),
   );
 
+program
+  .command("backfill-splits")
+  .description("One-shot: replay corporate_actions splits against historical daily_prices")
+  .action(
+    wrap("backfill-splits", async () => {
+      const { runBackfillHistoricalSplitAdjustments } = await import(
+        "../scripts/backfill_historical_split_adjustments.js"
+      );
+      const config = getConfig();
+      const { openCueDb } = await import("./db/provider.js");
+      const db = openCueDb(config.DB_PATH);
+      try {
+        const result = runBackfillHistoricalSplitAdjustments(db, cueLogger);
+        if (result.failed > 0) {
+          process.exitCode = 1;
+        }
+      } finally {
+        db.close();
+      }
+    }),
+  );
+
 const enrichFundamentals = program
   .command("enrich-fundamentals")
   .description("Phase 4: Yahoo Finance fundamentals context (cache on disk; DB table TBD)")

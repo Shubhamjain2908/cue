@@ -65,12 +65,12 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 
 | Metric | Result | Gate |
 |---|---|---|
-| CAGR | 21.39% | > 12% |
-| Max drawdown | 11.54% | < 20% |
-| Sharpe | 1.162 | > 1.0 |
-| Expectancy | +4.78% | > 0 |
+| CAGR | 21.82% | > 12% |
+| Max drawdown | 10.51% | < 20% |
+| Sharpe | 1.198 | > 1.0 |
+| Expectancy | +4.945% | > 0 |
 
-*Window: 2023-01-01 → 2025-12-31. Do not merge engine changes that fail these gates.*
+*Window: 2023-01-01 → 2025-12-31. Locked run **`backtest_runs` id=81** (PR-4 ceremony 2026-06-04). Supersedes id=74 — see `spec/cue-handoff.txt` §2.2. Any engine change that moves a gate metric >1% requires re-run + lock rotation.*
 
 ---
 
@@ -152,7 +152,7 @@ interface PipelineStep {
 | Env | `src/config/index.ts` | `getConfig()` |
 | Universe files | `data/universe/*.json`, `data/universe/_meta.json` | `UNIVERSE` env key; loader `src/universe/load-universe.ts` |
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
-| Corporate actions | `src/ingestors/corporate-actions.ts` | `cue adjust-splits` (Yahoo `chart` split events; adjusts OPEN `positions` + linked `signals`) |
+| Corporate actions | `src/ingestors/corporate-actions.ts`, `scripts/backfill_historical_split_adjustments.ts` | `cue adjust-splits` (live splits); `cue backfill-splits` (one-shot replay of `corporate_actions` → `daily_prices`) |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
 | LLM | `src/llm/factory.ts`, `src/llm/types.ts`, `src/llm/json.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
@@ -196,8 +196,8 @@ interface PipelineStep {
 
 - **Applied DDL:** `001`–`009` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/cue-db-schema.md`**.
 - **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`**; `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`).
-- **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (bull window **2023–2025** pinned in `009` backfill); newer unlocked research runs (e.g. extended **2022–2025**) do not displace it.
-- **Split adjustment:** `corporate_actions` idempotency + price-level updates on OPEN book before screen/stops (`cue adjust-splits`).
+- **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (**id=81**, 2023–2025 bull window; ceremony 2026-06-04). Migration `009` locked ids 73–74; id=81 supersedes via gate ceremony. Unlocked research runs do not displace the pin.
+- **Split adjustment (PR-4):** `cue adjust-splits` records splits in **`corporate_actions`**, adjusts OPEN **`positions` / `signals`**, and retroactively adjusts **`daily_prices`** for `date < ex_date` (OHLC ÷ `factor`, volume × `factor`) so momentum/backtest inputs stay continuous. One-shot **`cue backfill-splits`** replays existing ledger rows (oldest `ex_date` first); idempotent via **`pipeline_state`** key `backfill_split_applied:{ticker}:{ex_date}`.
 - **Live `positions` exit mapping** (`mapLiveExitReason` / `006`): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP → REBALANCE_DROP`**; `FORCED_CLOSE → MANUAL`.
 - **Live Performance dashboard:** `getLivePerformanceSummary` / `getLivePerformanceByConfidence` exclude **`MANUAL`** and **`REBALANCE_DROP`**; backtest comparison metrics come from **`getMomentumBacktestSummary`** (`formatBacktestRef` in `template.ts`), not hardcoded constants.
 - **`backtest_trades` exit mapping** (simulator only): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP` / `FORCED_CLOSE → MANUAL`**. `INITIAL_STOP` reserved in CHECK but not emitted by the current runner.
@@ -355,13 +355,15 @@ Per strategy constraints, a secondary research module was built to evaluate a Gr
 
 | Metric | Core Momentum (Locked) | GARP v1 (Rotational Model) | GARP v2 (Technical Exit Model) | Gate Threshold |
 | :--- | :--- | :--- | :--- | :--- |
-| **CAGR** | **21.39%** | 1.11% | 2.60% | N/A |
-| **Max Drawdown** | **11.54%** | 6.56% | 8.49% | < 20.0% |
+| **CAGR** | **21.39%** *(id=74 archival)* | 1.11% | 2.60% | N/A |
+| **Max Drawdown** | **11.54%** *(id=74)* | 6.56% | 8.49% | < 20.0% |
 | **Win Rate** | **52.20%** | 44.44% | 53.33% | N/A |
-| **Sharpe Ratio** | **1.162** | -0.778 | **-0.188** | **> 0.8** |
-| **Expectancy** | **+4.78%** | +2.329% | +1.112% | > 0.0% |
+| **Sharpe Ratio** | **1.162** *(id=74)* | -0.778 | **-0.188** | **> 0.8** |
+| **Expectancy** | **+4.78%** *(id=74)* | +2.329% | +1.112% | > 0.0% |
 | **Total Trades** | **78** | 9 | 45 | N/A |
 | **Gate Verdict** | **LOCKED / PROD** | **BLOCKED** | **BLOCKED** | N/A |
+
+*Current production momentum lock: **id=81** (§3.3 — 102 trades, ceremony 2026-06-04). Table above is the original Phase 4 GARP comparison snapshot (id=74, 78 trades).*
 
 #### Factor Breakdown & Diagnostic Post-Mortem
 The strategy underperformed due to anti-momentum factor selection. The valuation filters systematically excluded premium megacap technology assets that drove index returns during the 2023–2025 market cycle. Stripping out rotational rebalance liquidations (`REBALANCE_DROP`) normalized trade frequency and improved win rates, but the final Sharpe ratio ($-0.188$) fell drastically short of the production clearance floor ($>0.8$).
