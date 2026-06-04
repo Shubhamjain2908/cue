@@ -37,6 +37,20 @@ function silentLogger(): winston.Logger {
   });
 }
 
+function seedDailyPrices(
+  db: SqliteConnection,
+  ticker: string,
+  bars: Array<{ date: string; close: number }>,
+): void {
+  const insert = db.prepare(`
+    INSERT INTO daily_prices (ticker, date, open, high, low, close, volume)
+    VALUES (@ticker, @date, @close, @close, @close, @close, 1_000_000)
+  `);
+  for (const bar of bars) {
+    insert.run({ ticker, date: bar.date, close: bar.close });
+  }
+}
+
 function seedOpenPosition(
   db: SqliteConnection,
   overrides?: Partial<typeof sampleSignal> & { entryPrice?: number },
@@ -95,6 +109,79 @@ describe("adjustSplitsForOpenPositions", () => {
     expect(yf.chart).not.toHaveBeenCalled();
     const count = db.prepare(`SELECT COUNT(*) AS c FROM corporate_actions`).get() as { c: number };
     expect(count.c).toBe(0);
+    db.close();
+  });
+
+  it("adjusts daily_prices before ex_date on a 2:1 forward split", async () => {
+    const db = openMemoryDb();
+    const exDate = "2024-06-01";
+    const yf = mockChart({
+      "1717200000": {
+        date: new Date(`${exDate}T00:00:00.000Z`),
+        numerator: 2,
+        denominator: 1,
+        splitRatio: "2:1",
+      },
+    });
+    seedDailyPrices(db, "TEST", [
+      { date: "2024-05-30", close: 200 },
+      { date: "2024-05-31", close: 204 },
+      { date: exDate, close: 100 },
+      { date: "2024-06-02", close: 102 },
+    ]);
+    seedOpenPosition(db, { ticker: "TEST", price: 100, entryPrice: 100 });
+
+    await adjustSplitsForOpenPositions(db, yf, silentLogger());
+
+    expect(
+      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-05-30'`).get() as {
+        close: number;
+      }).close,
+    ).toBeCloseTo(100, 6);
+    expect(
+      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-05-31'`).get() as {
+        close: number;
+      }).close,
+    ).toBeCloseTo(102, 6);
+    expect(
+      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = ?`).get(exDate) as {
+        close: number;
+      }).close,
+    ).toBe(100);
+    expect(
+      (db.prepare(`SELECT close FROM daily_prices WHERE ticker = 'TEST' AND date = '2024-06-02'`).get() as {
+        close: number;
+      }).close,
+    ).toBe(102);
+    db.close();
+  });
+
+  it("does not double-adjust daily_prices when corporate_actions row already exists", async () => {
+    const db = openMemoryDb();
+    const exDate = "2024-06-05";
+    const yf = mockChart({
+      "1717545600": {
+        date: new Date(`${exDate}T00:00:00.000Z`),
+        numerator: 2,
+        denominator: 1,
+        splitRatio: "2:1",
+      },
+    });
+    seedDailyPrices(db, "AAPL", [{ date: "2024-06-04", close: 200 }]);
+    seedOpenPosition(db);
+    db.prepare(
+      `
+      INSERT INTO corporate_actions (ticker, ex_date, type, factor, source)
+      VALUES ('AAPL', ?, 'split', 2.0, 'yahoo')
+    `,
+    ).run(exDate);
+
+    await adjustSplitsForOpenPositions(db, yf, silentLogger());
+
+    const bar = db
+      .prepare(`SELECT close FROM daily_prices WHERE ticker = 'AAPL' AND date = '2024-06-04'`)
+      .get() as { close: number };
+    expect(bar.close).toBe(200);
     db.close();
   });
 
