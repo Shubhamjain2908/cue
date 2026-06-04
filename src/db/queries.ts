@@ -479,11 +479,7 @@ export function closePosition(
       exit_date = @exitDate,
       exit_price = @exitPrice,
       exit_reason = @exitReason,
-      pnl_pct = CASE
-        WHEN @exitPrice IS NOT NULL AND @exitPrice > 0
-        THEN ROUND((@exitPrice - entry_price) / entry_price * 100, 4)
-        ELSE pnl_pct
-      END
+      pnl_pct = ROUND((@exitPrice - entry_price) / entry_price * 100, 4)
     WHERE id = @id AND status = 'OPEN'
   `);
   stmt.run({ id: positionId, exitDate, exitPrice, exitReason });
