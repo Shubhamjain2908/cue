@@ -1,10 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import axios from "axios";
 import type { Logger } from "winston";
 
 import { REBALANCE_DAY_OF_WEEK, weekdayUtcForNyCalendarDate } from "./daily-workflow.js";
+import { cueLogger } from "../cli/cue-logger.js";
 import type { AppConfig } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE, getExchangeDateString } from "../config/cue-timezone.js";
 import { getPipelineState } from "../db/queries.js";
@@ -23,20 +21,7 @@ export interface CheckResult {
 export type HealthcheckDeps = {
   now?: () => Date;
   sendTelegram?: (text: string) => Promise<void>;
-  resolveLogPath?: () => string;
-  readLogTail?: (logPath: string, maxLines: number) => string[];
 };
-
-const LOG_TAIL_LINES = 100;
-const LOG_ERROR_LOOKBACK_MS = 90 * 60 * 1000;
-
-const LOG_TIMESTAMP_RE = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)/;
-const LOG_ERROR_LEVEL_RE = /\serror:\s/i;
-
-/** Align with `deploy/ecosystem.config.cjs` `error_file` for the `cue` app. */
-export function resolveDefaultPm2ErrorLogPath(projectRoot = process.cwd()): string {
-  return path.join(projectRoot, "logs", "pm2-cue.log");
-}
 
 function formatEtTime(now: Date): string {
   const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
@@ -267,67 +252,49 @@ export function checkPipelineRanToday(db: CueDatabase, now: Date): CheckResult {
   };
 }
 
-function readLogTailFromDisk(logPath: string, maxLines: number): string[] {
-  if (!fs.existsSync(logPath)) {
-    return [];
-  }
-  const raw = fs.readFileSync(logPath, "utf8");
-  const lines = raw.split(/\r?\n/).filter((line) => line.length > 0);
-  return lines.slice(-maxLines);
-}
-
-export function parseRecentErrorLogLines(lines: string[], nowMs: number): string[] {
-  const cutoff = nowMs - LOG_ERROR_LOOKBACK_MS;
-  const errors: string[] = [];
-  for (const line of lines) {
-    if (!LOG_ERROR_LEVEL_RE.test(line)) {
-      continue;
-    }
-    const match = line.match(LOG_TIMESTAMP_RE);
-    if (match === null) {
-      continue;
-    }
-    const ts = Date.parse(match[1]!);
-    if (Number.isNaN(ts) || ts < cutoff) {
-      continue;
-    }
-    errors.push(line);
-  }
-  return errors;
-}
-
-export function checkPm2Logs(
-  logPath: string,
-  now: Date,
-  readLogTail: (path: string, maxLines: number) => string[] = readLogTailFromDisk,
-  logger?: Logger,
+export function checkPipelineStepState(
+  db: CueDatabase,
+  mode: "rebalance" | "stop",
 ): CheckResult {
-  const name = "pm2_logs";
+  const name = "pipeline_step_state";
+  const criticalSteps =
+    mode === "rebalance" ? ["ingest", "screen"] : ["ingest", "execute-stops"];
 
-  if (!fs.existsSync(logPath)) {
-    logger?.warn(`[healthcheck] Log file missing, skipping PM2 scan: ${logPath}`);
-    return {
-      name,
-      status: "SKIP",
-      message: `log file not found (${logPath})`,
-    };
+  const failures: string[] = [];
+
+  for (const stepName of criticalSteps) {
+    const exitCodeVal = getPipelineState(db, `step:${stepName}:last_exit_code`);
+
+    if (exitCodeVal === null) {
+      cueLogger.warn(
+        `healthcheck: no pipeline_state entry for step:${stepName}:last_exit_code — step may not have run yet`,
+      );
+      continue;
+    }
+
+    if (exitCodeVal !== "0") {
+      const ranAt = getPipelineState(db, `step:${stepName}:last_run_at`) ?? "unknown time";
+      failures.push(`${stepName} exited ${exitCodeVal} at ${ranAt}`);
+    }
   }
 
-  const lines = readLogTail(logPath, LOG_TAIL_LINES);
-  const recentErrors = parseRecentErrorLogLines(lines, now.getTime());
-  if (recentErrors.length > 0) {
-    const preview = recentErrors.slice(0, 3).join("\n");
+  if (failures.length === 0) {
     return {
       name,
-      status: "FAIL",
-      message: `${recentErrors.length} error-level log entries in last 90 minutes:\n${preview}`,
+      status: "PASS",
+      message: "All critical steps exited 0",
     };
   }
   return {
     name,
-    status: "PASS",
-    message: "no error-level log entries in last 90 minutes",
+    status: "FAIL",
+    message: `Critical step failures: ${failures.join("; ")}`,
   };
+}
+
+function healthcheckModeForEtDate(todayEt: string): "rebalance" | "stop" {
+  const [y, m, d] = todayEt.split("-").map(Number);
+  return weekdayUtcForNyCalendarDate(y!, m!, d!) === REBALANCE_DAY_OF_WEEK ? "rebalance" : "stop";
 }
 
 function buildTelegramMessage(todayEt: string, timeEt: string, results: CheckResult[]): string {
@@ -394,7 +361,7 @@ export async function runHealthcheck(
   const now = deps.now?.() ?? new Date();
   const todayEt = getExchangeDateString(now);
   const timeEt = formatEtTime(now);
-  const logPath = deps.resolveLogPath?.() ?? resolveDefaultPm2ErrorLogPath();
+  const todayMode = healthcheckModeForEtDate(todayEt);
   const sendTelegram = deps.sendTelegram ?? ((text: string) => defaultSendTelegram(text, config));
 
   const results: CheckResult[] = [
@@ -403,7 +370,7 @@ export async function runHealthcheck(
     checkQqqLag(db, now),
     checkStalePositions(db, now),
     checkPipelineRanToday(db, now),
-    checkPm2Logs(logPath, now, deps.readLogTail, logger),
+    checkPipelineStepState(db, todayMode),
   ];
 
   const hasFailure = results.some((r) => r.status === "FAIL");
