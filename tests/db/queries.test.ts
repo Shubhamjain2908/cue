@@ -10,6 +10,7 @@ import {
   listUnenrichedBuySignals,
   mapLiveExitReason,
   markSignalAlerted,
+  markWatchlistSignalsAlerted,
 } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 
@@ -164,15 +165,49 @@ describe("db queries", () => {
     db.close();
   });
 
-  it("marks a signal as alerted", () => {
+  it("marks a signal as alerted with alerted_at timestamp", () => {
     const db = openMemoryDb();
     insertSignal(db, sampleSignal);
     const id = (db.prepare(`SELECT id FROM signals`).get() as { id: number }).id;
     markSignalAlerted(db, id);
-    const alerted = (db.prepare(`SELECT alerted FROM signals WHERE id = ?`).get(id) as {
-      alerted: number;
-    }).alerted;
-    expect(alerted).toBe(1);
+    const row = db
+      .prepare(`SELECT alerted, alerted_at FROM signals WHERE id = ?`)
+      .get(id) as { alerted: number; alerted_at: string | null };
+    expect(row.alerted).toBe(1);
+    expect(row.alerted_at).not.toBeNull();
+    expect(row.alerted_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    db.close();
+  });
+
+  it("markWatchlistSignalsAlerted sets alerted_at on all targeted rows", () => {
+    const db = openMemoryDb();
+    const wlBase = {
+      signal: "WATCHLIST" as const,
+      price: 50,
+      momentumRank: 4,
+      universeRankedCount: 50,
+      momentum12_1Return: 0.08,
+      atr14: 1.5,
+      initialAtrStop: 45,
+    };
+    insertSignal(db, { ...wlBase, ticker: "WL1", date: "2024-06-01" });
+    insertSignal(db, { ...wlBase, ticker: "WL2", date: "2024-06-01", momentumRank: 5 });
+    const ids = (
+      db.prepare(`SELECT id FROM signals WHERE signal = 'WATCHLIST' ORDER BY ticker`).all() as Array<{
+        id: number;
+      }>
+    ).map((r) => r.id);
+
+    markWatchlistSignalsAlerted(db, ids);
+
+    const rows = db
+      .prepare(`SELECT alerted, alerted_at FROM signals WHERE signal = 'WATCHLIST' ORDER BY id`)
+      .all() as Array<{ alerted: number; alerted_at: string | null }>;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.alerted).toBe(1);
+      expect(row.alerted_at).not.toBeNull();
+    }
     db.close();
   });
 

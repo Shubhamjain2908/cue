@@ -26,8 +26,9 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `013_enrichment_status` | ALTER TABLE enrichments ADD COLUMN status (OK/LLM_FAIL/TIMEOUT/SCHEMA_FAIL/YAHOO_FAIL); backfills existing rows to 'OK' |
 | `014_enrichments_signal_id_unique` | `enrichments.signal_id` UNIQUE |
 | `015_backtest_rebalance_drop` | Rebuild `backtest_trades`; CHECK adds **`REBALANCE_DROP`**; re-index ticker + run_id |
+| `016_signals_alerted_at` | ALTER TABLE `signals` ADD COLUMN `alerted_at` TEXT; NULL until alert fires; written by `markSignalAlerted` |
 
-**Next migration:** `016`
+**Next migration:** `017`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
@@ -102,6 +103,7 @@ Momentum screen outputs: actionable **BUY** / **SELL**, plus rebalance-only **WA
 | `signal_type` | Strategy lane; default **`MOMENTUM`** |
 | `price` | REAL at signal |
 | `alerted` | 0/1 — Telegram / brief idempotency (BUY alerts and watchlist bench) |
+| `alerted_at` | TEXT — ISO timestamp written when `alerted=1` is set; NULL if not yet alerted |
 | `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context (required for BUY and WATCHLIST at insert) |
 | `atr14`, `initial_atr_stop` | Stop ladder inputs; `initial_atr_stop` set on BUY; optional on WATCHLIST |
 
