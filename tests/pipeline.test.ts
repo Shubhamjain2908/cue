@@ -18,8 +18,8 @@ import {
 } from "../src/agents/daily-workflow.js";
 
 describe("weekdayUtcForNyCalendarDate", () => {
-  it("maps 2026-01-10 (Sat) to Saturday rebalance day (6)", () => {
-    expect(weekdayUtcForNyCalendarDate(2026, 1, 10)).toBe(REBALANCE_DAY_OF_WEEK);
+  it("maps 2026-01-11 (Sun) to Sunday rebalance day (0)", () => {
+    expect(weekdayUtcForNyCalendarDate(2026, 1, 11)).toBe(REBALANCE_DAY_OF_WEEK);
   });
 
   it("maps 2026-01-05 (Mon) to Monday (1)", () => {
@@ -28,23 +28,23 @@ describe("weekdayUtcForNyCalendarDate", () => {
 });
 
 describe("detectRunMode", () => {
-  it("returns rebalance on Saturday (ET calendar)", () => {
-    const now = new Date("2026-01-10T14:10:00.000Z");
+  it("returns rebalance on Sunday (ET calendar)", () => {
+    const now = new Date("2026-01-11T11:05:00.000Z");
     expect(detectRunMode({ now, argv: ["node", "pipeline"] })).toBe("rebalance");
   });
 
-  it("returns stop on Friday (ET calendar)", () => {
-    const now = new Date("2026-01-09T21:10:00.000Z");
+  it("returns stop on Saturday (ET calendar)", () => {
+    const now = new Date("2026-01-10T11:05:00.000Z");
     expect(detectRunMode({ now, argv: ["node", "pipeline"] })).toBe("stop");
   });
 
-  it("returns stop on Monday (ET calendar)", () => {
-    const now = new Date("2026-01-05T21:10:00.000Z");
+  it("returns stop on Tuesday (ET calendar)", () => {
+    const now = new Date("2026-01-06T11:05:00.000Z");
     expect(detectRunMode({ now, argv: ["node", "pipeline"] })).toBe("stop");
   });
 
   it("returns rebalance when --force-rebalance is present", () => {
-    const now = new Date("2026-01-05T16:10:00-05:00");
+    const now = new Date("2026-01-06T06:05:00-05:00");
     expect(detectRunMode({ now, argv: ["node", "pipeline", "--force-rebalance"] })).toBe("rebalance");
   });
 });
@@ -71,16 +71,16 @@ describe("stepsForMode", () => {
 });
 
 describe("isWithinExecutionWindow", () => {
-  it("is true for 16:10 ET on a weekday", () => {
-    expect(isWithinExecutionWindow(new Date("2026-01-05T21:10:00.000Z"))).toBe(true);
+  it("is true for 06:05 ET on a weekday", () => {
+    expect(isWithinExecutionWindow(new Date("2026-01-06T11:05:00.000Z"))).toBe(true);
   });
 
-  it("is false at 16:04 ET on a weekday", () => {
-    expect(isWithinExecutionWindow(new Date("2026-01-05T21:04:00.000Z"))).toBe(false);
+  it("is false at 05:59 ET on a weekday", () => {
+    expect(isWithinExecutionWindow(new Date("2026-01-06T10:59:00.000Z"))).toBe(false);
   });
 
-  it("is true for 09:10 ET on Saturday", () => {
-    expect(isWithinExecutionWindow(new Date("2026-01-10T14:10:00.000Z"))).toBe(true);
+  it("is true for 06:05 ET on Sunday", () => {
+    expect(isWithinExecutionWindow(new Date("2026-01-11T11:05:00.000Z"))).toBe(true);
   });
 });
 

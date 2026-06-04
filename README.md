@@ -16,9 +16,9 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 
 - Pulls **EOD OHLCV** for the configured universe and stores it in SQLite.
 - **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
-- On **Saturday rebalance** path (uses **Friday** EOD bars): **split adjustment**, fundamentals prefetch, full screen with `--force-rebalance`, LLM enrich, then brief (BUY alerts + optional **Next in Rank** bench).
-- On **Mon–Fri stop** path (including **Friday**): price refresh, **split adjustment**, **execute-stops**, then brief (no Saturday-style screen).
-- After the **16:05–16:15 ET** pipeline window: optional **`cue healthcheck`** (~17:00 ET cron) verifies ingest currency, pipeline output, and PM2 error logs, then Telegram ✅/⚠️.
+- On **Sunday rebalance** path (uses **Friday** EOD bars): **split adjustment**, fundamentals prefetch, full screen with `--force-rebalance`, LLM enrich, then brief (BUY alerts + optional **Next in Rank** bench).
+- On **Tue–Sat stop** path: price refresh, **split adjustment**, **execute-stops**, then brief (no rebalance-style screen).
+- After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, pipeline output, and PM2 error logs, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
 Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Phase 7 record: **`spec/cue-phase7-complete.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
@@ -41,14 +41,14 @@ flowchart LR
   Screen --> DB
   DB --> Fund["enrich-fundamentals\nYahoo → cache"]
   Fund --> Disk[("disk cache\nCACHE_DIR")]
-  DB --> Stops["execute-stops\nMon–Thu scheduler"]
+  DB --> Stops["execute-stops\nTue–Sat scheduler"]
   Stops --> DB
   DB --> LLM["enrich\nLLM + Yahoo context"]
   LLM --> DB
   DB --> Brief["brief\ndashboard + Telegram"]
   Brief --> Out["dist/*.html\nTelegram API"]
   Sched["scheduler.ts\n60s poll, ET window"] -.->|"subprocess chain"| CLI
-  HC["healthcheck.ts\n~17:00 ET cron"] -.->|"post-window verify"| DB
+  HC["healthcheck.ts\n~07:00 ET cron"] -.->|"post-window verify"| DB
   HC -.-> Out
 ```
 
@@ -56,9 +56,9 @@ flowchart LR
 
 | Path | Entry | Behaviour |
 |------|--------|-----------|
-| **Registry pipeline** | `cue run-all`, `cue pipeline --now` | **Saturday** → rebalance chain; **Mon–Fri** → stop chain (`detectRunMode`). |
-| **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | **Sat 09:05–09:15 ET** rebalance; **Mon–Fri 16:05–16:15 ET** stops; **Sunday** idle. |
-| **Healthcheck** | `cue healthcheck` | Post-window Telegram check; PM2 **`cue-healthcheck`** (weekdays) + **`cue-healthcheck-sat`**. |
+| **Registry pipeline** | `cue run-all`, `cue pipeline --now` | **Sunday** → rebalance chain; **Tue–Sat** → stop chain (`detectRunMode`); **Monday** idle. |
+| **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | **Sun 06:00–06:10 ET** rebalance; **Tue–Sat 06:00–06:10 ET** stops; **Monday** idle. |
+| **Healthcheck** | `cue healthcheck` | Post-window Telegram check; PM2 **`cue-healthcheck`** on Sun/Tue-Sat. |
 
 **LLM:** `src/llm/provider.ts` chooses **Anthropic**, **OpenAI**, **Google AI**, or **Vertex AI** from `LLM_PROVIDER`. The runtime contract is `LLMProvider.complete(messages, maxTokens)`; structured outputs are validated with **Zod** after parsing JSON from the model.
 
@@ -111,7 +111,7 @@ pnpm run-all
 
 ```bash
 pnpm schedule
-# 60s polling, fires inside 16:05–16:15 America/New_York when ET weekday matches
+# 60s polling, fires inside 06:00–06:10 America/New_York on scheduled ET weekdays
 ```
 
 ---
@@ -202,8 +202,7 @@ Defined in **`src/config/cue-timezone.ts`** and used from ingest date helpers, `
 
 - **PM2:** `deploy/ecosystem.config.cjs` defines:
   - **`cue`** — long-lived scheduler (`src/cli.ts pipeline` or **`src/cli.ts schedule`**); logs `logs/pm2-cue.log`.
-  - **`cue-healthcheck`** — Mon–Fri post-stop window (`0 21 * * 1-5` UTC ≈ 17:00 ET).
-  - **`cue-healthcheck-sat`** — Saturday post-rebalance (`0 14 * * 6` UTC ≈ 10:00 ET). Use **`0 17 * * 1-5`** / **`0 10 * * 6`** if the host clock is **America/New_York**.
+  - **`cue-healthcheck`** — post-window check (`0 11 * * 0,2-6` UTC ≈ ~07:00 ET on Sun/Tue-Sat). Use **`0 7 * * 0,2-6`** if host clock is **America/New_York**.
 - **systemd:** run `cue schedule` (or `cue pipeline`) as a `Type=simple` long-lived service; send `SIGTERM` for clean shutdown (scheduler closes its readonly DB handle). Schedule `cue healthcheck` separately (cron or second unit) if not using PM2 for the healthcheck app.
 
 ---

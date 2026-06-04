@@ -24,7 +24,7 @@ const POLL_MS = 60_000;
 /** `pipeline_state.key` — ET `YYYY-MM-DD` of last scheduler run that exited 0. */
 const PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE = "last_successful_run_date";
 
-/** Saturday morning: full rebalance (Friday session OHLCV). */
+/** Sunday morning: full rebalance (Friday session OHLCV from T-1 ingest). */
 const SCHEDULER_REBALANCE_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
@@ -40,7 +40,7 @@ const SCHEDULER_REBALANCE_STEPS: PipelineStep[] = [
   },
 ];
 
-/** Mon–Fri maintenance: stop path (includes Friday — no rebalance on Fri). */
+/** Tue–Sat maintenance: stop path (Monday idles; no same-day data dependency). */
 const SCHEDULER_WEEKDAY_STOP_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
@@ -69,12 +69,12 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
 });
 
-/** NY weekday: Saturday → rebalance; Mon–Fri → stop maintenance; Sunday → idle. */
+/** NY weekday: Sunday → rebalance; Tue–Sat → stop maintenance; Monday → idle. */
 export function schedulerRunKindForNyWeekday(dow: number): "rebalance" | "weekday" | null {
-  if (dow === 6) {
+  if (dow === 0) {
     return "rebalance";
   }
-  if (dow >= 1 && dow <= 5) {
+  if (dow >= 2 && dow <= 6) {
     return "weekday";
   }
   return null;
@@ -244,7 +244,7 @@ function schedulerTick(): void {
   const dow = getNyCalendarWeekday(now);
   const kind = schedulerRunKindForNyWeekday(dow);
   if (kind === null) {
-    logger.debug(`scheduler_skip_sunday dow=${dow} etDate=${todayEt}`);
+    logger.debug(`scheduler_skip_idle_day dow=${dow} etDate=${todayEt}`);
     return;
   }
 
@@ -309,7 +309,7 @@ function formatSchedulerWindowEt(now: Date): string {
 }
 
 /**
- * Long-running scheduler daemon (60s poll; ET window Mon–Fri 16:05–16:15, Sat 09:05–09:15).
+ * Long-running scheduler daemon (60s poll; ET window Tue–Sat 06:00–06:10 stop, Sun 06:00–06:10 rebalance).
  * Intended for systemd / PM2 alongside `cue schedule`.
  */
 export function runScheduleDaemonCli(): void {
@@ -321,7 +321,7 @@ export function runScheduleDaemonCli(): void {
   process.on("SIGTERM", shutdown);
 
   logger.info(
-    `scheduler_started pollMs=${POLL_MS} windowEt=Mon-Fri_20:00-20:10_Sat_09:05-09:15 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
+    `scheduler_started pollMs=${POLL_MS} windowEt=Tue-Sat_06:00-06:10_Sun_06:00-06:10 locale=${CUE_LOCALE} timeZone=${CUE_TIME_ZONE} lockPath=${cfg.LOCK_PATH}`,
   );
   pollTimer = setInterval(schedulerTick, POLL_MS);
   schedulerTick();

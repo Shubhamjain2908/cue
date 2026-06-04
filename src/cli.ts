@@ -81,8 +81,8 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   brief                Static HTML dashboard + Telegram alerts
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
   run-all              Run full pipeline once (subprocess chain, same as scheduled window)
-  schedule             Scheduler daemon (Mon–Fri 16:05–16:15 ET; Sat rebalance 09:05–09:15 ET)
-  healthcheck          Post-pipeline verification + Telegram alert (17:00 ET cron)
+  schedule             Scheduler daemon (Tue–Sat 06:00–06:10 ET stop; Sun rebalance 06:00–06:10 ET)
+  healthcheck          Post-pipeline verification + Telegram alert (after morning window)
   doctor               Config + DB + env presence diagnostics
   pipeline             Legacy alias: \`--now\` = one-shot run-all; no flag = same as schedule
 `,
@@ -320,7 +320,7 @@ program
 program
   .command("schedule")
   .description(
-    `Start scheduler daemon (${CUE_TIME_ZONE}; Sat 09:05–09:15 rebalance, Mon–Fri 20:00–20:10 stops)`,
+    `Start scheduler daemon (${CUE_TIME_ZONE}; Sun 06:00–06:10 rebalance, Tue–Sat 06:00–06:10 stops)`,
   )
   .action(
     wrap("schedule", async () => {
@@ -331,7 +331,7 @@ program
 
 program
   .command("healthcheck")
-  .description("Verify ingest, pipeline output, and PM2 logs; alert via Telegram (post 16:15 ET window)")
+  .description("Verify ingest, pipeline output, and PM2 logs; alert via Telegram (post morning window)")
   .action(
     wrap("healthcheck", async () => {
       const config = getConfig();

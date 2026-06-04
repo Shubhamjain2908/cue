@@ -4,15 +4,15 @@ import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 
-/** Saturday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 6 Sat). */
-export const REBALANCE_DAY_OF_WEEK = 6;
+/** Sunday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 6 Sat). */
+export const REBALANCE_DAY_OF_WEEK = 0;
 
-/** Mon–Fri stop path: 20:00–20:10 ET gives Massive free-tier ~4 h to publish T+0 EOD data. */
-const WEEKDAY_WINDOW_START_MIN = 20 * 60;
-const WEEKDAY_WINDOW_END_MIN = 20 * 60 + 10;
-/** Saturday rebalance: morning window (Friday EOD bars available from Massive). */
-const REBALANCE_WINDOW_START_MIN = 9 * 60 + 5;
-const REBALANCE_WINDOW_END_MIN = 9 * 60 + 15;
+/** Tue–Sat stop path: next-morning 06:00–06:10 ET for stable free-tier T-1 availability. */
+const WEEKDAY_WINDOW_START_MIN = 6 * 60;
+const WEEKDAY_WINDOW_END_MIN = 6 * 60 + 10;
+/** Sunday rebalance: 06:00–06:10 ET using Friday OHLCV from T-1 ingest. */
+const REBALANCE_WINDOW_START_MIN = 6 * 60;
+const REBALANCE_WINDOW_END_MIN = 6 * 60 + 10;
 
 export interface PipelineStep {
   name: string;
@@ -124,7 +124,7 @@ export function getEtMinutesSinceMidnight(now: Date): number {
   return hour * 60 + minute;
 }
 
-/** ET execution window for scheduler polling (weekday vs Saturday rebalance). */
+/** ET execution window for scheduler polling (Tue–Sat stop vs Sunday rebalance). */
 export function executionWindowEtForDate(now: Date): { startMin: number; endMin: number } {
   const dow = getNyCalendarWeekday(now);
   if (dow === REBALANCE_DAY_OF_WEEK) {

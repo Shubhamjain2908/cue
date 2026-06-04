@@ -45,11 +45,11 @@ module.exports = {
       time: true,
     },
   // PM2 `cron_restart` uses the HOST system timezone (not `TZ` env).
-  // Pipeline now runs at 20:00–20:10 ET. Healthcheck must fire AFTER it.
+  // Pipeline now runs at 06:00–06:10 ET on Tue–Sun execution days.
   // Oracle Cloud VMs are usually UTC:
-  //   Weekday: `0 2 * * 2-6` = 02:00 UTC Tue–Sat = 22:00 EDT / 21:00 EST
-  //     (covers Mon–Fri pipelines which finish by ~00:15 UTC)
-  //   If host clock is America/New_York: use `0 22 * * 1-5` instead.
+  //   `0 11 * * 0,2-6` = 11:00 UTC on Sun/Tue-Sat (~07:00 EDT, ~06:00 EST)
+  //     which runs after the morning pipeline window.
+  //   If host clock is America/New_York: use `0 7 * * 0,2-6`.
     {
       name: 'cue-healthcheck',
       cwd: root,
@@ -58,7 +58,7 @@ module.exports = {
       interpreter: 'none',
       instances: 1,
       autorestart: false,
-      cron_restart: '0 2 * * 2-6',
+      cron_restart: '0 11 * * 0,2-6',
       watch: false,
       env_file: path.join(root, '.env'),
       env: {
@@ -68,27 +68,6 @@ module.exports = {
       combine_logs: true,
       out_file: path.join(logDir, 'healthcheck-out.log'),
       error_file: path.join(logDir, 'healthcheck-error.log'),
-      time: true,
-    },
-    // Saturday post-rebalance (~10:00 ET when host is UTC; use `0 10 * * 6` if host clock is America/New_York).
-    {
-      name: 'cue-healthcheck-sat',
-      cwd: root,
-      script: 'node_modules/.bin/tsx',
-      args: 'src/cli.ts healthcheck',
-      interpreter: 'none',
-      instances: 1,
-      autorestart: false,
-      cron_restart: '0 14 * * 6',
-      watch: false,
-      env_file: path.join(root, '.env'),
-      env: {
-        NODE_ENV: 'production',
-      },
-      merge_logs: true,
-      combine_logs: true,
-      out_file: path.join(logDir, 'healthcheck-sat-out.log'),
-      error_file: path.join(logDir, 'healthcheck-sat-error.log'),
       time: true,
     },
   ],
