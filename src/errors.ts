@@ -1,3 +1,10 @@
+export class LLMTimeoutError extends Error {
+  constructor(signalId: number, timeoutMs: number) {
+    super(`LLM enrichment timed out — signalId=${String(signalId)} after ${String(timeoutMs)}ms`);
+    this.name = "LLMTimeoutError";
+  }
+}
+
 export class RegimeGateNotInitialized extends Error {
   constructor(availableBars: number, requiredBars: number) {
     super(
