@@ -12,6 +12,7 @@ import { detectRunMode } from "../agents/daily-workflow.js";
 import { cueLogger } from "../cli/cue-logger.js";
 import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
 import { getConfig } from "../config/index.js";
+import { RegimeGateNotInitialized } from "../errors.js";
 import {
   closePosition,
   insertPosition,
@@ -407,7 +408,11 @@ export function runLiveScreen(
 
   const qqqSlice = sliceBarsThrough(qqqSeries, asOf);
   const qqqCloses = qqqSlice?.map((b) => b.close) ?? [];
-  const smaRegime = sma(cfg.smaPeriod, qqqCloses);
+  const REGIME_SMA_PERIOD = 200;
+  if (qqqCloses.length < REGIME_SMA_PERIOD) {
+    throw new RegimeGateNotInitialized(qqqCloses.length, REGIME_SMA_PERIOD);
+  }
+  const smaRegime = sma(REGIME_SMA_PERIOD, qqqCloses);
   const regimeOk = smaRegime !== null && qqqBar.close > smaRegime;
 
   let fullRanked: RankedTicker[] = [];

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runLiveScreen } from "../../src/analysers/momentum-screener.js";
 import { resetConfigCache } from "../../src/config/index.js";
+import { RegimeGateNotInitialized } from "../../src/errors.js";
 import { insertDailyPrices, insertPosition, insertSignal } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 
@@ -157,6 +158,63 @@ function insertOpenPosition(db: SqliteConnection, seed: OpenPositionSeed): { pos
   });
   return { positionId: Number(lastInsertRowid) };
 }
+
+function seedUniverseWithQqqBarCount(db: SqliteConnection, qqqBarCount: number): string {
+  const momentumEnds: Record<string, number> = {
+    AAA: 200,
+    BBB: 180,
+    CCC: 160,
+    DDD: 140,
+    EEE: 120,
+    FFF: 110,
+    GGG: 105,
+    HHH: 100,
+  };
+  for (const [ticker, end] of Object.entries(momentumEnds)) {
+    insertDailyPrices(db, ticker, barsFromCloses(makeCloses(80, end)));
+  }
+  const qqqCloses = Array.from({ length: qqqBarCount }, (_, i) => 80 + (i / Math.max(qqqBarCount - 1, 1)) * 120);
+  insertDailyPrices(db, "QQQ", barsFromCloses(qqqCloses));
+  return latestQqqDate(db);
+}
+
+describe("runLiveScreen regime gate SMA seed", () => {
+  beforeEach(() => {
+    envBase();
+  });
+
+  afterEach(() => {
+    Object.assign(process.env, savedEnv);
+    resetConfigCache();
+  });
+
+  it("throws RegimeGateNotInitialized when QQQ has fewer than 200 bars", () => {
+    const db = openTestDb();
+    const asOf = seedUniverseWithQqqBarCount(db, 199);
+
+    try {
+      runLiveScreen(db, "rebalance", { asOf });
+      expect.unreachable("expected RegimeGateNotInitialized");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RegimeGateNotInitialized);
+      const e = err as RegimeGateNotInitialized;
+      expect(e.name).toBe("RegimeGateNotInitialized");
+      expect(e.message).toContain("199 bars");
+      expect(e.message).toContain("requires at least 200");
+    }
+
+    db.close();
+  });
+
+  it("does not throw when QQQ has exactly 200 bars", () => {
+    const db = openTestDb();
+    const asOf = seedUniverseWithQqqBarCount(db, 200);
+
+    expect(() => runLiveScreen(db, "rebalance", { asOf })).not.toThrow();
+
+    db.close();
+  });
+});
 
 describe("runLiveScreen WATCHLIST bench", () => {
   beforeEach(() => {
