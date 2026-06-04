@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 
+import { cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { openCueDb } from "./provider.js";
 
@@ -230,6 +231,13 @@ export function insertSignal(
     atr14: row.atr14 ?? null,
     initialAtrStop: row.initialAtrStop ?? null,
   });
+  if (info.changes === 0) {
+    cueLogger.warn(
+      `insertSignal: no-op (UNIQUE collision) ticker=${row.ticker} ` +
+        `date=${row.date} signal=${row.signal} ` +
+        `signalType=${row.signalType ?? "MOMENTUM"}`,
+    );
+  }
   return { changes: info.changes, lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
 
@@ -399,6 +407,17 @@ export function insertPosition(
   db: SqliteConnection,
   row: PositionInsert,
 ): { lastInsertRowid: bigint } {
+  const tickerRow = db
+    .prepare(`SELECT ticker FROM signals WHERE id = @signalId`)
+    .get({ signalId: row.signalId }) as { ticker: string } | undefined;
+
+  if (tickerRow?.ticker === "QQQ") {
+    throw new Error(
+      `insertPosition: refusing QQQ position — ` +
+        `signalId=${String(row.signalId)} (QQQ is regime benchmark only)`,
+    );
+  }
+
   const stmt = db.prepare(`
     INSERT INTO positions (signal_id, entry_date, entry_price, status)
     VALUES (@signalId, @entryDate, @entryPrice, @status)
