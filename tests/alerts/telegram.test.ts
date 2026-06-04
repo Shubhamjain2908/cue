@@ -2,7 +2,9 @@ import Database from "better-sqlite3";
 import axios from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { BuyAlertPendingRow } from "../../src/briefing/queries.js";
 import {
+  formatTelegramAlert,
   parseAlertModeFromArgv,
   sendDailyPulse,
   sendSellAlerts,
@@ -49,6 +51,61 @@ describe("parseAlertModeFromArgv", () => {
 
   it("throws when --mode has no following arg", () => {
     expect(() => parseAlertModeFromArgv(["node", "telegram.ts", "--mode"])).toThrow(/missing or empty --mode/);
+  });
+});
+
+function sampleBuyAlertRow(overrides: Partial<BuyAlertPendingRow> = {}): BuyAlertPendingRow {
+  return {
+    id: 42,
+    ticker: "NVDA",
+    date: "2024-06-10",
+    signal: "BUY",
+    price: 100,
+    alerted: 0,
+    momentumRank: 1,
+    universeRankedCount: 10,
+    momentum12_1Return: 0.5,
+    atr14: 2.5,
+    initialAtrStop: 90,
+    sentiment: "BULLISH",
+    rationale: "Strong momentum and AI demand tailwinds support the entry thesis here.",
+    earningsDate: null,
+    sector: "Technology",
+    confidence: "HIGH",
+    enrichmentStatus: "OK",
+    ...overrides,
+  };
+}
+
+describe("formatTelegramAlert", () => {
+  beforeEach(() => {
+    envForTelegram();
+  });
+
+  afterEach(() => {
+    Object.assign(process.env, savedEnv);
+    resetConfigCache();
+  });
+
+  it("includes quantitative fields and enrichment warning when status is not OK", () => {
+    const text = formatTelegramAlert(
+      sampleBuyAlertRow({
+        enrichmentStatus: "TIMEOUT",
+        rationale: "[enrichment unavailable]",
+        sentiment: "UNKNOWN",
+        confidence: "UNKNOWN",
+      }),
+    );
+    expect(text).toContain("Entry range");
+    expect(text).toContain("Stop loss");
+    expect(text).toContain("1R target");
+    expect(text).toContain("⚠️ enrichment unavailable (TIMEOUT)");
+  });
+
+  it("omits enrichment warning when status is OK", () => {
+    const text = formatTelegramAlert(sampleBuyAlertRow());
+    expect(text).toContain("Strong momentum");
+    expect(text).not.toContain("enrichment unavailable");
   });
 });
 
