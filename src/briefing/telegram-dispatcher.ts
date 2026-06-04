@@ -34,6 +34,22 @@ const TG_MAX = 4096;
 const RULE = "──────────────────────────────";
 const STOP_PROXIMITY_ATR_THRESHOLD = 0.5;
 
+/** Telegram bot API: ~1 msg/sec per chat; fixed pacing between sends. */
+const TELEGRAM_MIN_INTERVAL_MS = 1100;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+async function sendAndMark(
+  message: string,
+  markAlertedFn: (() => void) | null,
+): Promise<void> {
+  await sendTelegramMessage(message);
+  if (markAlertedFn) {
+    markAlertedFn();
+  }
+  await sleep(TELEGRAM_MIN_INTERVAL_MS);
+}
+
 const round2 = (n: number): string => n.toFixed(2);
 const round1 = (n: number): string => n.toFixed(1);
 
@@ -152,14 +168,11 @@ export async function sendSellAlerts(db: CueDatabase): Promise<number> {
   let sent = 0;
   for (const row of pending) {
     const text = formatTelegramSellAlert(row);
-    try {
-      await sendTelegramMessage(text);
+    await sendAndMark(text, () => {
       markSignalAlerted(db, row.id);
-      logger.info(`SELL alert sent for ${row.ticker} (signal_id=${row.id}, reason=${row.exitReason ?? "n/a"})`);
-      sent++;
-    } catch (e) {
-      logger.error(`SELL alert failed for ${row.ticker} (${row.id}): ${String(e)}`);
-    }
+    });
+    logger.info(`SELL alert sent for ${row.ticker} (signal_id=${row.id}, reason=${row.exitReason ?? "n/a"})`);
+    sent++;
   }
   return sent;
 }
@@ -265,11 +278,10 @@ export async function sendWatchlistBenchAlerts(
     return;
   }
   const text = formatWatchlistBench(rows, asOf);
-  await sendTelegramMessage(text);
-  markWatchlistSignalsAlerted(
-    db,
-    rows.map((r) => r.id),
-  );
+  const signalIds = rows.map((r) => r.id);
+  await sendAndMark(text, () => {
+    markWatchlistSignalsAlerted(db, signalIds);
+  });
   logger.info(`Watchlist bench sent (asOf=${asOf}, count=${rows.length})`);
 }
 
@@ -315,7 +327,7 @@ export async function sendDailyPulse(db: CueDatabase): Promise<void> {
     positions,
   });
 
-  await sendTelegramMessage(text);
+  await sendAndMark(text, null);
   logger.info(`Daily pulse sent (asOf=${asOf}, open=${raw.length}, lines=${positions.length})`);
 }
 
@@ -386,13 +398,10 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
     } else {
       for (const row of pending) {
         const text = formatTelegramAlert(row);
-        try {
-          await sendTelegramMessage(text);
+        await sendAndMark(text, () => {
           markSignalAlerted(db, row.id);
-          logger.info(`Alert sent for ${row.ticker} (${row.id})`);
-        } catch (e) {
-          logger.error(`Alert failed for ${row.ticker} (${row.id}): ${String(e)}`);
-        }
+        });
+        logger.info(`Alert sent for ${row.ticker} (${row.id})`);
       }
     }
 
@@ -400,11 +409,7 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
     if (asOf === null) {
       logger.warn("Watchlist bench skipped — no QQQ as-of date in daily_prices");
     } else if (config.WATCHLIST_BENCH_DEPTH > 0) {
-      try {
-        await sendWatchlistBenchAlerts(db, asOf);
-      } catch (e) {
-        logger.error(`Watchlist bench failed: ${String(e)}`);
-      }
+      await sendWatchlistBenchAlerts(db, asOf);
     }
   } finally {
     db.close();

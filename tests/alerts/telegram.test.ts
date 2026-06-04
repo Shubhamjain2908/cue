@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   parseAlertModeFromArgv,
+  sendDailyPulse,
+  sendSellAlerts,
   sendWatchlistBenchAlerts,
 } from "../../src/briefing/telegram-dispatcher.js";
 import { formatWatchlistBench } from "../../src/briefing/template.js";
 import { resetConfigCache } from "../../src/config/index.js";
-import { insertSignal } from "../../src/db/queries.js";
+import { insertDailyPrices, insertPosition, insertSignal } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 
 const savedEnv = { ...process.env };
@@ -217,6 +219,192 @@ describe("formatWatchlistBench", () => {
       "2026-05-29",
     );
     expect(text).toContain("Comm. Services");
+  });
+});
+
+const TELEGRAM_MIN_INTERVAL_MS = 1100;
+
+function barsFromCloses(
+  closes: number[],
+  startDate = "2024-01-02",
+): Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }> {
+  return closes.map((close, i) => {
+    const ms = Date.parse(`${startDate}T12:00:00Z`) + i * 86_400_000;
+    const dt = new Date(ms);
+    const y = dt.getUTCFullYear();
+    const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const da = String(dt.getUTCDate()).padStart(2, "0");
+    return {
+      date: `${y}-${mo}-${da}`,
+      open: close,
+      high: close * 1.01,
+      low: close * 0.99,
+      close,
+      volume: 1_000_000,
+    };
+  });
+}
+
+function seedQqqForPulse(db: InstanceType<typeof Database>): void {
+  const closes = Array.from({ length: 220 }, (_, i) => 90 + i * 0.2);
+  insertDailyPrices(db, "QQQ", barsFromCloses(closes));
+}
+
+function seedClosedSellAlert(
+  db: InstanceType<typeof Database>,
+  ticker: string,
+  exitDate: string,
+): { sellSignalId: number } {
+  const entryDate = "2024-01-02";
+  const buy = insertSignal(db, {
+    ticker,
+    date: entryDate,
+    signal: "BUY",
+    price: 100,
+    momentumRank: 1,
+    universeRankedCount: 10,
+    momentum12_1Return: 0.5,
+    atr14: 2.5,
+    initialAtrStop: 90,
+  });
+  const signalId = Number(buy.lastInsertRowid);
+  const pos = insertPosition(db, {
+    signalId,
+    entryDate,
+    entryPrice: 100,
+    status: "OPEN",
+  });
+  db.prepare(
+    `
+    UPDATE positions
+    SET status = 'CLOSED', exit_date = @exitDate, exit_price = @exitPrice, exit_reason = 'TRAILING_STOP'
+    WHERE id = @id
+  `,
+  ).run({
+    id: Number(pos.lastInsertRowid),
+    exitDate,
+    exitPrice: 95,
+  });
+  const sell = insertSignal(db, { ticker, date: exitDate, signal: "SELL", price: 95 });
+  return { sellSignalId: Number(sell.lastInsertRowid) };
+}
+
+function alertedForSignal(db: InstanceType<typeof Database>, signalId: number): number {
+  return (db.prepare(`SELECT alerted FROM signals WHERE id = ?`).get(signalId) as { alerted: number })
+    .alerted;
+}
+
+describe("sendAndMark / alert pacing", () => {
+  beforeEach(() => {
+    envForTelegram();
+    vi.mocked(axios.post).mockResolvedValue({ status: 200, data: { ok: true } });
+  });
+
+  afterEach(() => {
+    vi.mocked(axios.post).mockReset();
+    vi.useRealTimers();
+    Object.assign(process.env, savedEnv);
+    resetConfigCache();
+  });
+
+  it("marks only successful sends and aborts the queue on HTTP failure", async () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+
+    const exitDate = "2024-06-10";
+    const a = seedClosedSellAlert(db, "AAA", exitDate);
+    const b = seedClosedSellAlert(db, "BBB", exitDate);
+    const c = seedClosedSellAlert(db, "CCC", exitDate);
+
+    let postCount = 0;
+    vi.mocked(axios.post).mockImplementation(async () => {
+      postCount++;
+      if (postCount === 2) {
+        return { status: 429, data: { ok: false, description: "Too Many Requests" } };
+      }
+      return { status: 200, data: { ok: true } };
+    });
+
+    await expect(sendSellAlerts(db)).rejects.toThrow(/HTTP 429/);
+
+    expect(alertedForSignal(db, a.sellSignalId)).toBe(1);
+    expect(alertedForSignal(db, b.sellSignalId)).toBe(0);
+    expect(alertedForSignal(db, c.sellSignalId)).toBe(0);
+    expect(postCount).toBe(2);
+    db.close();
+  });
+
+  it("marks all signals alerted after every send succeeds", async () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+
+    const exitDate = "2024-06-10";
+    const a = seedClosedSellAlert(db, "AAA", exitDate);
+    const b = seedClosedSellAlert(db, "BBB", exitDate);
+    const c = seedClosedSellAlert(db, "CCC", exitDate);
+
+    await sendSellAlerts(db);
+
+    expect(alertedForSignal(db, a.sellSignalId)).toBe(1);
+    expect(alertedForSignal(db, b.sellSignalId)).toBe(1);
+    expect(alertedForSignal(db, c.sellSignalId)).toBe(1);
+    expect(axios.post).toHaveBeenCalledTimes(3);
+    db.close();
+  });
+
+  it("paces consecutive sends by at least TELEGRAM_MIN_INTERVAL_MS", async () => {
+    vi.useFakeTimers();
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+
+    seedClosedSellAlert(db, "AAA", "2024-06-10");
+    seedClosedSellAlert(db, "BBB", "2024-06-10");
+
+    const run = sendSellAlerts(db);
+    await Promise.resolve();
+    expect(axios.post).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(TELEGRAM_MIN_INTERVAL_MS - 1);
+    expect(axios.post).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+    expect(axios.post).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(TELEGRAM_MIN_INTERVAL_MS);
+    await run;
+    db.close();
+  });
+
+  it("sendDailyPulse does not set signals.alerted", async () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    initSchema(db);
+    seedQqqForPulse(db);
+
+    insertSignal(db, {
+      ticker: "ZZZ",
+      date: "2024-06-01",
+      signal: "BUY",
+      price: 50,
+      momentumRank: 1,
+      universeRankedCount: 10,
+      momentum12_1Return: 0.1,
+      atr14: 2,
+      initialAtrStop: 45,
+    });
+
+    await sendDailyPulse(db);
+
+    const row = db.prepare(`SELECT alerted FROM signals WHERE ticker = 'ZZZ'`).get() as {
+      alerted: number;
+    };
+    expect(row.alerted).toBe(0);
+    expect(axios.post).toHaveBeenCalledTimes(1);
+    db.close();
   });
 });
 
