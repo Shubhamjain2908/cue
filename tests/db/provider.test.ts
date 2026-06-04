@@ -5,7 +5,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openCueDb } from "../../src/db/provider.js";
+import { openCueDb, openCueDbReadonly } from "../../src/db/provider.js";
 
 const tempDirs: string[] = [];
 
@@ -57,6 +57,21 @@ describe("openCueDb pragmas", () => {
       writer.exec("COMMIT");
     } finally {
       writer.close();
+      reader.close();
+    }
+  });
+});
+
+describe("openCueDbReadonly", () => {
+  it("sets busy_timeout on readonly connections", () => {
+    const dbPath = tempDbPath("readonly-busy.db");
+    const writer = openCueDb(dbPath);
+    writer.close();
+
+    const reader = openCueDbReadonly(dbPath);
+    try {
+      expect(reader.pragma("busy_timeout", { simple: true })).toBe(5000);
+    } finally {
       reader.close();
     }
   });
