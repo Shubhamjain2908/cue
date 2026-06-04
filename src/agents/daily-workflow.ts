@@ -2,7 +2,10 @@ import { spawnSync } from "node:child_process";
 
 import winston from "winston";
 
+import { getConfig } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
+import { setPipelineState } from "../db/queries.js";
+import { openCueDb, type CueDatabase } from "../db/provider.js";
 
 /** Sunday in America/New_York civil calendar (matches `Date.UTC` weekday: 0 Sun … 6 Sat). */
 export const REBALANCE_DAY_OF_WEEK = 0;
@@ -191,6 +194,7 @@ export interface RunPipelineDeps {
 export function runPipelineWithSteps(
   steps: PipelineStep[],
   mode: "rebalance" | "stop",
+  db: CueDatabase,
   deps: RunPipelineDeps = {},
 ): number {
   const spawnImpl = deps.spawn ?? spawnSync;
@@ -207,6 +211,9 @@ export function runPipelineWithSteps(
       env: process.env,
       cwd: process.cwd(),
     });
+    const storedExit = result.status === null ? -1 : result.status;
+    setPipelineState(db, `step:${step.name}:last_exit_code`, String(storedExit));
+    setPipelineState(db, `step:${step.name}:last_run_at`, new Date().toISOString());
     const exitCode = result.status === null ? 1 : result.status;
     if (exitCode !== 0) {
       if (step.critical) {
@@ -227,14 +234,23 @@ export function runPipelineWithSteps(
 /**
  * Runs filtered registry steps in order. Returns 0 on success, 1 if a critical step failed (caller should `process.exit(1)`).
  */
-export function runPipeline(mode: "rebalance" | "stop", deps: RunPipelineDeps = {}): number {
-  return runPipelineWithSteps(stepsForMode(mode), mode, deps);
+export function runPipeline(
+  mode: "rebalance" | "stop",
+  db: CueDatabase,
+  deps: RunPipelineDeps = {},
+): number {
+  return runPipelineWithSteps(stepsForMode(mode), mode, db, deps);
 }
 
 /** One-shot: full pipeline in subprocess order (ingest → screen → …). Returns exit code (0 ok, 1 critical failure). */
 export function runAllPipelineCli(argv?: readonly string[]): number {
   const mode = detectRunMode({ argv: argv ?? process.argv });
-  return runPipeline(mode);
+  const db = openCueDb(getConfig().DB_PATH);
+  try {
+    return runPipeline(mode, db);
+  } finally {
+    db.close();
+  }
 }
 
 export function runDailyWorkflowCli(): void {
@@ -242,6 +258,11 @@ export function runDailyWorkflowCli(): void {
     throw new Error("runDailyWorkflowCli is only for --now; use `cue schedule` for the daemon.");
   }
   const mode = detectRunMode();
-  const code = runPipeline(mode);
-  process.exit(code);
+  const db = openCueDb(getConfig().DB_PATH);
+  try {
+    const code = runPipeline(mode, db);
+    process.exit(code);
+  } finally {
+    db.close();
+  }
 }

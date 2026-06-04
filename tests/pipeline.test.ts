@@ -1,4 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+
+import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,6 +17,17 @@ import {
   stepsForMode,
   weekdayUtcForNyCalendarDate,
 } from "../src/agents/daily-workflow.js";
+import { getPipelineState } from "../src/db/queries.js";
+import { initSchema } from "../src/db/schema.js";
+
+type SqliteConnection = InstanceType<typeof Database>;
+
+function openPipelineTestDb(): SqliteConnection {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  initSchema(db);
+  return db;
+}
 
 describe("weekdayUtcForNyCalendarDate", () => {
   it("maps 2026-01-11 (Sun) to Sunday rebalance day (0)", () => {
@@ -151,6 +164,7 @@ describe("getNyCalendarWeekday", () => {
 
 describe("runPipelineWithSteps", () => {
   it("runs scheduler Friday order with rebalance screen flags", () => {
+    const db = openPipelineTestDb();
     const schedulerFridayLike = stepsForMode("rebalance");
     const calls: string[][] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
@@ -158,7 +172,7 @@ describe("runPipelineWithSteps", () => {
       return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
-    runPipelineWithSteps(schedulerFridayLike, "rebalance", { spawn });
+    runPipelineWithSteps(schedulerFridayLike, "rebalance", db, { spawn });
     const scripts = calls.map((a) => a[3]).filter((s): s is string => s !== undefined);
     expect(scripts).toEqual([
       "ingest",
@@ -170,37 +184,56 @@ describe("runPipelineWithSteps", () => {
     ]);
     const screenCall = calls.find((a) => a[3] === "screen");
     expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
+    db.close();
+  });
+
+  it("writes per-step exit codes to pipeline_state", () => {
+    const db = openPipelineTestDb();
+    const spawn = vi.fn((): SpawnSyncReturns<Buffer> => ({ status: 0 }) as SpawnSyncReturns<Buffer>) as unknown as typeof spawnSync;
+
+    runPipelineWithSteps(stepsForMode("rebalance"), "rebalance", db, { spawn });
+
+    expect(getPipelineState(db, "step:ingest:last_exit_code")).toBe("0");
+    expect(getPipelineState(db, "step:screen:last_exit_code")).toBe("0");
+    expect(getPipelineState(db, "step:enrich-fundamentals:last_exit_code")).toBe("0");
+    expect(getPipelineState(db, "step:brief:last_run_at")).not.toBeNull();
+    db.close();
   });
 });
 
 describe("runPipeline", () => {
   it("passes --force-rebalance to screen subprocess in rebalance mode", () => {
+    const db = openPipelineTestDb();
     const calls: string[][] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       calls.push(args !== undefined ? [...args] : []);
       return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
-    runPipeline("rebalance", { spawn });
+    runPipeline("rebalance", db, { spawn });
     const screenCall = calls.find((a) => a[3] === "screen");
     expect(screenCall).toEqual(["run", "cue", "--", "screen", "--force-rebalance"]);
     const briefCall = calls.find((a) => a[3] === "brief");
     expect(briefCall).toEqual(["run", "cue", "--", "brief", "--mode", "rebalance"]);
+    db.close();
   });
 
   it("passes --mode stop to alert subprocess in stop mode", () => {
+    const db = openPipelineTestDb();
     const calls: string[][] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       calls.push(args !== undefined ? [...args] : []);
       return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
-    runPipeline("stop", { spawn });
+    runPipeline("stop", db, { spawn });
     const briefCall = calls.find((a) => a[3] === "brief");
     expect(briefCall).toEqual(["run", "cue", "--", "brief", "--mode", "stop"]);
+    db.close();
   });
 
   it("returns 1 and does not run downstream when ingest fails (critical)", () => {
+    const db = openPipelineTestDb();
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       if (args?.[3] === "ingest") {
         return { status: 1 } as SpawnSyncReturns<Buffer>;
@@ -208,12 +241,15 @@ describe("runPipeline", () => {
       return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
-    const code = runPipeline("stop", { spawn });
+    const code = runPipeline("stop", db, { spawn });
     expect(code).toBe(1);
     expect(spawn).toHaveBeenCalledTimes(1);
+    expect(getPipelineState(db, "step:ingest:last_exit_code")).toBe("1");
+    db.close();
   });
 
   it("continues after enrich fails and still runs brief", () => {
+    const db = openPipelineTestDb();
     const scripts: string[] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       const script = args !== undefined && args.length > 3 ? args[3] : undefined;
@@ -226,7 +262,7 @@ describe("runPipeline", () => {
       return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
-    const code = runPipeline("rebalance", { spawn });
+    const code = runPipeline("rebalance", db, { spawn });
     expect(code).toBe(0);
     expect(scripts).toEqual([
       "ingest",
@@ -236,9 +272,12 @@ describe("runPipeline", () => {
       "enrich",
       "brief",
     ]);
+    expect(getPipelineState(db, "step:enrich:last_exit_code")).toBe("1");
+    db.close();
   });
 
   it("runs execute-stops on stop mode instead of screen", () => {
+    const db = openPipelineTestDb();
     const scripts: string[] = [];
     const spawn = vi.fn((_cmd, args?: readonly string[]): SpawnSyncReturns<Buffer> => {
       const script = args !== undefined && args.length > 3 ? args[3] : undefined;
@@ -248,8 +287,9 @@ describe("runPipeline", () => {
       return { status: 0 } as SpawnSyncReturns<Buffer>;
     }) as unknown as typeof spawnSync;
 
-    runPipeline("stop", { spawn });
+    runPipeline("stop", db, { spawn });
     expect(scripts).toEqual(["ingest", "adjust-splits", "execute-stops", "brief"]);
     expect(scripts).not.toContain("screen");
+    db.close();
   });
 });
