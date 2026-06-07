@@ -346,6 +346,8 @@ export interface RecentSignal {
   ticker: string;
   signal_type: "BUY" | "SELL";
   signal_date: string;
+  /** ISO timestamp when the Telegram alert was sent (null if not yet alerted). */
+  alerted_at: string | null;
   momentum_rank: number | null;
   momentum_12_1_return: number | null;
   sentiment: string | null;
@@ -505,11 +507,7 @@ interface RegimeRow {
  * Read-only snapshot of SQLite for dashboard embedding.
  * Column names follow UI contracts; `cagr` / `max_drawdown` / `expectancy` are **decimals** (e.g. 0.2139 = 21.39%).
  */
-export function extractDashboardPayload(): DashboardPayload {
-  const { DB_PATH } = getConfig();
-  const db = openCueDbReadonly(DB_PATH);
-
-  try {
+export function extractDashboardPayloadFromDb(db: CueDatabase): DashboardPayload {
     const open_positions = db
       .prepare(
         `
@@ -541,7 +539,12 @@ export function extractDashboardPayload(): DashboardPayload {
         sig.momentum_rank AS momentum_rank,
         sig.momentum_12_1_return AS momentum_12_1_return,
         sig.atr14 AS atr14,
-        CAST(julianday('now') - julianday(p.entry_date) AS INTEGER) AS days_held
+        (
+          SELECT COUNT(*)
+          FROM daily_prices dp_held
+          WHERE dp_held.ticker = sig.ticker
+            AND dp_held.date > p.entry_date
+        ) AS days_held
       FROM positions p
       INNER JOIN signals sig ON sig.id = p.signal_id
       LEFT JOIN daily_prices dp ON dp.ticker = sig.ticker
@@ -563,6 +566,7 @@ export function extractDashboardPayload(): DashboardPayload {
         s.ticker AS ticker,
         s.signal AS signal_type,
         s.date AS signal_date,
+        s.alerted_at AS alerted_at,
         s.momentum_rank AS momentum_rank,
         s.momentum_12_1_return AS momentum_12_1_return,
         e.sentiment AS sentiment,
@@ -636,6 +640,14 @@ export function extractDashboardPayload(): DashboardPayload {
       live_performance_summary: getLivePerformanceSummary(db),
       live_performance_by_confidence: getLivePerformanceByConfidence(db),
     };
+}
+
+export function extractDashboardPayload(): DashboardPayload {
+  const { DB_PATH } = getConfig();
+  const db = openCueDbReadonly(DB_PATH);
+
+  try {
+    return extractDashboardPayloadFromDb(db);
   } finally {
     db.close();
   }

@@ -171,7 +171,7 @@ export function renderHtml(payload: DashboardPayload): string {
         <th>Ticker</th><th>Entry Date</th><th>Entry Price</th><th>Current Close</th>
         <th>High Since Entry</th>
         <th>Stop (dist %)</th><th>ATR regime</th>
-        <th>Days Held</th><th>Momentum Rank</th><th>12-1 Return</th>
+        <th>Days Held (trading)</th><th>Momentum Rank</th><th>12-1 Return</th>
       </tr></thead>
       <tbody id="positions-body"></tbody>
     </table>
@@ -186,7 +186,7 @@ export function renderHtml(payload: DashboardPayload): string {
       <div class="card">
         <table>
           <thead><tr>
-            <th>Date</th><th>Ticker</th><th>Type</th><th>Sector</th><th>Sentiment</th><th>Rationale</th>
+            <th>Session Date</th><th>Alerted</th><th>Ticker</th><th>Type</th><th>Sector</th><th>Sentiment</th><th>Rationale</th>
           </tr></thead>
           <tbody id="signals-body"></tbody>
         </table>
@@ -337,6 +337,7 @@ export function renderHtml(payload: DashboardPayload): string {
       return (
         '<tr>' +
         '<td>' + s.signal_date + '</td>' +
+        '<td style="color:var(--muted);font-size:12px">' + (s.alerted_at ? s.alerted_at.slice(0, 10) : '—') + '</td>' +
         '<td class="ticker">' + s.ticker + '</td>' +
         '<td><span class="badge ' + (s.signal_type === 'BUY' ? 'badge-green' : 'badge-red') + '">' + s.signal_type + '</span></td>' +
         '<td>' + sectorCell + '</td>' +

@@ -336,6 +336,12 @@ Full record: **`spec/cue-phase8-complete.md`**.
 
 Full record: **`spec/cue-phase9-complete.md`**.
 
+**Parked (backtest-gated, ≥15 genuine closed trades):**
+- Backlog #9: Regime hysteresis (asymmetric ±0.5% QQQ envelope)
+- Backlog #12: Intraday stop semantics (`low ≤ stop`, `exit_price = min(open, stop)`)
+- Backlog #16: Historical split discovery sweep
+- **Backlog #17 (new 2026-06-07):** Re-entry cooldown after `TRAILING_STOP` — skip re-entry for 1 rebalance cycle on same ticker. Motivated by MU stopped out Sat Jun-6 and re-bought Sun Jun-7 at same price ($864.01). Parameter sweep N={1,2,3} weeks. Same gate as #9.
+
 ---
 
 | Document | Role |
