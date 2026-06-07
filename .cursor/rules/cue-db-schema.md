@@ -27,8 +27,9 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `014_enrichments_signal_id_unique` | `enrichments.signal_id` UNIQUE |
 | `015_backtest_rebalance_drop` | Rebuild `backtest_trades`; CHECK adds **`REBALANCE_DROP`**; re-index ticker + run_id |
 | `016_signals_alerted_at` | ALTER TABLE `signals` ADD COLUMN `alerted_at` TEXT; NULL until alert fires; written by `markSignalAlerted` |
+| `017_positions_current_rank` | ALTER TABLE `positions` ADD COLUMN `current_rank` INTEGER; NULL until first Sunday rebalance after migration; stamped by `runLiveScreen()` on rebalance path |
 
-**Next migration:** `017`
+**Next migration:** `018`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
@@ -140,6 +141,7 @@ Open and closed book from **BUY** signals only (not WATCHLIST).
 | `pnl_pct` | REAL — `ROUND((exit - entry) / entry * 100, 4)` at close; NULL if invalid exit |
 | `exit_reason` | TEXT CHECK IN (`TRAILING_STOP`, `INITIAL_STOP`, `TIME_EXIT`, `MANUAL`, **`REBALANCE_DROP`**) — see `006` |
 | `highest_close_since_entry`, `current_stop_loss` | Trailing stop machinery (`003` backfill from signal stop) |
+| `current_rank` | INTEGER NULL — latest rebalance rank for OPEN positions; stamped by `runLiveScreen()` on every Sunday rebalance; NULL until first rebalance after migration `017` |
 
 **Written by:** `momentum-screener.ts` (`cue screen`, `cue execute-stops`).
 

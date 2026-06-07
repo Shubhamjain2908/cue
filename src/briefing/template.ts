@@ -171,7 +171,7 @@ export function renderHtml(payload: DashboardPayload): string {
         <th>Ticker</th><th>Entry Date</th><th>Entry Price</th><th>Current Close</th>
         <th>High Since Entry</th>
         <th>Stop (dist %)</th><th>ATR regime</th>
-        <th>Days Held (trading)</th><th>Momentum Rank</th><th>12-1 Return</th>
+        <th>Days Held (trading)</th><th>Rank (current / entry)</th><th>12-1 Return</th>
       </tr></thead>
       <tbody id="positions-body"></tbody>
     </table>
@@ -263,7 +263,15 @@ export function renderHtml(payload: DashboardPayload): string {
             ' <span style="color:var(--muted);font-weight:500">(' + distStopPct.toFixed(2) + '%)</span></td>' +
           '<td><span class="badge ' + (tight ? 'badge-amber' : 'badge-green') + '">' + stopLabel + '</span></td>' +
           '<td>' + p.days_held + '</td>' +
-          '<td>' + (p.momentum_rank == null ? '—' : ('#' + p.momentum_rank)) + '</td>' +
+          (function() {
+            const cur = p.current_rank;
+            const entry = p.momentum_rank;
+            if (cur != null && entry != null && cur !== entry) {
+              return '<td>#' + cur + ' <span style="color:var(--muted);font-size:11px">(was #' + entry + ')</span></td>';
+            }
+            const display = cur ?? entry;
+            return '<td>' + (display == null ? '—' : '#' + display) + '</td>';
+          })() +
           '<td>' + (p.momentum_12_1_return == null ? '—' : ((p.momentum_12_1_return * 100).toFixed(1) + '%')) + '</td>' +
           '</tr>'
         );

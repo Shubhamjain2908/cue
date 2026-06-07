@@ -250,6 +250,83 @@ describe("runLiveScreen WATCHLIST bench", () => {
     db.close();
   });
 
+  it("stamps current_rank on retained open positions during rebalance", () => {
+    const db = openTestDb();
+    const momentumEnds: Record<string, number> = {
+      BBB: 210,
+      AAA: 200,
+      CCC: 160,
+      DDD: 140,
+      EEE: 120,
+      FFF: 110,
+      GGG: 105,
+      HHH: 100,
+    };
+    for (const [ticker, end] of Object.entries(momentumEnds)) {
+      insertDailyPrices(db, ticker, barsFromCloses(makeCloses(80, end)));
+    }
+    const qqqCloses = Array.from({ length: 320 }, (_, i) => 80 + (i / 319) * 120);
+    insertDailyPrices(db, "QQQ", barsFromCloses(qqqCloses));
+    const asOf = latestQqqDate(db);
+
+    const entryDate = qqqDateOffset(db, asOf, 5);
+    const { positionId } = insertOpenPosition(db, {
+      ticker: "AAA",
+      entryDate,
+      entryPrice: 100,
+      initialAtrStop: 90,
+    });
+
+    runLiveScreen(db, "rebalance", { asOf });
+
+    const row = db
+      .prepare(`SELECT current_rank, status FROM positions WHERE id = ?`)
+      .get(positionId) as { current_rank: number | null; status: string };
+    expect(row.status).toBe("OPEN");
+    expect(row.current_rank).toBe(2);
+
+    db.close();
+  });
+
+  it("stamps current_rank on REBALANCE_DROP positions before they close", () => {
+    const db = openTestDb();
+    const momentumEnds: Record<string, number> = {
+      BBB: 210,
+      CCC: 200,
+      DDD: 190,
+      AAA: 180,
+      EEE: 120,
+      FFF: 110,
+      GGG: 105,
+      HHH: 100,
+    };
+    for (const [ticker, end] of Object.entries(momentumEnds)) {
+      insertDailyPrices(db, ticker, barsFromCloses(makeCloses(80, end)));
+    }
+    const qqqCloses = Array.from({ length: 320 }, (_, i) => 80 + (i / 319) * 120);
+    insertDailyPrices(db, "QQQ", barsFromCloses(qqqCloses));
+    const asOf = latestQqqDate(db);
+
+    const entryDate = qqqDateOffset(db, asOf, 5);
+    const { positionId } = insertOpenPosition(db, {
+      ticker: "AAA",
+      entryDate,
+      entryPrice: 100,
+      initialAtrStop: 90,
+    });
+
+    runLiveScreen(db, "rebalance", { asOf });
+
+    const row = db
+      .prepare(`SELECT current_rank, status, exit_reason FROM positions WHERE id = ?`)
+      .get(positionId) as { current_rank: number | null; status: string; exit_reason: string | null };
+    expect(row.status).toBe("CLOSED");
+    expect(row.exit_reason).toBe("REBALANCE_DROP");
+    expect(row.current_rank).toBe(4);
+
+    db.close();
+  });
+
   it("writes no WATCHLIST rows when WATCHLIST_BENCH_DEPTH=0", () => {
     process.env.WATCHLIST_BENCH_DEPTH = "0";
     resetConfigCache();

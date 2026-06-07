@@ -524,6 +524,23 @@ export function runLiveScreen(
       }
     }
 
+    // Stamp current_rank on all open positions at rebalance time.
+    // Runs after exits are determined (REBALANCE_DROP positions will close shortly).
+    if (mode === "rebalance") {
+      const stampRankStmt = db.prepare(
+        `UPDATE positions SET current_rank = @rank
+         WHERE status = 'OPEN'
+           AND signal_id = (
+             SELECT id FROM signals
+             WHERE ticker = @ticker AND signal = 'BUY'
+             ORDER BY id DESC LIMIT 1
+           )`,
+      );
+      for (const rankEntry of fullRanked) {
+        stampRankStmt.run({ ticker: rankEntry.ticker, rank: rankEntry.rank });
+      }
+    }
+
     for (const pos of openRows) {
       const reason = exitReasonByTicker.get(pos.ticker);
       if (reason === undefined) {

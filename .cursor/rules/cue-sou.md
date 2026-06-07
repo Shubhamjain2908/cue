@@ -125,7 +125,7 @@ interface PipelineStep {
 4. `schedulerRunKindForNyWeekday(dow)`: `0` → `"rebalance"`, `2–6` → `"weekday"`, `1` → `null` (idle).
 5. If **`isRunning`** → warn and return (no overlapping subprocess pipelines in one process).
 6. If **`LOCK_PATH`** is held by a **live** PID (`process.kill(pid, 0)`) → warn and return; else acquire PID lock (unlink stale file if PID is dead).
-7. On startup: `verifyMigrations(heldDb)` checks **`HEAD_MIGRATION = "016_signals_alerted_at"`** is applied — exits 2 if not.
+7. On startup: `verifyMigrations(heldDb)` checks **`HEAD_MIGRATION = "017_positions_current_rank"`** is applied — exits 2 if not.
 8. Run **`runPipelineWithSteps(stepsForMode("rebalance" | "stop"), mode, heldDb)`** — after each subprocess step, writes **`step:{name}:last_exit_code`** and **`step:{name}:last_run_at`** to **`pipeline_state`**; on pipeline exit code **0** only, also writes **`last_successful_run_date`**; always clear **`isRunning`** and release **`LOCK_PATH`** in `finally`.
 
 **Startup / shutdown:** parent **`heldDb`** via **`openCueDb`** (read-write, applies WAL + pragmas via `applySqlitePragmas`) for health **`SELECT 1`**, **`pipeline_state`** reads/writes, and clean shutdown; **`LOCK_PATH`** stale lock cleared on startup if holder PID is dead; subprocess **`cue`** steps open their own DB handles; keep **`heldDb`** until **`SIGINT`/`SIGTERM`**: clear interval, **release PID lock**, **close** DB, **`process.exit(0)`**.
@@ -192,8 +192,8 @@ interface PipelineStep {
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `001`–`016` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/cue-db-schema.md`**.
-- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** + **`alerted_at TEXT`** (migration `016`); `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`); `backtest_trades` with **`REBALANCE_DROP`** in exit_reason CHECK (`015`).
+- **Applied DDL:** `001`–`017` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/cue-db-schema.md`**.
+- **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** + **`alerted_at TEXT`** (migration `016`); `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`) + **`current_rank INTEGER`** (migration `017`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`); `backtest_trades` with **`REBALANCE_DROP`** in exit_reason CHECK (`015`).
 - **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (**id=82**, 2023–2025 bull window; PR-6 ceremony 2026-06-04 — `REBALANCE_DROP` mapping fix). Migration `009` locked ids 73–74; id=82 supersedes via ceremony. Unlocked research runs do not displace the pin.
 - **Split adjustment (PR-4):** `cue adjust-splits` records splits in **`corporate_actions`**, adjusts OPEN **`positions` / `signals`**, and retroactively adjusts **`daily_prices`** for `date < ex_date` (OHLC ÷ `factor`, volume × `factor`) so momentum/backtest inputs stay continuous. One-shot **`cue backfill-splits`** replays existing ledger rows (oldest `ex_date` first); idempotent via **`pipeline_state`** key `backfill_split_applied:{ticker}:{ex_date}`.
 - **Live `positions` exit mapping** (`mapLiveExitReason` / `006`): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP → REBALANCE_DROP`**; `FORCED_CLOSE → MANUAL`.
@@ -252,7 +252,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 7 — Bug fixes + capital safety + instrumentation | `REBALANCE_DROP` exit reason; backtest `strategy` discriminator; corporate actions split adjuster; bear backtest extension (Sharpe 0.956 documented); healthcheck cron; watchlist bench #4–#8; **Saturday rebalance** cadence fix | ✅ Complete |
 | 8 — Scheduler reliability + stop audit | Scheduler idempotency (`pipeline_state`); trailing-stop audit log (`stop_movements`); parallel LLM enrichment; P7-G VIX research (falsified) | ✅ Complete |
 | 9 — Stop-replay correctness + ingestor modernisation | `replayExitReason` stale-stop fix; ratchet `nextHigh` over all unevaluated bars; SELL Telegram alerts; same-day artefact filter; T+0-first ingestor + auto-backfill; scheduler 06:00 ET window | ✅ Complete |
-| **9b — Arch-review gap closure (June 2026)** | PR-4: corporate actions + split adjust; PR-5: Yahoo 15s timeout, T-1 staleness flag, sizer fallback 5% cap; PR-6: `REBALANCE_DROP` in `backtest_trades` (migration `015`) + backtest gate id=82; PR-7: `alerted_at` audit column (migration `016`); PR-9: SQLite WAL + pragmas; PR-10: unified `PIPELINE_STEPS` registry, SELL `signal_type: "MOMENTUM"`, pulse suppression, `verifyMigrations`, reason emoji labels | ✅ Complete |
+| **9b — Arch-review gap closure (June 2026)** | PR-4: corporate actions + split adjust; PR-5: Yahoo 15s timeout, T-1 staleness flag, sizer fallback 5% cap; PR-6: `REBALANCE_DROP` in `backtest_trades` (migration `015`) + backtest gate id=82; PR-7: `alerted_at` audit column (migration `016`); PR-9: SQLite WAL + pragmas; PR-10: unified `PIPELINE_STEPS` registry, SELL `signal_type: "MOMENTUM"`, pulse suppression, `verifyMigrations`, reason emoji labels; PR-11: trading-days fix + `alerted_at` on Recent Signals dashboard; PR-12: `positions.current_rank` stamped each rebalance (migration `017`) | ✅ Complete |
 
 
 ---
@@ -329,12 +329,25 @@ Full record: **`spec/cue-phase8-complete.md`**.
 | Unified `PIPELINE_STEPS` registry + `stepsForMode()` | PR-10 | ✅ `daily-workflow.ts`; scheduler uses `stepsForMode()` |
 | SELL `signalType: "MOMENTUM"` explicit | PR-10 | ✅ `momentum-screener.ts` |
 | Daily Pulse suppression when 0 open + 0 sells | PR-10 | ✅ `sendDailyPulse(db, sellCount)` |
-| Migration pre-flight `verifyMigrations` | PR-10 | ✅ `HEAD_MIGRATION = "016_signals_alerted_at"` in `scheduler.ts` |
+| Migration pre-flight `verifyMigrations` | PR-10 | ✅ `HEAD_MIGRATION = "017_positions_current_rank"` in `scheduler.ts` (updated PR-12) |
 | Exit reason emoji labels (🔴 🔄 ⏱ ✋) | PR-10 | ✅ `reasonLabels` in `formatTelegramSellAlert` |
 | `openCueDbReadonly` busy_timeout | PR-10 | ✅ Applied in `db/provider.ts` |
 | Healthcheck cron after 06:00 ET window | PR-10 | ✅ `deploy/ecosystem.config.cjs` `0 11 * * 0,2,3,4,5,6` UTC |
 
 Full record: **`spec/cue-phase9-complete.md`**.
+
+## 14d. Phase 9b additions — PR-11 & PR-12 (2026-06-07)
+
+| Task | PR | Status |
+|------|----|--------|
+| Dashboard trading days held (count `daily_prices` rows, not `julianday`) | PR-11 | ✅ `extractDashboardPayloadFromDb` SQL subquery |
+| `alerted_at` column on Recent Signals ("Session Date" / "Alerted" columns) | PR-11 | ✅ `briefing/queries.ts` + `template.ts` |
+| `positions.current_rank` — stamped on all OPEN positions each Sunday rebalance | PR-12 | ✅ Migration `017`; stamp before close loop in `runLiveScreen()` |
+| Dashboard rank cell: `#N (was #M)` when rank changed since entry | PR-12 | ✅ `template.ts` positions loop IIFE |
+| `extractDashboardPayload` refactored → `extractDashboardPayloadFromDb(db)` | PR-12 | ✅ Public wrapper unchanged; test-DB injection enabled |
+| `HEAD_MIGRATION` → `"017_positions_current_rank"` | PR-12 | ✅ `scheduler.ts` |
+
+**Queued PRs:** None.
 
 **Parked (backtest-gated, ≥15 genuine closed trades):**
 - Backlog #9: Regime hysteresis (asymmetric ±0.5% QQQ envelope)
@@ -347,7 +360,7 @@ Full record: **`spec/cue-phase9-complete.md`**.
 | Document | Role |
 |---|---|
 | `.cursor/rules/cue-sou.md` | Living engineering spec (this file) |
-| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`016`) |
+| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`017`) |
 | `.cursor/rules/cue-guardrails.md` | Hard constraints |
 | `spec/cue-reference.md` | Compressed living spec (Phase 9 current) |
 | `spec/cue-handoff.md` | Locked architectural decisions + research archive |
