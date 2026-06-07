@@ -221,6 +221,42 @@ describe("extractDashboardPayloadFromDb", () => {
     db.close();
   });
 
+  it("returns current_rank and momentum_rank independently on open positions", () => {
+    const db = openMemoryDb();
+    const entryDate = "2024-06-03";
+
+    const ins = insertSignal(db, {
+      ticker: "TEST",
+      date: entryDate,
+      signal: "BUY",
+      price: 100,
+      momentumRank: 1,
+      universeRankedCount: 10,
+      momentum12_1Return: 0.5,
+      atr14: 2.5,
+      initialAtrStop: 90,
+    });
+    const pos = insertPosition(db, {
+      signalId: Number(ins.lastInsertRowid),
+      entryDate,
+      entryPrice: 100,
+      status: "OPEN",
+    });
+    db.prepare(`UPDATE positions SET current_rank = 3 WHERE id = @id`).run({
+      id: Number(pos.lastInsertRowid),
+    });
+
+    insertDailyPrices(db, "TEST", [bar(entryDate, 100), bar("2024-06-06", 102)]);
+    insertDailyPrices(db, "QQQ", [bar("2024-06-06", 400)]);
+
+    const payload = extractDashboardPayloadFromDb(db);
+    expect(payload.open_positions).toHaveLength(1);
+    expect(payload.open_positions[0]!.current_rank).toBe(3);
+    expect(payload.open_positions[0]!.momentum_rank).toBe(1);
+
+    db.close();
+  });
+
   it("returns alerted_at on recent_signals and null when not yet alerted", () => {
     const db = openMemoryDb();
     const alertedAt = "2026-06-07 09:15:00";
