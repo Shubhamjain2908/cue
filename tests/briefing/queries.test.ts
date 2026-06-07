@@ -2,10 +2,16 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import {
+  extractDashboardPayloadFromDb,
   getMomentumBacktestSummary,
   listBuySignalsReadyToAlert,
 } from "../../src/briefing/queries.js";
-import { insertEnrichmentStub, insertSignal } from "../../src/db/queries.js";
+import {
+  insertDailyPrices,
+  insertEnrichmentStub,
+  insertPosition,
+  insertSignal,
+} from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
@@ -164,6 +170,97 @@ describe("getMomentumBacktestSummary", () => {
     });
 
     expect(getMomentumBacktestSummary(db)).toBeNull();
+    db.close();
+  });
+});
+
+function bar(date: string, close: number) {
+  return { date, open: close, high: close, low: close, close, volume: 1_000_000 };
+}
+
+describe("extractDashboardPayloadFromDb", () => {
+  it("counts days_held as trading sessions after entry_date, not calendar days", () => {
+    const db = openMemoryDb();
+    const entryDate = "2024-06-03";
+
+    const ins = insertSignal(db, {
+      ticker: "TEST",
+      date: entryDate,
+      signal: "BUY",
+      price: 100,
+      momentumRank: 1,
+      universeRankedCount: 10,
+      momentum12_1Return: 0.5,
+      atr14: 2.5,
+      initialAtrStop: 90,
+    });
+    insertPosition(db, {
+      signalId: Number(ins.lastInsertRowid),
+      entryDate,
+      entryPrice: 100,
+      status: "OPEN",
+    });
+
+    insertDailyPrices(db, "TEST", [
+      bar(entryDate, 100),
+      bar("2024-06-04", 101),
+      bar("2024-06-05", 102),
+      bar("2024-06-06", 103),
+    ]);
+    insertDailyPrices(db, "QQQ", [bar("2024-06-06", 400)]);
+
+    const payload = extractDashboardPayloadFromDb(db);
+    expect(payload.open_positions).toHaveLength(1);
+    expect(payload.open_positions[0]!.days_held).toBe(3);
+
+    const calendarDays = db
+      .prepare(`SELECT CAST(julianday('now') - julianday(@entryDate) AS INTEGER) AS n`)
+      .get({ entryDate }) as { n: number };
+    expect(payload.open_positions[0]!.days_held).not.toBe(calendarDays.n);
+
+    db.close();
+  });
+
+  it("returns alerted_at on recent_signals and null when not yet alerted", () => {
+    const db = openMemoryDb();
+    const alertedAt = "2026-06-07 09:15:00";
+
+    const alerted = insertSignal(db, {
+      ticker: "ALRT",
+      date: "2026-06-05",
+      signal: "BUY",
+      price: 50,
+      momentumRank: 2,
+      universeRankedCount: 20,
+      momentum12_1Return: 0.3,
+      atr14: 1.5,
+      initialAtrStop: 45,
+    });
+    db.prepare(`UPDATE signals SET alerted = 1, alerted_at = @alertedAt WHERE id = @id`).run({
+      id: Number(alerted.lastInsertRowid),
+      alertedAt,
+    });
+
+    insertSignal(db, {
+      ticker: "PEND",
+      date: "2026-06-04",
+      signal: "BUY",
+      price: 40,
+      momentumRank: 5,
+      universeRankedCount: 20,
+      momentum12_1Return: 0.2,
+      atr14: 1.2,
+      initialAtrStop: 36,
+    });
+
+    insertDailyPrices(db, "QQQ", [bar("2026-06-05", 400)]);
+
+    const payload = extractDashboardPayloadFromDb(db);
+    const byTicker = Object.fromEntries(payload.recent_signals.map((s) => [s.ticker, s]));
+
+    expect(byTicker.ALRT!.alerted_at).toBe(alertedAt);
+    expect(byTicker.PEND!.alerted_at).toBeNull();
+
     db.close();
   });
 });
