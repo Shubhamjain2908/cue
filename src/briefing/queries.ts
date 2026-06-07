@@ -336,7 +336,10 @@ export interface OpenPosition {
   highest_close_since_entry: number;
   /** Latest daily close (`daily_prices`) for stop-distance / regime display. */
   current_close: number;
+  /** Rank at time of BUY signal entry (from `signals.momentum_rank`). */
   momentum_rank: number | null;
+  /** Rank from the most recent rebalance (from `positions.current_rank`). Updated every Sunday. */
+  current_rank: number | null;
   momentum_12_1_return: number | null;
   atr14: number | null;
   days_held: number;
@@ -536,6 +539,7 @@ export function extractDashboardPayloadFromDb(db: CueDatabase): DashboardPayload
           ),
           p.entry_price
         ) AS current_close,
+        p.current_rank AS current_rank,
         sig.momentum_rank AS momentum_rank,
         sig.momentum_12_1_return AS momentum_12_1_return,
         sig.atr14 AS atr14,
