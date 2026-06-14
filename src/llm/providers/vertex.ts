@@ -1,17 +1,20 @@
 /**
- * Google Vertex AI — Gemini via `@google-cloud/vertexai`.
+ * Google Vertex AI — Gemini via `@google/genai` (Vertex backend).
  *
- * Auth: Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` or GCP identity).
+ * The legacy `@google-cloud/vertexai` SDK was deprecated 2025-06-24 and removed
+ * 2026-06-24. The unified Gen AI SDK speaks to Vertex when constructed with
+ * `vertexai: true` and a project/location, using ADC for auth
+ * (`GOOGLE_APPLICATION_CREDENTIALS` or workload identity).
  */
 
 import {
   BlockedReason,
   FinishReason,
   type GenerateContentResponse,
+  GoogleGenAI,
   HarmBlockThreshold,
   HarmCategory,
-  VertexAI,
-} from "@google-cloud/vertexai";
+} from "@google/genai";
 
 import { getConfig } from "../../config/index.js";
 import { parseAndValidate } from "../json.js";
@@ -45,7 +48,7 @@ const RESEARCH_SAFETY_SETTINGS = [
 export class VertexProvider implements LlmProvider {
   readonly name = "vertex";
   readonly model: string;
-  private readonly vertex: VertexAI;
+  private readonly ai: GoogleGenAI;
   private readonly timeoutMs: number;
 
   constructor() {
@@ -57,33 +60,29 @@ export class VertexProvider implements LlmProvider {
     }
     this.model = config.VERTEX_MODEL;
     this.timeoutMs = config.VERTEX_TIMEOUT_MS;
-    this.vertex = new VertexAI({
+    this.ai = new GoogleGenAI({
+      vertexai: true,
       project: config.VERTEX_PROJECT_ID,
       location: config.VERTEX_LOCATION,
+      httpOptions: { timeout: this.timeoutMs },
     });
   }
 
   async generateText(opts: GenerateTextOptions): Promise<LlmTextResult> {
     const started = Date.now();
-    const generativeModel = this.vertex.getGenerativeModel(
-      {
-        model: this.model,
+    const result = await this.ai.models.generateContent({
+      model: this.model,
+      contents: opts.user,
+      config: {
         systemInstruction: opts.system,
         safetySettings: RESEARCH_SAFETY_SETTINGS,
-        generationConfig: {
-          temperature: opts.temperature ?? 0.2,
-          maxOutputTokens: opts.maxOutputTokens ?? 8192,
-        },
+        temperature: opts.temperature ?? 0.2,
+        maxOutputTokens: opts.maxOutputTokens ?? 8192,
       },
-      { timeout: this.timeoutMs },
-    );
-
-    const result = await generativeModel.generateContent({
-      contents: [{ role: "user", parts: [{ text: opts.user }] }],
     });
 
-    const text = extractResponseText(result.response);
-    const usage = result.response.usageMetadata;
+    const text = extractResponseText(result);
+    const usage = result.usageMetadata;
     return {
       text,
       model: this.model,
@@ -107,27 +106,21 @@ export class VertexProvider implements LlmProvider {
           ? opts.user
           : `${opts.user}\n\nIMPORTANT: Return ONLY a single valid JSON object matching the schema. No markdown fences, no commentary.`;
 
-      const generativeModel = this.vertex.getGenerativeModel(
-        {
-          model: this.model,
+      const result = await this.ai.models.generateContent({
+        model: this.model,
+        contents: userPrompt,
+        config: {
           systemInstruction: opts.system,
           safetySettings: RESEARCH_SAFETY_SETTINGS,
-          generationConfig: {
-            temperature: opts.temperature ?? 0.1,
-            maxOutputTokens: opts.maxOutputTokens ?? 8192,
-            responseMimeType: "application/json",
-          },
+          temperature: opts.temperature ?? 0.1,
+          maxOutputTokens: opts.maxOutputTokens ?? 8192,
+          responseMimeType: "application/json",
         },
-        { timeout: this.timeoutMs },
-      );
-
-      const result = await generativeModel.generateContent({
-        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
       });
 
-      const raw = extractResponseText(result.response, { rejectMaxTokens: true });
+      const raw = extractResponseText(result, { rejectMaxTokens: true });
       lastRaw = raw;
-      const usage = result.response.usageMetadata;
+      const usage = result.usageMetadata;
 
       try {
         const data = parseAndValidate(raw, opts.schema);
@@ -158,7 +151,9 @@ function extractResponseText(
 ): string {
   const pf = response.promptFeedback;
   if (pf?.blockReason && pf.blockReason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED) {
-    throw new Error(`Vertex blocked the prompt: ${pf.blockReason}. ${pf.blockReasonMessage ?? ""}`);
+    throw new Error(
+      `Vertex blocked the prompt: ${pf.blockReason}. ${pf.blockReasonMessage ?? ""}`,
+    );
   }
 
   const candidates = response.candidates ?? [];
@@ -169,7 +164,7 @@ function extractResponseText(
     let chunk = "";
     if (cand.content?.parts?.length) {
       for (const part of cand.content.parts) {
-        if ("text" in part && part.text) chunk += part.text;
+        if (typeof part.text === "string" && part.text) chunk += part.text;
       }
     }
     const trimmed = chunk.trim();
@@ -195,6 +190,11 @@ function extractResponseText(
       emptyReasons.push(String(reason));
     }
   }
+
+  // Fall back to the SDK convenience accessor when candidates are present but
+  // we couldn't reconstruct text manually (e.g. tool-call-only responses).
+  const flat = typeof response.text === "string" ? response.text.trim() : "";
+  if (flat) return flat;
 
   const hint = emptyReasons.length > 0 ? ` finishReason=${emptyReasons.join(",")}` : "";
   throw new Error(`Vertex returned no text candidates (empty or filtered).${hint}`);

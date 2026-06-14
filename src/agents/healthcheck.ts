@@ -208,20 +208,37 @@ export function checkPipelineRanToday(db: CueDatabase, now: Date): CheckResult {
   const isRebalanceDay = weekdayUtcForNyCalendarDate(y!, m!, d!) === REBALANCE_DAY_OF_WEEK;
 
   if (isRebalanceDay) {
+    // Screener stamps signals with date = asOf (last ET trading session), not the
+    // calendar run date. On Sunday rebalance, asOf is the prior Friday.
+    const sessionYmd = resolveLastETSession(now);
     const row = db
-      .prepare(`SELECT COUNT(*) AS c FROM signals WHERE date = @todayEt`)
-      .get({ todayEt }) as { c: number };
-    if (row.c === 0) {
+      .prepare(`SELECT COUNT(*) AS c FROM signals WHERE date = @sessionYmd`)
+      .get({ sessionYmd }) as { c: number };
+    if (row.c > 0) {
       return {
         name,
-        status: "FAIL",
-        message: `no signals for rebalance session ${todayEt}`,
+        status: "PASS",
+        message: `signals present for session ${sessionYmd}: ${row.c} rows`,
+      };
+    }
+    // Zero-churn rebalance: top-N is already fully held, no exits triggered, and
+    // WATCHLIST_BENCH_DEPTH may be 0. Accept iff screen step exited cleanly and
+    // an open book exists — otherwise something genuinely failed.
+    const screenExit = getPipelineState(db, "step:screen:last_exit_code");
+    const openRow = db
+      .prepare(`SELECT COUNT(*) AS c FROM positions WHERE status = 'OPEN'`)
+      .get() as { c: number };
+    if (screenExit === "0" && openRow.c > 0) {
+      return {
+        name,
+        status: "PASS",
+        message: `zero-churn rebalance for session ${sessionYmd}: ${openRow.c} OPEN positions, screen exited 0`,
       };
     }
     return {
       name,
-      status: "PASS",
-      message: `signals present for ${todayEt}: ${row.c} rows`,
+      status: "FAIL",
+      message: `no signals for rebalance session ${sessionYmd} (today_et=${todayEt})`,
     };
   }
 

@@ -16,11 +16,24 @@
  *
  * Subsequent deploys:
  *   git pull && pm2 reload cue --update-env
+ *
+ * When log paths / script paths / interpreter change in this file,
+ * `pm2 reload` is NOT enough (PM2 keeps the in-memory definition).
+ * Run:
+ *   pm2 delete cue cue-healthcheck
+ *   pm2 start deploy/ecosystem.config.cjs
+ *   pm2 save
+ * Then verify with: `pm2 describe cue | grep -E 'out log|error log'`
+ * — both paths must be under <repo>/logs/, not ~/.pm2/logs/.
  */
 const path = require('node:path');
+const fs = require('node:fs');
 
 const root = path.resolve(__dirname, '..');
 const logDir = path.join(root, 'logs');
+// PM2 will silently fall back to ~/.pm2/logs/ if this directory does not exist
+// at process start. Ensure it exists before PM2 reads this config.
+fs.mkdirSync(logDir, { recursive: true });
 
 module.exports = {
   apps: [
@@ -42,8 +55,10 @@ module.exports = {
       },
       merge_logs: true,
       combine_logs: true,
-      out_file: path.join(logDir, 'pm2-cue.log'),
-      error_file: path.join(logDir, 'pm2-cue.log'),
+      // Distinct files: some PM2 versions ignore identical out_file/error_file
+      // and fall back to ~/.pm2/logs/.
+      out_file: path.join(logDir, 'cue-out.log'),
+      error_file: path.join(logDir, 'cue-error.log'),
       time: true,
     },
   // PM2 `cron_restart` uses the HOST system timezone (not `TZ` env).
