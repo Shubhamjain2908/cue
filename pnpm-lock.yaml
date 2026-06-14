@@ -11,9 +11,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.91.1
         version: 0.91.1(zod@3.25.76)
-      '@google-cloud/vertexai':
-        specifier: ^1.12.0
-        version: 1.12.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       '@google/genai':
         specifier: ^2.0.0
         version: 2.7.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
@@ -432,19 +429,6 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@google-cloud/vertexai@1.12.0':
-    resolution: {integrity: sha512-XMJIk7GIeavFLP5A3YEUlowKa5Y5PZRrnnuTJcqR0k+lFKkv7+IWpdRp+Xbqb8xNDrvQaE2hP2RYPUylyD5EdA==}
-    engines: {node: '>=18.0.0'}
-
-  '@google/genai@1.52.0':
-    resolution: {integrity: sha512-gwSvbpiN/17O9TbsqSsE/OzZcpv5Fo4RQjdngGgogtuB9RsyJ8ZHhX5KjHj1bp5N9snN2eK8LDGXSaWW2hof8Q==}
-    engines: {node: '>=20.0.0'}
-    peerDependencies:
-      '@modelcontextprotocol/sdk': ^1.25.2
-    peerDependenciesMeta:
-      '@modelcontextprotocol/sdk':
-        optional: true
 
   '@google/genai@2.7.0':
     resolution: {integrity: sha512-tv0DRtcndt2oEhBYy+5mA0TaXH98+L1Gt0AP9unBfH7DP20KhB7+O3QqAN1Lz+laMARGTHS7BFQSNpLbl4gm1g==}
@@ -2384,30 +2368,6 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
-
-  '@google-cloud/vertexai@1.12.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
-    dependencies:
-      '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
-      google-auth-library: 9.15.1
-    transitivePeerDependencies:
-      - '@modelcontextprotocol/sdk'
-      - bufferutil
-      - encoding
-      - supports-color
-      - utf-8-validate
-
-  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
-    dependencies:
-      google-auth-library: 10.6.2
-      p-retry: 4.6.2
-      protobufjs: 7.6.2
-      ws: 8.21.0
-    optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
-    transitivePeerDependencies:
-      - bufferutil
-      - supports-color
-      - utf-8-validate
 
   '@google/genai@2.7.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
     dependencies:

@@ -1,5 +1,4 @@
-import { HarmBlockThreshold, HarmCategory } from "@google-cloud/vertexai";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from "@google/genai";
 
 import { getConfig } from "../../config/index.js";
 import { parseAndValidate } from "../json.js";

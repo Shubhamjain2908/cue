@@ -10,6 +10,17 @@ vi.mock("@google/genai", () => ({
   GoogleGenAI: vi.fn().mockImplementation(() => ({
     models: { generateContent },
   })),
+  HarmCategory: {
+    HARM_CATEGORY_HARASSMENT: "HARM_CATEGORY_HARASSMENT",
+    HARM_CATEGORY_HATE_SPEECH: "HARM_CATEGORY_HATE_SPEECH",
+    HARM_CATEGORY_SEXUALLY_EXPLICIT: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    HARM_CATEGORY_DANGEROUS_CONTENT: "HARM_CATEGORY_DANGEROUS_CONTENT",
+  },
+  HarmBlockThreshold: {
+    BLOCK_LOW_AND_ABOVE: "BLOCK_LOW_AND_ABOVE",
+    BLOCK_ONLY_HIGH: "BLOCK_ONLY_HIGH",
+    BLOCK_NONE: "BLOCK_NONE",
+  },
 }));
 
 import { resetConfigCache } from "../../../src/config/index.js";
