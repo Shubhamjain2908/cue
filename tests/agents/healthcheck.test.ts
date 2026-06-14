@@ -76,12 +76,11 @@ describe("runHealthcheck", () => {
     const db = openMemoryDb();
     const now = SUNDAY_REBALANCE_HEALTHCHECK;
     const expectedSession = resolveLastETSession(now);
-    const todayEt = "2026-01-11";
 
     seedDailyPrices(db, expectedSession);
     insertSignal(db, {
       ticker: "AAPL",
-      date: todayEt,
+      date: expectedSession,
       signal: "BUY",
       price: 100,
       momentumRank: 1,
@@ -104,7 +103,7 @@ describe("runHealthcheck", () => {
     const text = sendTelegram.mock.calls[0]![0] as string;
     expect(text).toContain("✅ Cue healthcheck passed");
     expect(text).toContain("daily_prices current to");
-    expect(text).toContain(`signals present for ${todayEt}`);
+    expect(text).toContain(`signals present for session ${expectedSession}`);
     expect(text).toContain("pipeline_step_state:");
     db.close();
   });
@@ -141,10 +140,11 @@ describe("runHealthcheck", () => {
     db.close();
   });
 
-  it("fails on Sunday rebalance day when no signals exist for today_et", async () => {
+  it("fails on Sunday rebalance day when no signals exist and no open positions", async () => {
     const db = openMemoryDb();
     const now = SUNDAY_REBALANCE_HEALTHCHECK;
-    seedDailyPrices(db, resolveLastETSession(now));
+    const expectedSession = resolveLastETSession(now);
+    seedDailyPrices(db, expectedSession);
 
     const sendTelegram = vi.fn().mockResolvedValue(undefined);
     const code = await runHealthcheck(db, mockConfig, silentLogger(), {
@@ -154,7 +154,29 @@ describe("runHealthcheck", () => {
 
     expect(code).toBe(1);
     const text = sendTelegram.mock.calls[0]![0] as string;
-    expect(text).toContain("no signals for rebalance session 2026-01-11");
+    expect(text).toContain(`no signals for rebalance session ${expectedSession}`);
+    db.close();
+  });
+
+  it("passes Sunday rebalance with zero-churn (no new signals, open book held, screen exited 0)", async () => {
+    const db = openMemoryDb();
+    const now = SUNDAY_REBALANCE_HEALTHCHECK;
+    const expectedSession = resolveLastETSession(now);
+    seedDailyPrices(db, expectedSession, ["QQQ", "AAPL"]);
+    seedStopDayOpenBook(db);
+    setPipelineState(db, "step:ingest:last_exit_code", "0");
+    setPipelineState(db, "step:screen:last_exit_code", "0");
+
+    const sendTelegram = vi.fn().mockResolvedValue(undefined);
+    const code = await runHealthcheck(db, mockConfig, silentLogger(), {
+      now: () => now,
+      sendTelegram,
+    });
+
+    expect(code).toBe(0);
+    const text = sendTelegram.mock.calls[0]![0] as string;
+    expect(text).toContain("zero-churn rebalance");
+    expect(text).toContain(expectedSession);
     db.close();
   });
 
