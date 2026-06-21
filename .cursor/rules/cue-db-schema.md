@@ -63,7 +63,7 @@ End-of-day OHLCV bars (Massive.com ingest).
 | `volume` | INTEGER |
 | `created_at` | Audit |
 
-**Written by:** `cue ingest` (`massive-price-ingestor.ts`); universe list from `data/universe/${UNIVERSE}.json` (see `src/universe/load-universe.ts`, `_meta.json`).
+**Written by:** `cue ingest` (`massive-price-ingestor.ts`); universe list from `data/universe/${UNIVERSE}.json` (see `src/universe/load-universe.ts`, `_meta.json`). Session resolution: T+0 → T−1 fallback; Massive may omit `results` on market holidays — treated as 0 bars, not a validation abort.
 
 **Split-adjusted (PR-4):** pre–ex-date rows updated by `adjustDailyPricesBeforeExDate()` when `cue adjust-splits` or `cue backfill-splits` applies a `corporate_actions` event (OHLC ÷ `factor`, volume × `factor`).
 
