@@ -169,7 +169,7 @@ interface PipelineStep {
 ### 6.1 Prices — Massive.com
 
 - **Env:** `POLYGON_API_KEY` (legacy name; Massive / Polygon-compatible key).
-- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run. **Session date resolution (Phase 9):** tries **T+0** (today's ET weekday) first; if the API returns 0 bars (market holiday or data not yet published) or throws (403/rate-limit), falls back to **T−1** (previous ET weekday). `--date YYYY-MM-DD` bypasses this logic. `--force` refetches regardless of DB currency. After a successful primary insert, **auto-backfill** checks the last 5 ET weekdays for gaps in QQQ's `daily_prices` and fills them (chronological order; market holidays logged and skipped; only dates strictly before `primarySessionDate` attempted to avoid free-tier 403s).
+- **Client:** `src/ingestors/massive-price-ingestor.ts` — **one** Massive **grouped daily** REST call per `cue ingest` run. **Session date resolution (Phase 9):** tries **T+0** (today's ET weekday) first; if the API returns 0 bars (market holiday or data not yet published) or throws (403/rate-limit), falls back to **T−1** (previous ET weekday). On US market holidays, Massive may **omit** the `results` key entirely (not `[]`); `fetchGroupedDaily()` pre-validates `results === undefined` or `resultsCount === 0` as 0 bars (logged as holiday) **before** Zod — so ingest falls through to T−1 instead of aborting on schema validation (confirmed 2026-06-19 Juneteenth). `--date YYYY-MM-DD` bypasses this logic. `--force` refetches regardless of DB currency. After a successful primary insert, **auto-backfill** checks the last 5 ET weekdays for gaps in QQQ's `daily_prices` and fills them (chronological order; market holidays logged and skipped; only dates strictly before `primarySessionDate` attempted to avoid free-tier 403s).
 - **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
@@ -252,7 +252,7 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 7 — Bug fixes + capital safety + instrumentation | `REBALANCE_DROP` exit reason; backtest `strategy` discriminator; corporate actions split adjuster; bear backtest extension (Sharpe 0.956 documented); healthcheck cron; watchlist bench #4–#8; **Saturday rebalance** cadence fix | ✅ Complete |
 | 8 — Scheduler reliability + stop audit | Scheduler idempotency (`pipeline_state`); trailing-stop audit log (`stop_movements`); parallel LLM enrichment; P7-G VIX research (falsified) | ✅ Complete |
 | 9 — Stop-replay correctness + ingestor modernisation | `replayExitReason` stale-stop fix; ratchet `nextHigh` over all unevaluated bars; SELL Telegram alerts; same-day artefact filter; T+0-first ingestor + auto-backfill; scheduler 06:00 ET window | ✅ Complete |
-| **9b — Arch-review gap closure (June 2026)** | PR-4: corporate actions + split adjust; PR-5: Yahoo 15s timeout, T-1 staleness flag, sizer fallback 5% cap; PR-6: `REBALANCE_DROP` in `backtest_trades` (migration `015`) + backtest gate id=82; PR-7: `alerted_at` audit column (migration `016`); PR-9: SQLite WAL + pragmas; PR-10: unified `PIPELINE_STEPS` registry, SELL `signal_type: "MOMENTUM"`, pulse suppression, `verifyMigrations`, reason emoji labels; PR-11: trading-days fix + `alerted_at` on Recent Signals dashboard; PR-12: `positions.current_rank` stamped each rebalance (migration `017`) | ✅ Complete |
+| **9b — Arch-review gap closure (June 2026)** | PR-4: corporate actions + split adjust; PR-5: Yahoo 15s timeout, T-1 staleness flag, sizer fallback 5% cap; PR-6: `REBALANCE_DROP` in `backtest_trades` (migration `015`) + backtest gate id=82; PR-7: `alerted_at` audit column (migration `016`); PR-9: SQLite WAL + pragmas; PR-10: unified `PIPELINE_STEPS` registry, SELL `signal_type: "MOMENTUM"`, pulse suppression, `verifyMigrations`, reason emoji labels; PR-11: trading-days fix + `alerted_at` on Recent Signals dashboard; PR-12: `positions.current_rank` stamped each rebalance (migration `017`); PR-13: Massive holiday `results` omit → T−1 fallback (not ingest Zod abort) | ✅ Complete |
 
 
 ---
@@ -346,6 +346,7 @@ Full record: **`spec/cue-phase9-complete.md`**.
 | Dashboard rank cell: `#N (was #M)` when rank changed since entry | PR-12 | ✅ `template.ts` positions loop IIFE |
 | `extractDashboardPayload` refactored → `extractDashboardPayloadFromDb(db)` | PR-12 | ✅ Public wrapper unchanged; test-DB injection enabled |
 | `HEAD_MIGRATION` → `"017_positions_current_rank"` | PR-12 | ✅ `scheduler.ts` |
+| Massive holiday `results` omit → T−1 fallback (not Zod abort) | PR-13 | ✅ `fetchGroupedDaily()` pre-check in `massive-price-ingestor.ts` |
 
 **Queued PRs:** None.
 

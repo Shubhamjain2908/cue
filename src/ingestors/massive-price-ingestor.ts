@@ -337,6 +337,15 @@ async function fetchGroupedDaily(input: {
   if (http.status !== 200) {
     throw new Error(`Massive grouped HTTP ${String(http.status)}: ${JSON.stringify(http.data)}`);
   }
+  if (typeof http.data === "object" && http.data !== null) {
+    const raw = http.data as Record<string, unknown>;
+    if (raw.results === undefined || raw.resultsCount === 0) {
+      cueLogger.info(
+        `massive: no results for ${input.dateString} — treating as holiday/non-trading day`,
+      );
+      return [];
+    }
+  }
   const parsed = massiveGroupedResponseSchema.safeParse(http.data);
   if (!parsed.success) {
     throw new Error(`Massive grouped response validation failed: ${parsed.error.message}`);
@@ -581,6 +590,7 @@ export function resolveLastETSession(now: Date = new Date()): string {
 
 export {
   currentEtWeekdaySession,
+  fetchGroupedDaily,
   markT1IngestStaleness,
   previousWeekdayBeforeEtCivil,
   resolveSessionDateAndResults,

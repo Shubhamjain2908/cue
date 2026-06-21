@@ -1,14 +1,26 @@
 import Database from "better-sqlite3";
 import winston from "winston";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getPipelineState } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 import {
+  fetchGroupedDaily,
   previousWeekdayBeforeEtCivil,
   resolveSessionDateAndResults,
 } from "../../src/ingestors/massive-price-ingestor.js";
 import type { MassiveGroupedBar } from "../../src/ingestors/types.js";
+
+const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+
+vi.mock("axios", () => ({
+  default: {
+    create: () => ({
+      get: mockGet,
+      interceptors: { response: { use: vi.fn() } },
+    }),
+  },
+}));
 
 function openMemoryDb(): InstanceType<typeof Database> {
   const db = new Database(":memory:");
@@ -132,5 +144,84 @@ describe("resolveSessionDateAndResults staleness", () => {
     expect(fetchGroupedDailyFn).toHaveBeenCalledTimes(1);
     expect(fetchGroupedDailyFn.mock.calls[0]![0].dateString).toBe(t0);
     db.close();
+  });
+
+  it("falls back to T-1 when T+0 Massive response omits results (holiday)", async () => {
+    const db = openMemoryDb();
+    mockGet.mockImplementation(async (url: string) => {
+      if (url.includes(`/stocks/${t0}`)) {
+        return {
+          status: 200,
+          data: { queryCount: 0, resultsCount: 0, status: "OK" },
+        };
+      }
+      return {
+        status: 200,
+        data: {
+          queryCount: 1,
+          resultsCount: 1,
+          status: "OK",
+          results: [sampleBar("QQQ")],
+        },
+      };
+    });
+
+    const resolved = await resolveSessionDateAndResults({
+      db,
+      apiKey: "key",
+      now,
+      explicitDate: undefined,
+      force: true,
+      tickersUpper: ["QQQ"],
+      logger: silentLogger(),
+    });
+
+    expect(resolved?.sessionDate).toBe(t1);
+    expect(resolved?.results).toHaveLength(1);
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    db.close();
+  });
+});
+
+describe("fetchGroupedDaily holiday handling", () => {
+  afterEach(() => {
+    mockGet.mockReset();
+  });
+
+  it("returns empty bars when results field is absent (market holiday)", async () => {
+    mockGet.mockResolvedValue({
+      status: 200,
+      data: { queryCount: 0, resultsCount: 0, status: "OK" },
+    });
+
+    const bars = await fetchGroupedDaily({ apiKey: "key", dateString: "2026-06-19" });
+    expect(bars).toEqual([]);
+  });
+
+  it("still throws on schema violation when results are present", async () => {
+    mockGet.mockResolvedValue({
+      status: 200,
+      data: {
+        queryCount: 1,
+        resultsCount: 1,
+        status: "OK",
+        results: [{ T: "QQQ" }],
+      },
+    });
+
+    await expect(fetchGroupedDaily({ apiKey: "key", dateString: "2026-06-18" })).rejects.toThrow(
+      "validation failed",
+    );
+  });
+
+  it("still throws on non-200 HTTP status", async () => {
+    mockGet.mockResolvedValue({
+      status: 503,
+      data: { error: "unavailable" },
+    });
+
+    await expect(fetchGroupedDaily({ apiKey: "key", dateString: "2026-06-18" })).rejects.toThrow(
+      "Massive grouped HTTP 503",
+    );
   });
 });

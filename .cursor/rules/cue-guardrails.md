@@ -34,7 +34,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **No hallucinated financials** | LLM prompt is bounded; Yahoo DTO + signal row only. | `src/llm/prompt.ts`, `src/llm/enricher.ts` |
 | **Zod output validation** | All LLM enrichment JSON validated before `enrichments` write; retry path in enricher. | `src/llm/enricher.ts`, `src/llm/types.ts` |
 | **Fetcher currency guard** | Per ticker: `MAX(date)` in `daily_prices` vs expected last ET session. `--force` bypasses. | `src/ingestors/massive-price-ingestor.ts` |
-| **T-1 ingest default** | Ingestor resolves previous ET weekday (`previousWeekdayBeforeEtCivil`) unless `--date` is explicit. Auto-backfill covers last 5 weekdays after primary insert (universe runs only; only dates `< primarySessionDate` attempted). | `src/ingestors/massive-price-ingestor.ts` |
+| **T+0 → T−1 ingest fallback** | Default path tries **T+0** (`currentEtWeekdaySession`) first; on 0 bars or recoverable fetch failure, falls back to **T−1** (`previousWeekdayBeforeEtCivil`). `--date` bypasses. **Market holidays:** Massive grouped daily may omit `results` (not `[]`) — `fetchGroupedDaily()` treats `results === undefined` or `resultsCount === 0` as 0 bars before Zod (not a validation abort). Auto-backfill covers last 5 weekdays after primary insert (universe runs only; only dates `< primarySessionDate` attempted). | `src/ingestors/massive-price-ingestor.ts` |
 | **Data lag accepted** | Massive EOD may lag 1–2 sessions. | Operational assumption |
 | **Yahoo context TTL** | Cache policy in Yahoo bundle fetch. | `src/llm/yahooContext.ts` |
 
