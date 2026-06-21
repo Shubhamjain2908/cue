@@ -1,7 +1,7 @@
 import { fetchExtendedYahooContext } from "../llm/yahooContext.js";
 import { cueLogger } from "../cli/cue-logger.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
-import { upsertFundamentalsCache } from "../db/queries.js";
+import { selectFundamentalsBatchTickers, upsertFundamentalsCache } from "../db/queries.js";
 import { loadUniverseTickers } from "../universe/load-universe.js";
 
 export interface EnrichFundamentalsOpts {
@@ -48,12 +48,22 @@ export async function runEnrichFundamentalsCli(opts: EnrichFundamentalsOpts): Pr
   }
 
   const tickers = loadUniverseTickers();
-  const n =
+  const batchLimit =
+    opts.force === true ? tickers.length : Math.min(opts.limit ?? 3, tickers.length);
+  const batchTickers =
     opts.force === true
-      ? tickers.length
-      : Math.min(opts.limit ?? 3, tickers.length);
-  cueLogger.info(`enrich_fundamentals_batch count=${n} force=${Boolean(opts.force)}`);
-  for (const t of tickers.slice(0, n)) {
+      ? tickers.map((t) => t.toUpperCase())
+      : selectFundamentalsBatchTickers(tickers, asOfDate, batchLimit);
+
+  if (batchTickers.length === 0) {
+    cueLogger.info(`enrich_fundamentals_skip all universe tickers cached for as_of_date=${asOfDate}`);
+    return;
+  }
+
+  cueLogger.info(
+    `enrich_fundamentals_batch count=${String(batchTickers.length)} force=${Boolean(opts.force)} as_of_date=${asOfDate}`,
+  );
+  for (const t of batchTickers) {
     const payload = await fetchExtendedYahooContext(t, asOfDate);
     cueLogger.info(
       `enrich_fundamentals_row ticker=${t} sector=${payload.yahoo.sector ?? "n/a"} pe=${payload.yahoo.financials.trailingPE ?? "n/a"}`,
