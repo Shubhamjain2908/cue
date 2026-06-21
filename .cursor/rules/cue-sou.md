@@ -182,6 +182,8 @@ interface PipelineStep {
 | LLM enrichment / fundamentals CLI | `src/llm/yahooContext.ts` | `search()`, `quoteSummary()` — disk cache under **`CACHE_DIR`** |
 | Corporate split events | `src/ingestors/corporate-actions.ts` | `chart()` — persisted in **`corporate_actions`** (`008`) |
 
+**`cue enrich-fundamentals` batch rotation (PR-14):** default pipeline run fetches **3** universe tickers per invocation (Yahoo rate-limit guard). `selectFundamentalsBatchTickers()` in `queries.ts` walks `nasdaq100.json` order and **skips** tickers already present in `fundamentals_cache` for today's `as_of_date` (`getExchangeDateString()`). Each run advances to the next uncached names (~34 Sunday runs to cover ~101 tickers). When all tickers are cached for today, the step logs `enrich_fundamentals_skip` and exits without API calls. **`--force`** refreshes the **entire** universe in one command; **`--limit N`** raises the per-run batch size (still rotates). **`--ticker SYM`** fetches one name only.
+
 ### 6.3 LLM providers
 
 - **`src/llm/factory.ts`**: **`anthropic` | `openai` | `google-studio` | `vertex` | `mock`** (legacy `google` env values normalize to `google-studio`; Vertex uses `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`).
@@ -202,7 +204,7 @@ interface PipelineStep {
 - **T-1 staleness flag:** `massive-price-ingestor.ts` writes `pipeline_state.last_ingest_was_stale = "1"` when the resolved session date was already in `daily_prices`. `healthcheck.ts` check `ingest_staleness` reads this flag and returns FAIL if set.
 - **Pipeline step exit codes:** `runPipelineWithSteps` persists `step:{name}:last_exit_code` / `step:{name}:last_run_at` after every registry step. `healthcheck.ts` **`checkPipelineStepState`** FAILs when critical steps (`ingest`+`screen` on Sunday, `ingest`+`execute-stops` Tue–Sat) last exited non-zero; absent keys warn only.
 - **SQLite pragmas:** `applySqlitePragmas()` in `db/provider.ts` sets WAL, `busy_timeout=5000`, `synchronous=NORMAL`, `cache_size=-64000`, `mmap_size=268435456`, `temp_store=MEMORY` on every read-write connection. `openCueDbReadonly()` applies `busy_timeout=5000` only.
-- **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`).
+- **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`). Batch CLI skips tickers already cached for today's `as_of_date` (see §6.2).
 - **Next migration ID:** **`017`**.
 - **Reference:** **`.cursor/rules/cue-db-schema.md`** (repo agent summary tied to applied migrations).
 
@@ -347,6 +349,7 @@ Full record: **`spec/cue-phase9-complete.md`**.
 | `extractDashboardPayload` refactored → `extractDashboardPayloadFromDb(db)` | PR-12 | ✅ Public wrapper unchanged; test-DB injection enabled |
 | `HEAD_MIGRATION` → `"017_positions_current_rank"` | PR-12 | ✅ `scheduler.ts` |
 | Massive holiday `results` omit → T−1 fallback (not Zod abort) | PR-13 | ✅ `fetchGroupedDaily()` pre-check in `massive-price-ingestor.ts` |
+| `enrich-fundamentals` batch rotation via `fundamentals_cache` | PR-14 | ✅ `selectFundamentalsBatchTickers()` in `queries.ts` |
 
 **Queued PRs:** None.
 

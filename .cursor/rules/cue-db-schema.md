@@ -214,7 +214,7 @@ Scheduler idempotency key/value store (`010_pipeline_state`).
 | `payload_json` | TEXT — serialized bundle for briefing / future prompts |
 | `fetched_at` | Default `CURRENT_TIMESTAMP` |
 
-**Written by:** `cue enrich-fundamentals` (disk cache under `CACHE_DIR`, then best-effort SQLite upsert).
+**Written by:** `cue enrich-fundamentals` (disk cache under `CACHE_DIR`, then best-effort SQLite upsert). Default batch: 3 tickers/run, universe order, skipping rows already present for today's `as_of_date` (`selectFundamentalsBatchTickers`). `--force` refreshes all tickers in one run.
 
 ---
 

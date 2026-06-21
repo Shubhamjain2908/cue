@@ -43,6 +43,39 @@ export function upsertFundamentalsCache(ticker: string, asOfDate: string, payloa
   upsertFundamentalsStmt.run(ticker.toUpperCase(), asOfDate, payloadJson);
 }
 
+/**
+ * Next fundamentals batch: universe order, skipping tickers already in
+ * `fundamentals_cache` for `asOfDate`. Used by `cue enrich-fundamentals` rate-limit guard.
+ */
+export function selectFundamentalsBatchTickers(
+  tickers: readonly string[],
+  asOfDate: string,
+  limit: number,
+  db: SqliteConnection = getDbHandleForFundamentals(),
+): string[] {
+  if (limit <= 0 || tickers.length === 0) {
+    return [];
+  }
+
+  const cachedRows = db
+    .prepare(`SELECT ticker FROM fundamentals_cache WHERE as_of_date = ?`)
+    .all(asOfDate) as { ticker: string }[];
+  const cachedToday = new Set(cachedRows.map((r) => r.ticker.toUpperCase()));
+
+  const batch: string[] = [];
+  for (const ticker of tickers) {
+    const upper = ticker.toUpperCase();
+    if (cachedToday.has(upper)) {
+      continue;
+    }
+    batch.push(upper);
+    if (batch.length >= limit) {
+      break;
+    }
+  }
+  return batch;
+}
+
 export type SignalSide = "BUY" | "SELL" | "HOLD" | "WATCHLIST";
 
 export type PositionStatus = "OPEN" | "CLOSED";
