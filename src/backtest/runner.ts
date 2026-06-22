@@ -19,16 +19,19 @@ import {
   indexByTicker,
   loadQqqTradingDates,
   sliceBarsThrough,
-  upperBoundInclusiveByDate,
-  lowerBoundInclusiveByDate,
-  type DailyBar,
 } from "../shared/market-data-utils.js";
 import { insertBacktestRun, insertBacktestTrade } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
 import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
 import { atr, sma } from "../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
-import { computeBacktestMetrics, cagrPct } from "./metrics.js";
+import {
+  benchmarkBuyHoldCagrPct,
+  computeBacktestMetrics,
+  fmtNum,
+  fmtPct,
+  type SimPosition,
+} from "./metrics.js";
 import { openCueDb } from "../db/provider.js";
 import type {
   ClosedBacktestTrade,
@@ -56,15 +59,6 @@ type SqliteConnection = InstanceType<typeof Database>;
 
 export const BACKTEST_BENCHMARK_TICKER = "QQQ";
 
-interface SimPosition {
-  entryDate: string;
-  entryFillPrice: number;
-  shares: number;
-  entryAtr: number;
-  currentStop: number;
-  highestCloseSinceEntry: number;
-}
-
 type StrategyExitReason =
   | "TRAILING_STOP"
   | "MAX_HOLD"
@@ -89,40 +83,7 @@ function tradingDaysHeld(
   return count;
 }
 
-function benchmarkBuyHoldCagrPct(
-  qqqBars: readonly DailyBar[],
-  fromDate: string,
-  toDate: string,
-): number | null {
-  if (qqqBars.length === 0) {
-    return null;
-  }
-  const lbFrom = lowerBoundInclusiveByDate(qqqBars, fromDate);
-  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
-  if (lbFrom < 0 || ubTo < 0 || lbFrom > ubTo) {
-    return null;
-  }
-  const start = qqqBars[lbFrom]!.close;
-  const end = qqqBars[ubTo]!.close;
-  const spanFrom = qqqBars[lbFrom]!.date;
-  const spanTo = qqqBars[ubTo]!.date;
-  const yf = calendarYearFraction(spanFrom, spanTo);
-  return cagrPct(start, end, yf);
-}
 
-function fmtPct(x: number | null, digits = 2): string {
-  if (x === null || Number.isNaN(x)) {
-    return "n/a";
-  }
-  return `${x.toFixed(digits)}%`;
-}
-
-function fmtNum(x: number | null, digits = 3): string {
-  if (x === null || Number.isNaN(x)) {
-    return "n/a";
-  }
-  return x.toFixed(digits);
-}
 
 function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitReason"] {
   switch (r) {

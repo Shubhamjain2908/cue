@@ -1,3 +1,9 @@
+import type { DailyBar } from "../shared/market-data-utils.js";
+import { calendarYearFraction } from "../shared/date-utils.js";
+import {
+  lowerBoundInclusiveByDate,
+  upperBoundInclusiveByDate,
+} from "../shared/market-data-utils.js";
 import {
   BACKTEST_ANNUAL_RISK_FREE_RATE,
   BACKTEST_TRADING_DAYS_PER_YEAR,
@@ -152,6 +158,65 @@ export function sharpeRatioAnnualized(
     (muExcess / sigma) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
   );
 }
+
+// ── Shared backtest position type ──────────────────────────────────────────
+
+/** A simulated position held during the backtest day loop. */
+export interface SimPosition {
+  entryDate: string;
+  entryFillPrice: number;
+  shares: number;
+  entryAtr: number;
+  currentStop: number;
+  highestCloseSinceEntry: number;
+}
+
+// ── Shared formatting helpers ──────────────────────────────────────────────
+
+/** Format a nullable number as a percentage string (or "n/a"). */
+export function fmtPct(x: number | null, digits = 2): string {
+  if (x === null || Number.isNaN(x)) {
+    return "n/a";
+  }
+  return `${x.toFixed(digits)}%`;
+}
+
+/** Format a nullable number as a decimal string (or "n/a"). */
+export function fmtNum(x: number | null, digits = 3): string {
+  if (x === null || Number.isNaN(x)) {
+    return "n/a";
+  }
+  return x.toFixed(digits);
+}
+
+// ── Shared benchmark CAGR helper ───────────────────────────────────────────
+
+/**
+ * Compute buy-and-hold CAGR for the benchmark index (QQQ) over the
+ * backtest window.  Used by both momentum and GARP simulations.
+ */
+export function benchmarkBuyHoldCagrPct(
+  qqqBars: readonly DailyBar[],
+  fromDate: string,
+  toDate: string,
+): number | null {
+  if (qqqBars.length === 0) {
+    return null;
+  }
+  const lbFrom = lowerBoundInclusiveByDate(qqqBars, fromDate);
+  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
+  if (lbFrom < 0 || ubTo < 0 || lbFrom > ubTo) {
+    return null;
+  }
+  const start = qqqBars[lbFrom]!.close;
+  const end = qqqBars[ubTo]!.close;
+  const spanFrom = qqqBars[lbFrom]!.date;
+  const spanTo = qqqBars[ubTo]!.date;
+  const yf = calendarYearFraction(spanFrom, spanTo);
+  return cagrPct(start, end, yf);
+}
+
+// ── Public API ─────────────────────────────────────────────────────────────
 
 export interface ComputeBacktestMetricsInput {
   /** Ordered trading-day equity marks (same order as dates used for returns / drawdown). */
