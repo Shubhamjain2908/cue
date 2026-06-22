@@ -216,6 +216,91 @@ export function benchmarkBuyHoldCagrPct(
   return cagrPct(start, end, yf);
 }
 
+// ── Shared print summary ──────────────────────────────────────────────────
+
+/** Strategy exit reasons tracked in the exit-bucket breakdown. */
+export type BacktestStrategyExitReason =
+  | "TRAILING_STOP"
+  | "MAX_HOLD"
+  | "REBALANCE_DROP"
+  | "FORCED_CLOSE";
+
+/** Aggregated stats for a single exit-reason bucket. */
+export interface BacktestExitBucketAgg {
+  count: number;
+  sumPnlPct: number;
+  sumHoldDays: number;
+}
+
+export interface PrintBacktestSummaryOptions {
+  /** If set, a "Strategy" row is prepended to the metric table. */
+  readonly label?: string;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly metrics: BacktestComputedMetrics;
+  readonly benchmarkCagrPct: number | null;
+  readonly expectancyPctPerTrade: number | null;
+  /**
+   * Optional exit-bucket breakdown. When provided, a per-bucket table is
+   * printed below the main metrics. Keys are exit-reason labels (e.g.
+   * "TRAILING_STOP", "MAX_HOLD", "REBALANCE_DROP", "FORCED_CLOSE").
+   */
+  readonly exitBuckets?: Record<string, BacktestExitBucketAgg>;
+}
+
+/**
+ * Print a formatted backtest summary table to stdout.
+ * Used by both the momentum runner and the GARP strategy module.
+ */
+export function printBacktestSummary(opts: PrintBacktestSummaryOptions): void {
+  const ticker = "QQQ";
+  const rows: [string, string][] = [];
+
+  if (opts.label !== undefined) {
+    rows.push(["Strategy", opts.label]);
+  }
+  rows.push(
+    ["Window", `${opts.fromDate} → ${opts.toDate}`],
+    ["CAGR (strategy)", fmtPct(opts.metrics.cagrPct)],
+    ["Max drawdown", fmtPct(opts.metrics.maxDrawdownPct)],
+    ["Win rate", fmtPct(opts.metrics.winRatePct)],
+    ["Sharpe (ann.)", fmtNum(opts.metrics.sharpeRatio)],
+    ["Expectancy (avg P&L % / trade)", fmtPct(opts.expectancyPctPerTrade, 3)],
+    ["Total trades", String(opts.metrics.totalTrades)],
+    [`Benchmark (${ticker}) CAGR`, fmtPct(opts.benchmarkCagrPct)],
+  );
+
+  const labelW = Math.max(...rows.map(([a]) => a.length));
+  console.log("");
+  console.log("Cue backtest");
+  console.log("-".repeat(Math.max(40, labelW + 28)));
+  for (const [label, value] of rows) {
+    console.log(`${label.padEnd(labelW)}  ${value}`);
+  }
+  console.log("-".repeat(Math.max(40, labelW + 28)));
+  console.log("");
+
+  if (opts.exitBuckets !== undefined) {
+    const keys = ["TRAILING_STOP", "MAX_HOLD", "REBALANCE_DROP", "FORCED_CLOSE"] as const;
+    console.log("");
+    console.log("Exit bucket breakdown (strategy labels):");
+    for (const k of keys) {
+      const bucket = opts.exitBuckets[k];
+      if (bucket === undefined) {
+        continue;
+      }
+      const { count, sumPnlPct, sumHoldDays } = bucket;
+      const avgPnl = count > 0 ? sumPnlPct / count : 0;
+      const avgHold = count > 0 ? sumHoldDays / count : 0;
+      console.log(
+        `  ${k.padEnd(18)} ${count.toString().padEnd(4)} | Avg P&L: ${avgPnl.toFixed(2)}% | Avg Hold: ${avgHold.toFixed(1)} days`,
+      );
+    }
+  }
+
+  console.log("");
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 export interface ComputeBacktestMetricsInput {

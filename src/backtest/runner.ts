@@ -28,8 +28,7 @@ import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentu
 import {
   benchmarkBuyHoldCagrPct,
   computeBacktestMetrics,
-  fmtNum,
-  fmtPct,
+  printBacktestSummary,
   type SimPosition,
 } from "./metrics.js";
 import { openCueDb } from "../db/provider.js";
@@ -162,50 +161,6 @@ function mean(nums: readonly number[]): number | null {
   return s / nums.length;
 }
 
-function printSummary(
-  fromDate: string,
-  toDate: string,
-  metrics: ReturnType<typeof computeBacktestMetrics>,
-  benchmarkCagrPct: number | null,
-  expectancyPctPerTrade: number | null,
-  exitAgg: Record<StrategyExitReason, ExitBucketAgg>,
-): void {
-  const rows: [string, string][] = [
-    ["Window", `${fromDate} → ${toDate}`],
-    ["CAGR (strategy)", fmtPct(metrics.cagrPct)],
-    ["Max drawdown", fmtPct(metrics.maxDrawdownPct)],
-    ["Win rate", fmtPct(metrics.winRatePct)],
-    ["Sharpe (ann.)", fmtNum(metrics.sharpeRatio)],
-    ["Expectancy (avg P&L % / trade)", fmtPct(expectancyPctPerTrade, 3)],
-    ["Total trades", String(metrics.totalTrades)],
-    [`Benchmark (${BACKTEST_BENCHMARK_TICKER}) CAGR`, fmtPct(benchmarkCagrPct)],
-  ];
-  const labelW = Math.max(...rows.map(([a]) => a.length));
-  console.log("");
-  console.log("Cue backtest");
-  console.log("-".repeat(Math.max(40, labelW + 28)));
-  for (const [label, value] of rows) {
-    console.log(`${label.padEnd(labelW)}  ${value}`);
-  }
-  console.log("-".repeat(Math.max(40, labelW + 28)));
-  console.log("");
-  console.log("Exit bucket breakdown (strategy labels):");
-  for (const k of [
-    "TRAILING_STOP",
-    "MAX_HOLD",
-    "REBALANCE_DROP",
-    "FORCED_CLOSE",
-  ] as const) {
-    const { count, sumPnlPct, sumHoldDays } = exitAgg[k];
-    const avgPnl = count > 0 ? sumPnlPct / count : 0;
-    const avgHold = count > 0 ? sumHoldDays / count : 0;
-    const label = k;
-    console.log(
-      `  ${label.padEnd(18)} ${count.toString().padEnd(4)} | Avg P&L: ${avgPnl.toFixed(2)}% | Avg Hold: ${avgHold.toFixed(1)} days`,
-    );
-  }
-  console.log("");
-}
 
 function rankingConfigFromDefaults(): RankingConfig {
   return { ...DEFAULT_RANKING_CONFIG };
@@ -730,7 +685,14 @@ if (isMain) {
         ),
       );
       const exitAgg = aggregateExitBuckets(result.closedTrades);
-      printSummary(from, to, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade, exitAgg);
+      printBacktestSummary({
+        fromDate: from,
+        toDate: to,
+        metrics: result.metrics,
+        benchmarkCagrPct: result.benchmarkCagrPct,
+        expectancyPctPerTrade,
+        exitBuckets: exitAgg,
+      });
 
       if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
         console.warn(
