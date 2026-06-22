@@ -6,7 +6,7 @@ import axios from "axios";
 import winston from "winston";
 
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
-import { cueLogger } from "../cli/cue-logger.js";
+import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { setPipelineState } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
@@ -65,19 +65,7 @@ function delay(ms: number): Promise<void> {
 
 function createLogger(): winston.Logger {
   const { LOG_LEVEL } = getConfig();
-  return winston.createLogger({
-    level: LOG_LEVEL,
-    format: winston.format.combine(
-      winston.format.timestamp(),
-      winston.format.printf((info) => {
-        const { timestamp, level, message, ...rest } = info;
-        const extra =
-          Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : "";
-        return `${String(timestamp)} ${level}: ${String(message)}${extra}`;
-      }),
-    ),
-    transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
-  });
+  return createCueLogger("massive", { level: LOG_LEVEL });
 }
 
 /** ET civil calendar parts for `now` (aligns ingest with US equity dates / pipeline). */
@@ -566,9 +554,7 @@ const isMain =
 
 if (isMain) {
   run().catch((err: unknown) => {
-    const logger = winston.createLogger({
-      transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
-    });
+    const logger = createCueLogger("massive-ingest");
     const message =
       err instanceof Error ? err.message : util.inspect(err, { depth: 8 });
     logger.error(`Fetcher fatal error: ${message}`);

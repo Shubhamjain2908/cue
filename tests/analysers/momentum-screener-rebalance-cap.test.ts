@@ -28,6 +28,12 @@ vi.mock("../../src/universe/load-universe.js", () => ({
 }));
 
 vi.mock("../../src/cli/cue-logger.js", () => ({
+  createCueLogger: vi.fn(() => ({
+    warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+  })),
   cueLogger: {
     warn: vi.fn(),
     error: vi.fn(),

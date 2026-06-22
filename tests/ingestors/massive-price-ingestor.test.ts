@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
-import winston from "winston";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { createCueLogger } from "../../src/cli/cue-logger.js";
 
 import { getPipelineState } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
@@ -29,8 +30,8 @@ function openMemoryDb(): InstanceType<typeof Database> {
   return db;
 }
 
-function silentLogger(): winston.Logger {
-  return winston.createLogger({ silent: true, transports: [new winston.transports.Console()] });
+function silentLogger(): ReturnType<typeof createCueLogger> {
+  return createCueLogger("test", { silent: true });
 }
 
 function seedDateRow(db: InstanceType<typeof Database>, date: string): void {

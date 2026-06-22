@@ -2,10 +2,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import axios from "axios";
-import winston from "winston";
 import { z } from "zod";
 
-import { cueLogger } from "../cli/cue-logger.js";
+import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
 import { markSignalAlerted, markWatchlistSignalsAlerted } from "../db/queries.js";
@@ -96,19 +95,7 @@ export function deriveBuyAlertShares(
   return { shares, positionUsd };
 }
 
-const logger = winston.createLogger({
-  defaultMeta: { service: "alert" },
-  level: process.env.LOG_LEVEL ?? "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf((info) => {
-      const { timestamp, level, message, service, ...rest } = info;
-      const extra = Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : "";
-      return `${String(timestamp)} ${String(service ?? "alert")} ${level}: ${String(message)}${extra}`;
-    }),
-  ),
-  transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
-});
+const logger = createCueLogger("alert");
 
 /**
  * Reads `--mode rebalance|stop` from argv (same values as pipeline `detectRunMode`).
