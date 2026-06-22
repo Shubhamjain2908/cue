@@ -2,7 +2,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, w
 import path from "node:path";
 import { clearInterval, setInterval } from "node:timers";
 
-import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
+import { CUE_LOCALE, CUE_TIME_ZONE, formatEtYmd } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
 import { getPipelineState, setPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
@@ -11,7 +11,6 @@ import { openCueDb } from "../db/provider.js";
 import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import {
   executionWindowEtForDate,
-  formatEtYmd,
   getNyCalendarWeekday,
   isWithinExecutionWindow,
   runPipelineWithSteps,

@@ -33,3 +33,60 @@ export function getExchangeDateString(now: Date = new Date()): string {
   }
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * Return `{ year, month, day }` for `now` in ET civil time.
+ * Used by pipeline scheduling and ingest to align with US equity session dates.
+ */
+export function getEtCalendarParts(now: Date): {
+  year: number;
+  month: number;
+  day: number;
+} {
+  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
+    timeZone: CUE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = dtf.formatToParts(now);
+  let year = 0;
+  let month = 0;
+  let day = 0;
+  for (const p of parts) {
+    if (p.type === "year") {
+      year = Number(p.value);
+    }
+    if (p.type === "month") {
+      month = Number(p.value);
+    }
+    if (p.type === "day") {
+      day = Number(p.value);
+    }
+  }
+  return { year, month, day };
+}
+
+/**
+ * Format `now` as `YYYY-MM-DD` in ET civil time.
+ * Canonical date string for daily_prices rows, pipeline_state keys, and logging.
+ */
+export function formatEtYmd(now: Date): string {
+  const { year, month, day } = getEtCalendarParts(now);
+  const y = String(year).padStart(4, "0");
+  const m = String(month).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Gregorian weekday for an America/New_York calendar date (0 Sunday … 6 Saturday).
+ * Uses UTC-noon anchor to avoid DST / timezone offset edge cases.
+ */
+export function weekdayUtcForNyCalendarDate(
+  year: number,
+  month: number,
+  day: number,
+): number {
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
+}

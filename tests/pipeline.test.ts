@@ -3,10 +3,10 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 
+import { formatEtYmd, weekdayUtcForNyCalendarDate } from "../src/config/cue-timezone.js";
 import {
   PIPELINE_STEPS,
   detectRunMode,
-  formatEtYmd,
   getEtMinutesSinceMidnight,
   getNyCalendarWeekday,
   isWithinExecutionWindow,
@@ -15,7 +15,6 @@ import {
   runPipeline,
   runPipelineWithSteps,
   stepsForMode,
-  weekdayUtcForNyCalendarDate,
 } from "../src/agents/daily-workflow.js";
 import { getPipelineState } from "../src/db/queries.js";
 import { initSchema } from "../src/db/schema.js";

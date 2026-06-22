@@ -1,10 +1,15 @@
 import axios from "axios";
 import type { Logger } from "winston";
 
-import { REBALANCE_DAY_OF_WEEK, weekdayUtcForNyCalendarDate } from "./daily-workflow.js";
+import { REBALANCE_DAY_OF_WEEK } from "./daily-workflow.js";
 import { cueLogger } from "../cli/cue-logger.js";
 import type { AppConfig } from "../config/index.js";
-import { CUE_LOCALE, CUE_TIME_ZONE, getExchangeDateString } from "../config/cue-timezone.js";
+import {
+  CUE_LOCALE,
+  CUE_TIME_ZONE,
+  getExchangeDateString,
+  weekdayUtcForNyCalendarDate,
+} from "../config/cue-timezone.js";
 import { getPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
 import { getStaleOpenPositions } from "../briefing/queries.js";

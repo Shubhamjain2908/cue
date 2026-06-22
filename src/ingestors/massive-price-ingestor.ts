@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import axios from "axios";
 import winston from "winston";
 
-import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
+import {
+  formatEtYmd,
+  getEtCalendarParts,
+  weekdayUtcForNyCalendarDate,
+} from "../config/cue-timezone.js";
 import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { setPipelineState } from "../db/queries.js";
@@ -82,44 +86,7 @@ function createLogger(): winston.Logger {
   return createCueLogger("massive", { level: LOG_LEVEL });
 }
 
-/** ET civil calendar parts for `now` (aligns ingest with US equity dates / pipeline). */
-function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
-  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
-    timeZone: CUE_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = dtf.formatToParts(now);
-  let year = 0;
-  let month = 0;
-  let day = 0;
-  for (const p of parts) {
-    if (p.type === "year") {
-      year = Number(p.value);
-    }
-    if (p.type === "month") {
-      month = Number(p.value);
-    }
-    if (p.type === "day") {
-      day = Number(p.value);
-    }
-  }
-  return { year, month, day };
-}
-
-function formatEtYmd(now: Date): string {
-  const { year, month, day } = getEtCalendarParts(now);
-  const y = String(year).padStart(4, "0");
-  const m = String(month).padStart(2, "0");
-  const d = String(day).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-/** Gregorian weekday for an America/New_York civil date (0 Sun … 6 Sat), UTC-noon anchor. */
-function weekdayUtcForNyCivilDate(year: number, month: number, day: number): number {
-  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
-}
+// ponytail: getEtCalendarParts, formatEtYmd, weekdayUtcForNyCalendarDate imported from cue-timezone.ts
 
 /**
  * Latest Mon–Fri on or before ET civil (year, month, day); walks back at most 5 days.
@@ -134,7 +101,7 @@ function latestWeekdayOnOrBeforeEtCivil(
   let mo = month;
   let d = day;
   for (let i = 0; i < 5; i++) {
-    const dow = weekdayUtcForNyCivilDate(y, mo, d);
+    const dow = weekdayUtcForNyCalendarDate(y, mo, d);
     if (dow !== 0 && dow !== 6) {
       return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     }
@@ -202,7 +169,7 @@ function recentEtWeekdays(now: Date, n: number): string[] {
   const results: string[] = [];
   let { year, month, day } = getEtCalendarParts(now);
   for (let attempts = 0; attempts < n * 3 && results.length < n; attempts++) {
-    const dow = weekdayUtcForNyCivilDate(year, month, day);
+    const dow = weekdayUtcForNyCalendarDate(year, month, day);
     if (dow !== 0 && dow !== 6) {
       const yStr = String(year).padStart(4, "0");
       const mStr = String(month).padStart(2, "0");
