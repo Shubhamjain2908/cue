@@ -22,6 +22,14 @@ import {
   type SignalInsert,
 } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
+import { addCalendarDays } from "../shared/date-utils.js";
+import {
+  type DailyBar,
+  loadQqqTradingDates,
+  sliceBarsThrough,
+  upperBoundInclusiveByDate,
+  indexByTicker,
+} from "../shared/market-data-utils.js";
 import {
   buildSignalThresholdsFromConfig,
   generateSignal,
@@ -45,56 +53,7 @@ type SqliteConnection = InstanceType<typeof Database>;
 /** Live rebalance BUY cap — not overridable via MAX_POSITIONS or RankingConfig.topN. */
 const LOCKED_TOP_N = 3 as const;
 
-interface DailyBar {
-  ticker: string;
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
 type ExitReason = "TRAILING_STOP" | "MAX_HOLD" | "REBALANCE_DROP";
-
-function parseIsoUtcMs(iso: string): number {
-  const [y, m, d] = iso.split("-").map(Number);
-  return Date.UTC(y!, m! - 1, d!);
-}
-
-function addCalendarDays(iso: string, days: number): string {
-  const ms = parseIsoUtcMs(iso) + days * 86_400_000;
-  const dt = new Date(ms);
-  const y = dt.getUTCFullYear();
-  const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const da = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${mo}-${da}`;
-}
-
-function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): number {
-  let lo = 0;
-  let hi = bars.length - 1;
-  let ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const d = bars[mid]!.date;
-    if (d <= asOf) {
-      ans = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return ans;
-}
-
-function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] | null {
-  const ub = upperBoundInclusiveByDate(bars, asOf);
-  if (ub < 0) {
-    return null;
-  }
-  return bars.slice(0, ub + 1);
-}
 
 /** As-of bar from day map, else last bar on or before `asOf` in the ticker series. */
 function resolveAsOfBar(
@@ -158,15 +117,6 @@ function tradingDaysHeld(
   return count;
 }
 
-function loadQqqTradingDates(db: SqliteConnection, dateFrom: string, dateTo: string): string[] {
-  const rows = db
-    .prepare(
-      `SELECT date FROM daily_prices WHERE ticker = 'QQQ' AND date >= ? AND date <= ? ORDER BY date ASC`,
-    )
-    .all(dateFrom, dateTo) as { date: string }[];
-  return rows.map((r) => r.date);
-}
-
 function hydrateDailyPrices(
   db: SqliteConnection,
   tickers: readonly string[],
@@ -186,20 +136,6 @@ function hydrateDailyPrices(
     ORDER BY date ASC, ticker ASC
   `);
   return stmt.all(...tickers, dateFrom, dateTo) as DailyBar[];
-}
-
-function indexByTicker(rows: readonly DailyBar[]): Map<string, DailyBar[]> {
-  const byTicker = new Map<string, DailyBar[]>();
-  for (const row of rows) {
-    const t = row.ticker.toUpperCase();
-    let arr = byTicker.get(t);
-    if (!arr) {
-      arr = [];
-      byTicker.set(t, arr);
-    }
-    arr.push({ ...row, ticker: t, date: row.date });
-  }
-  return byTicker;
 }
 
 function latestQqqDate(db: SqliteConnection): string | null {

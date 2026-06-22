@@ -5,6 +5,24 @@ import Database from "better-sqlite3";
 
 import { getConfig } from "../config/index.js";
 import type { BacktestTradeExitReasonDb } from "../db/queries.js";
+import {
+  addCalendarDays,
+  calendarYearFraction,
+  compareIsoDate,
+  isoWeekdayMon1ToFri5,
+  parseIsoUtcMs,
+} from "../shared/date-utils.js";
+import {
+  closeMarkAsOf,
+  hydrateDailyPrices,
+  indexByDate,
+  indexByTicker,
+  loadQqqTradingDates,
+  sliceBarsThrough,
+  upperBoundInclusiveByDate,
+  lowerBoundInclusiveByDate,
+  type DailyBar,
+} from "../shared/market-data-utils.js";
 import { insertBacktestRun, insertBacktestTrade } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
 import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
@@ -32,7 +50,6 @@ import {
 
 type SqliteConnection = InstanceType<typeof Database>;
 
-/** Nasdaq-100 proxy for Phase 1 (SPY not required in DB). */
 export const BACKTEST_BENCHMARK_TICKER = "QQQ";
 
 const INITIAL_CASH_USD = 2500;
@@ -42,16 +59,6 @@ const WARMUP_CALENDAR_DAYS = 550;
 
 /** Calendar days after `toDate` to simulate pending fills through settlement extension. */
 const SETTLEMENT_EXTENSION_CALENDAR_DAYS = 45;
-
-interface DailyBar {
-  ticker: string;
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
 
 interface SimPosition {
   entryDate: string;
@@ -67,39 +74,6 @@ type StrategyExitReason =
   | "MAX_HOLD"
   | "REBALANCE_DROP"
   | "FORCED_CLOSE";
-
-function compareIsoDate(a: string, b: string): number {
-  if (a < b) {
-    return -1;
-  }
-  if (a > b) {
-    return 1;
-  }
-  return 0;
-}
-
-function parseIsoUtcMs(iso: string): number {
-  const [y, m, d] = iso.split("-").map(Number);
-  return Date.UTC(y!, m! - 1, d!);
-}
-
-function addCalendarDays(iso: string, days: number): string {
-  const ms = parseIsoUtcMs(iso) + days * 86_400_000;
-  const dt = new Date(ms);
-  const y = dt.getUTCFullYear();
-  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-/** 1 = Monday … 5 = Friday (ISO weekday, matches `Date#getUTCDay()` for Mon–Fri). */
-function isoWeekdayMon1ToFri5(iso: string): number {
-  const dow = new Date(parseIsoUtcMs(iso)).getUTCDay();
-  if (dow === 0 || dow === 6) {
-    return 0;
-  }
-  return dow;
-}
 
 function tradingDaysHeld(
   sortedDates: readonly string[],
@@ -117,123 +91,6 @@ function tradingDaysHeld(
     count++;
   }
   return count;
-}
-
-function calendarYearFraction(fromIso: string, toIso: string): number {
-  const raw = (parseIsoUtcMs(toIso) - parseIsoUtcMs(fromIso)) / 86_400_000 / 365.25;
-  return Math.max(raw, 1e-9);
-}
-
-function upperBoundInclusiveByDate(bars: readonly DailyBar[], asOf: string): number {
-  let lo = 0;
-  let hi = bars.length - 1;
-  let ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const d = bars[mid]!.date;
-    if (d <= asOf) {
-      ans = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return ans;
-}
-
-function lowerBoundInclusiveByDate(bars: readonly DailyBar[], from: string): number {
-  let lo = 0;
-  let hi = bars.length - 1;
-  let ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (bars[mid]!.date >= from) {
-      ans = mid;
-      hi = mid - 1;
-    } else {
-      lo = mid + 1;
-    }
-  }
-  return ans;
-}
-
-function sliceBarsThrough(bars: readonly DailyBar[], asOf: string): DailyBar[] | null {
-  const ub = upperBoundInclusiveByDate(bars, asOf);
-  if (ub < 0) {
-    return null;
-  }
-  return bars.slice(0, ub + 1);
-}
-
-function closeMarkAsOf(bars: readonly DailyBar[], asOf: string): number | null {
-  const ub = upperBoundInclusiveByDate(bars, asOf);
-  if (ub < 0) {
-    return null;
-  }
-  return bars[ub]!.close;
-}
-
-function loadQqqTradingDates(
-  db: SqliteConnection,
-  dateFrom: string,
-  dateTo: string,
-): string[] {
-  const rows = db
-    .prepare(
-      `SELECT date FROM daily_prices WHERE ticker = ? AND date >= ? AND date <= ? ORDER BY date ASC`,
-    )
-    .all(BACKTEST_BENCHMARK_TICKER, dateFrom, dateTo) as { date: string }[];
-  return rows.map((r) => r.date);
-}
-
-function hydrateDailyPrices(
-  db: SqliteConnection,
-  tickers: readonly string[],
-  dateFrom: string,
-  dateTo: string,
-): DailyBar[] {
-  if (tickers.length === 0) {
-    return [];
-  }
-  const placeholders = tickers.map(() => "?").join(", ");
-  const stmt = db.prepare(`
-    SELECT ticker, date, open, high, low, close, volume
-    FROM daily_prices
-    WHERE ticker IN (${placeholders})
-      AND date >= ?
-      AND date <= ?
-    ORDER BY date ASC, ticker ASC
-  `);
-  return stmt.all(...tickers, dateFrom, dateTo) as DailyBar[];
-}
-
-function indexByTicker(rows: readonly DailyBar[]): Map<string, DailyBar[]> {
-  const byTicker = new Map<string, DailyBar[]>();
-  for (const row of rows) {
-    const t = row.ticker.toUpperCase();
-    let arr = byTicker.get(t);
-    if (!arr) {
-      arr = [];
-      byTicker.set(t, arr);
-    }
-    arr.push({ ...row, ticker: t, date: row.date });
-  }
-  return byTicker;
-}
-
-function indexByDate(rows: readonly DailyBar[]): Map<string, Map<string, DailyBar>> {
-  const byDate = new Map<string, Map<string, DailyBar>>();
-  for (const row of rows) {
-    const t = row.ticker.toUpperCase();
-    const d = row.date;
-    let dayMap = byDate.get(d);
-    if (!dayMap) {
-      dayMap = new Map();
-      byDate.set(d, dayMap);
-    }
-    dayMap.set(t, { ...row, ticker: t, date: d });
-  }
-  return byDate;
 }
 
 function benchmarkBuyHoldCagrPct(
