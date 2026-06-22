@@ -13,7 +13,9 @@
 
 import { pathToFileURL } from "node:url";
 
-import winston from "winston";
+import type winston from "winston";
+
+import { createCueLogger } from "../src/cli/cue-logger.js";
 
 import { getConfig } from "../src/config/index.js";
 import { getPipelineState, setPipelineState } from "../src/db/queries.js";
@@ -99,10 +101,7 @@ function main(): void {
     process.exit(1);
   }
 
-  const logger = winston.createLogger({
-    level: "info",
-    transports: [new winston.transports.Console({ format: winston.format.simple() })],
-  });
+  const logger = createCueLogger("backfill");
 
   try {
     const result = runBackfillHistoricalSplitAdjustments(db, logger);

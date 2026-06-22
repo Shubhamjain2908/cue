@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-import winston from "winston";
-
+import { createCueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { setPipelineState } from "../db/queries.js";
@@ -53,20 +52,7 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   },
 ];
 
-const logger = winston.createLogger({
-  defaultMeta: { service: "pipeline" },
-  level: process.env.LOG_LEVEL ?? "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf((info) => {
-      const { timestamp, level, message, service, ...rest } = info;
-      const extra =
-        Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : "";
-      return `${String(timestamp)} ${String(service ?? "pipeline")} ${level}: ${String(message)}${extra}`;
-    }),
-  ),
-  transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
-});
+const logger = createCueLogger("pipeline");
 
 function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
   const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {

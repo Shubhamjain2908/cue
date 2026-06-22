@@ -2,15 +2,13 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, w
 import path from "node:path";
 import { clearInterval, setInterval } from "node:timers";
 
-import winston from "winston";
-
 import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
 import { getConfig } from "../config/index.js";
 import { getPipelineState, setPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
 import { openCueDb } from "../db/provider.js";
 
-import { cueLogger } from "../cli/cue-logger.js";
+import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import {
   executionWindowEtForDate,
   formatEtYmd,
@@ -29,20 +27,7 @@ const PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE = "last_successful_run_date";
 // verifyMigrations() will exit(2) if the DB is behind HEAD.
 export const HEAD_MIGRATION = "017_positions_current_rank";
 
-const logger = winston.createLogger({
-  defaultMeta: { service: "scheduler" },
-  level: process.env.LOG_LEVEL ?? "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf((info) => {
-      const { timestamp, level, message, service, ...rest } = info;
-      const extra =
-        Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : "";
-      return `${String(timestamp)} ${String(service ?? "scheduler")} ${level}: ${String(message)}${extra}`;
-    }),
-  ),
-  transports: [new winston.transports.Console({ stderrLevels: ["error"] })],
-});
+const logger = createCueLogger("scheduler");
 
 /** NY weekday: Sunday → rebalance; Tue–Sat → stop maintenance; Monday → idle. */
 export function schedulerRunKindForNyWeekday(dow: number): "rebalance" | "weekday" | null {

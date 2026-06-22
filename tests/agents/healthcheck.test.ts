@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
-import winston from "winston";
+import { createCueLogger } from "../../src/cli/cue-logger.js";
 
 import {
   checkIngestStaleness,
@@ -39,8 +39,8 @@ function openMemoryDb(): SqliteConnection {
   return db;
 }
 
-function silentLogger(): winston.Logger {
-  return winston.createLogger({ silent: true });
+function silentLogger(): ReturnType<typeof createCueLogger> {
+  return createCueLogger("test", { silent: true });
 }
 
 function seedDailyPrices(db: SqliteConnection, sessionDate: string, tickers: string[] = ["QQQ"]): void {
