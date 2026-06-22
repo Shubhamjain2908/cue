@@ -29,6 +29,7 @@ import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
 import { atr, sma } from "../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
 import { computeBacktestMetrics, cagrPct } from "./metrics.js";
+import { openCueDb } from "../db/provider.js";
 import type {
   ClosedBacktestTrade,
   EquityPoint,
@@ -729,7 +730,7 @@ if (isMain) {
   void (async () => {
   const { from, to, strategy } = parseCli();
   const config = getConfig();
-  const db = new Database(config.DB_PATH);
+  const db = openCueDb(config.DB_PATH);
   try {
     initSchema(db);
 
