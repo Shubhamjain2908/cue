@@ -41,8 +41,6 @@ export function schedulerRunKindForNyWeekday(dow: number): "rebalance" | "weekda
 
 let isRunning = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
-/** Parent-held DB for health, pipeline_state, and clean shutdown (subprocess `cue` steps open their own DBs). */
-let heldDb: CueDatabase | undefined;
 
 /** `process.kill(pid, 0)` liveness probe; EPERM means a process exists but we cannot signal it. */
 function isProcessAlive(pid: number): boolean {
@@ -176,81 +174,82 @@ function openAndLogHealth(): void {
   try {
     const cfg = getConfig();
     const now = new Date();
-    heldDb = openCueDb(cfg.DB_PATH);
-    heldDb.prepare("SELECT 1 AS ok").get();
-    verifyMigrations(heldDb);
-    logger.info(
-      `scheduler_health ${JSON.stringify({
-        ok: true,
-        locale: CUE_LOCALE,
-        timeZone: CUE_TIME_ZONE,
-        etYmd: formatEtYmd(now),
-        etWeekday: getNyCalendarWeekday(now),
-        pollMs: POLL_MS,
-        executionWindowEt: formatSchedulerWindowEt(now),
-        dbPath: cfg.DB_PATH,
-        lockPath: cfg.LOCK_PATH,
-      })}`,
-    );
+    const db = openCueDb(cfg.DB_PATH);
+    try {
+      db.prepare("SELECT 1 AS ok").get();
+      verifyMigrations(db);
+      logger.info(
+        `scheduler_health ${JSON.stringify({
+          ok: true,
+          locale: CUE_LOCALE,
+          timeZone: CUE_TIME_ZONE,
+          etYmd: formatEtYmd(now),
+          etWeekday: getNyCalendarWeekday(now),
+          pollMs: POLL_MS,
+          executionWindowEt: formatSchedulerWindowEt(now),
+          dbPath: cfg.DB_PATH,
+          lockPath: cfg.LOCK_PATH,
+        })}`,
+      );
+    } finally {
+      db.close();
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error(`scheduler_health_failed error=${msg}`);
-    if (heldDb !== undefined) {
-      heldDb.close();
-      heldDb = undefined;
-    }
     process.exit(1);
   }
-}
-
-function schedulerTick(): void {
+}function schedulerTick(): void {
   const now = new Date();
   if (!isWithinExecutionWindow(now)) {
     return;
   }
   const todayEt = formatEtYmd(now);
-  if (heldDb === undefined) {
-    return;
-  }
-  if (getPipelineState(heldDb, PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE) === todayEt) {
-    return;
-  }
 
-  const dow = getNyCalendarWeekday(now);
-  const kind = schedulerRunKindForNyWeekday(dow);
-  if (kind === null) {
-    logger.debug(`scheduler_skip_idle_day dow=${dow} etDate=${todayEt}`);
-    return;
-  }
-
-  if (isRunning) {
-    logger.warn(
-      "scheduler_skip_overlap previous tick still running; skipping to avoid overlapping DB writes",
-    );
-    return;
-  }
-
-  const { LOCK_PATH } = getConfig();
-  if (!tryAcquireSchedulerLock(LOCK_PATH)) {
-    return;
-  }
-
-  isRunning = true;
-  let exitCode = 1;
+  const db = openCueDb(getConfig().DB_PATH);
   try {
-    if (kind === "rebalance") {
-      logger.info(`scheduler_fire kind=rebalance etDate=${todayEt} dow=${dow}`);
-      exitCode = runPipelineWithSteps(stepsForMode("rebalance"), "rebalance", heldDb);
-    } else {
-      logger.info(`scheduler_fire kind=weekday_stop etDate=${todayEt} dow=${dow}`);
-      exitCode = runPipelineWithSteps(stepsForMode("stop"), "stop", heldDb);
+    if (getPipelineState(db, PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE) === todayEt) {
+      return;
+    }
+
+    const dow = getNyCalendarWeekday(now);
+    const kind = schedulerRunKindForNyWeekday(dow);
+    if (kind === null) {
+      logger.debug(`scheduler_skip_idle_day dow=${dow} etDate=${todayEt}`);
+      return;
+    }
+
+    if (isRunning) {
+      logger.warn(
+        "scheduler_skip_overlap previous tick still running; skipping to avoid overlapping DB writes",
+      );
+      return;
+    }
+
+    const { LOCK_PATH } = getConfig();
+    if (!tryAcquireSchedulerLock(LOCK_PATH)) {
+      return;
+    }
+
+    isRunning = true;
+    let exitCode = 1;
+    try {
+      if (kind === "rebalance") {
+        logger.info(`scheduler_fire kind=rebalance etDate=${todayEt} dow=${dow}`);
+        exitCode = runPipelineWithSteps(stepsForMode("rebalance"), "rebalance", db);
+      } else {
+        logger.info(`scheduler_fire kind=weekday_stop etDate=${todayEt} dow=${dow}`);
+        exitCode = runPipelineWithSteps(stepsForMode("stop"), "stop", db);
+      }
+    } finally {
+      isRunning = false;
+      if (exitCode === 0) {
+        setPipelineState(db, PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE, todayEt);
+      }
+      releaseSchedulerLock(LOCK_PATH);
     }
   } finally {
-    isRunning = false;
-    if (exitCode === 0) {
-      setPipelineState(heldDb, PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE, todayEt);
-    }
-    releaseSchedulerLock(LOCK_PATH);
+    db.close();
   }
 }
 
@@ -266,10 +265,6 @@ function shutdown(): void {
     }
   } catch {
     // config may be unavailable in extreme teardown paths
-  }
-  if (heldDb !== undefined) {
-    heldDb.close();
-    heldDb = undefined;
   }
   process.exit(0);
 }
