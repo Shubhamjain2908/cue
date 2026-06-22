@@ -2,7 +2,12 @@ import { spawnSync } from "node:child_process";
 
 import { createCueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
-import { CUE_LOCALE, CUE_TIME_ZONE } from "../config/cue-timezone.js";
+import {
+  CUE_LOCALE,
+  CUE_TIME_ZONE,
+  getEtCalendarParts,
+  weekdayUtcForNyCalendarDate,
+} from "../config/cue-timezone.js";
 import { setPipelineState } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
 
@@ -54,48 +59,10 @@ export const PIPELINE_STEPS: PipelineStep[] = [
 
 const logger = createCueLogger("pipeline");
 
-function getEtCalendarParts(now: Date): { year: number; month: number; day: number } {
-  const dtf = new Intl.DateTimeFormat(CUE_LOCALE, {
-    timeZone: CUE_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = dtf.formatToParts(now);
-  let year = 0;
-  let month = 0;
-  let day = 0;
-  for (const p of parts) {
-    if (p.type === "year") {
-      year = Number(p.value);
-    }
-    if (p.type === "month") {
-      month = Number(p.value);
-    }
-    if (p.type === "day") {
-      day = Number(p.value);
-    }
-  }
-  return { year, month, day };
-}
-
 /** NY civil calendar weekday for an instant (0 Sunday … 6 Saturday). */
 export function getNyCalendarWeekday(now: Date): number {
   const { year, month, day } = getEtCalendarParts(now);
   return weekdayUtcForNyCalendarDate(year, month, day);
-}
-
-/** Gregorian weekday for an America/New_York calendar date (0 Sunday … 6 Saturday). */
-export function weekdayUtcForNyCalendarDate(year: number, month: number, day: number): number {
-  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
-}
-
-export function formatEtYmd(now: Date): string {
-  const { year, month, day } = getEtCalendarParts(now);
-  const y = String(year).padStart(4, "0");
-  const m = String(month).padStart(2, "0");
-  const d = String(day).padStart(2, "0");
-  return `${y}-${m}-${d}`;
 }
 
 export function getEtMinutesSinceMidnight(now: Date): number {
