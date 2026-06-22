@@ -13,6 +13,7 @@ import { getConfig } from "../../config/index.js";
 import { addCalendarDays } from "../../shared/date-utils.js";
 import { persistBacktestArtifacts, runBacktest } from "../runner.js";
 import {
+  BACKTEST_WARMUP_CALENDAR_DAYS,
   DEFAULT_BACKTEST_GATES,
   VIX_MOMENTUM_RESEARCH_STRATEGY,
   VIX_MOMENTUM_THRESHOLDS,
@@ -25,8 +26,7 @@ type SqliteConnection = InstanceType<typeof Database>;
 
 const VIX_TICKER = "^VIX";
 
-/** Calendar padding before `fromDate` so rebalance sessions align with VIX history. */
-const VIX_FETCH_WARMUP_CALENDAR_DAYS = 550;
+/** Calendar padding before `fromDate` so rebalance sessions align with VIX history (reuses BACKTEST_WARMUP_CALENDAR_DAYS). */
 
 type YahooFinanceHandle = InstanceType<typeof YahooFinance>;
 
@@ -80,7 +80,7 @@ export async function fetchVixClosesByDate(
   toDate: string,
   yf: YahooFinanceHandle = new YahooFinance({ suppressNotices: ["yahooSurvey"] }),
 ): Promise<Map<string, number>> {
-  const period1 = addCalendarDays(fromDate, -VIX_FETCH_WARMUP_CALENDAR_DAYS);
+  const period1 = addCalendarDays(fromDate, -BACKTEST_WARMUP_CALENDAR_DAYS);
   const chart = await yf.chart(VIX_TICKER, {
     period1,
     period2: toDate,

@@ -21,6 +21,18 @@ import {
   type MassiveGroupedBar,
 } from "./types.js";
 
+/** Maximum HTTP retries for 429/500/503 responses (1s, 2s, 4s backoff). */
+const MAX_HTTP_RETRIES = 3;
+
+/** Base exponential backoff in ms (actual: 1s, 2s, 4s). */
+const RETRY_BACKOFF_BASE_MS = 1000;
+
+/** HTTP status codes eligible for automatic retry. */
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 503]);
+
+/** Quorum fraction: at least 80% of expected universe tickers must be present. */
+const QUORUM_THRESHOLD = 0.8;
+
 function createHttpClient(): import("axios").AxiosInstance {
   const client = axios.create({ timeout: 120_000 });
 
@@ -39,14 +51,16 @@ function createHttpClient(): import("axios").AxiosInstance {
       config._retryCount = config._retryCount ?? 0;
       const status = axiosError.response?.status;
       const shouldRetry =
-        config._retryCount < 3 && (status === 429 || status === 500 || status === 503);
+        config._retryCount < MAX_HTTP_RETRIES &&
+        status !== undefined &&
+        RETRYABLE_STATUS_CODES.has(status);
 
       if (!shouldRetry) {
         return Promise.reject(error);
       }
 
       config._retryCount += 1;
-      const backoffMs = Math.pow(2, config._retryCount - 1) * 1000; // 1s, 2s, 4s
+      const backoffMs = Math.pow(2, config._retryCount - 1) * RETRY_BACKOFF_BASE_MS; // 1s, 2s, 4s
       await delay(backoffMs);
       return client(config);
     },
@@ -360,7 +374,7 @@ function insertGroupedSessionRows(input: {
   const { db, sessionDate, tickerMask, expectedMaskCount, rows, logger } = input;
 
   const matched = rows.filter((r) => tickerMask.has(r.T.toUpperCase()));
-  const quorum = expectedMaskCount * 0.8;
+  const quorum = expectedMaskCount * QUORUM_THRESHOLD;
   if (matched.length < quorum) {
     logger.warn(
       `Partial data anomaly: expected at least ${String(Math.ceil(quorum))} universe matches for ${sessionDate}, found ${String(matched.length)}. Aborting transactional commit.`,

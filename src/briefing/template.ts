@@ -1,7 +1,7 @@
+import { TG_MAX, TG_TRUNCATE_RESERVE } from "../shared/constants.js";
 import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import type { DashboardPayload, WatchlistBriefingRow } from "./queries.js";
 
-const TG_MAX = 4096;
 /** Three substantive sentences for bench context (Telegram readability). */
 const WATCHLIST_RATIONALE_MAX = 280;
 const TICKER_COL_WIDTH = 5;
@@ -103,7 +103,7 @@ export function formatWatchlistBench(rows: readonly WatchlistBriefingRow[], asOf
   lines.push("", "ⓘ Watch context only — not an entry signal");
   let text = lines.join("\n");
   if (text.length > TG_MAX) {
-    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+    text = `${text.slice(0, TG_MAX - TG_TRUNCATE_RESERVE)}\n…(truncated)`;
   }
   return text;
 }

@@ -33,22 +33,22 @@ import {
 } from "../../shared/market-data-utils.js";
 import { atr, sma } from "../../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG } from "../../enrichers/momentum-types.js";
+import { MS_PER_DAY } from "../../shared/constants.js";
 import { cagrPct, computeBacktestMetrics } from "../metrics.js";
 import type { ClosedBacktestTrade, EquityPoint, RunBacktestResult } from "../types.js";
 import {
+  BACKTEST_INITIAL_CASH_USD,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
   BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
   BACKTEST_POSITION_USD,
+  BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS,
+  BACKTEST_WARMUP_CALENDAR_DAYS,
 } from "../types.js";
 import { loadUniverseTickers } from "../../universe/load-universe.js";
 
 type SqliteConnection = InstanceType<typeof Database>;
 
 const BENCHMARK_TICKER = "QQQ";
-
-const INITIAL_CASH_USD = 2500;
-const WARMUP_CALENDAR_DAYS = 550;
-const SETTLEMENT_EXTENSION_CALENDAR_DAYS = 45;
 
 const GARP_TOP_N = 3;
 const GARP_MAX_CONCURRENT = 3;
@@ -79,7 +79,7 @@ interface QualityBalanceSheetRow {
 type QualitySnapshotFile = Record<string, Record<string, unknown>>;
 
 function calendarDaysHeld(entryDate: string, asOf: string): number {
-  return Math.floor((parseIsoUtcMs(asOf) - parseIsoUtcMs(entryDate)) / 86_400_000);
+  return Math.floor((parseIsoUtcMs(asOf) - parseIsoUtcMs(entryDate)) / MS_PER_DAY);
 }
 
 function benchmarkBuyHoldCagrPct(
@@ -201,7 +201,7 @@ function pickEpsPair(
     return null;
   }
 
-  const gapDays = bestDist / 86_400_000;
+  const gapDays = bestDist / MS_PER_DAY;
   if (gapDays > 540) {
     return null;
   }
@@ -390,8 +390,8 @@ export function runQualityGarpBacktest(
   const universe = loadUniverseTickers();
   const allTickers = [...new Set([...universe, BENCHMARK_TICKER])].sort((a, b) => a.localeCompare(b));
 
-  const dataFrom = addCalendarDays(fromDate, -WARMUP_CALENDAR_DAYS);
-  const dataTo = addCalendarDays(toDate, SETTLEMENT_EXTENSION_CALENDAR_DAYS);
+  const dataFrom = addCalendarDays(fromDate, -BACKTEST_WARMUP_CALENDAR_DAYS);
+  const dataTo = addCalendarDays(toDate, BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS);
   const rows = hydrateDailyPrices(db, allTickers, dataFrom, dataTo);
 
   const byTicker = indexByTicker(rows);
@@ -406,7 +406,7 @@ export function runQualityGarpBacktest(
   const yearFraction = calendarYearFraction(fromDate, toDate);
   const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate);
 
-  let cash = INITIAL_CASH_USD;
+  let cash = BACKTEST_INITIAL_CASH_USD;
   const positions = new Map<string, SimPosition>();
   const pendingExitReason = new Map<string, StrategyExitReason>();
 

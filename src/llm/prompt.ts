@@ -1,5 +1,6 @@
 import type { BuySignalForEnrichmentRow } from "../db/queries.js";
 import { ENRICHMENT_RATIONALE_MAX_CHARS } from "./enrichment.js";
+import { MS_PER_DAY } from "../shared/constants.js";
 import type { YahooEnrichmentDto } from "./yahooContext.js";
 
 export interface EnrichmentPrompt {
@@ -77,5 +78,5 @@ Assess sentiment and provide a one-paragraph rationale for this ${signal.signal}
 export function calendarDaysBetweenIso(a: string, b: string): number {
   const da = new Date(`${a}T12:00:00Z`);
   const db = new Date(`${b}T12:00:00Z`);
-  return Math.round(Math.abs(db.getTime() - da.getTime()) / 86_400_000);
+  return Math.round(Math.abs(db.getTime() - da.getTime()) / MS_PER_DAY);
 }

@@ -24,6 +24,15 @@ export const BACKTEST_MAX_CONCURRENT_POSITIONS = 5;
  */
 export const BACKTEST_STOP_LOSS_FRACTION = 0.05;
 
+/** Default initial cash for backtest simulations. */
+export const BACKTEST_INITIAL_CASH_USD = 2500;
+
+/** Calendar days to pull before `fromDate` for momentum / SMA / ATR windows. */
+export const BACKTEST_WARMUP_CALENDAR_DAYS = 550;
+
+/** Calendar days after `toDate` to simulate pending fills through settlement extension. */
+export const BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS = 45;
+
 /** Increment 3 default — annual risk-free rate for Sharpe (decimal, e.g. 0.04 = 4%). */
 export const BACKTEST_ANNUAL_RISK_FREE_RATE = 0.04;
 
