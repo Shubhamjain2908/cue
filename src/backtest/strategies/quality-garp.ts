@@ -35,8 +35,7 @@ import { MS_PER_DAY } from "../../shared/constants.js";
 import {
   benchmarkBuyHoldCagrPct,
   computeBacktestMetrics,
-  fmtNum,
-  fmtPct,
+  printBacktestSummary,
   type SimPosition,
 } from "../metrics.js";
 import type { ClosedBacktestTrade, EquityPoint, RunBacktestResult } from "../types.js";
@@ -259,35 +258,6 @@ function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitR
   }
 }
 
-function printSummary(
-  label: string,
-  fromDate: string,
-  toDate: string,
-  metrics: ReturnType<typeof computeBacktestMetrics>,
-  benchmarkCagrPct: number | null,
-  expectancyPctPerTrade: number | null,
-): void {
-  const rows: [string, string][] = [
-    ["Strategy", label],
-    ["Window", `${fromDate} → ${toDate}`],
-    ["CAGR (strategy)", fmtPct(metrics.cagrPct)],
-    ["Max drawdown", fmtPct(metrics.maxDrawdownPct)],
-    ["Win rate", fmtPct(metrics.winRatePct)],
-    ["Sharpe (ann.)", fmtNum(metrics.sharpeRatio)],
-    ["Expectancy (avg P&L % / trade)", fmtPct(expectancyPctPerTrade, 3)],
-    ["Total trades", String(metrics.totalTrades)],
-    [`Benchmark (${BENCHMARK_TICKER}) CAGR`, fmtPct(benchmarkCagrPct)],
-  ];
-  const labelW = Math.max(...rows.map(([a]) => a.length));
-  console.log("");
-  console.log("Cue backtest");
-  console.log("-".repeat(Math.max(40, labelW + 28)));
-  for (const [lab, value] of rows) {
-    console.log(`${lab.padEnd(labelW)}  ${value}`);
-  }
-  console.log("-".repeat(Math.max(40, labelW + 28)));
-  console.log("");
-}
 
 function loadEpsHistory(filePath: string): EpsHistoryFile {
   const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
@@ -598,6 +568,13 @@ export function printQualityGarpSummary(
   result: RunBacktestResult,
   expectancyPctPerTrade: number | null,
 ): void {
-  printSummary("quality-garp (research)", fromDate, toDate, result.metrics, result.benchmarkCagrPct, expectancyPctPerTrade);
+  printBacktestSummary({
+    label: "quality-garp (research)",
+    fromDate,
+    toDate,
+    metrics: result.metrics,
+    benchmarkCagrPct: result.benchmarkCagrPct,
+    expectancyPctPerTrade,
+  });
   printQualityGarpGateLine(result.metrics, expectancyPctPerTrade);
 }
