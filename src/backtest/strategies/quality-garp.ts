@@ -27,14 +27,18 @@ import {
   indexByTicker,
   loadQqqTradingDates,
   sliceBarsThrough,
-  upperBoundInclusiveByDate,
-  lowerBoundInclusiveByDate,
   type DailyBar,
 } from "../../shared/market-data-utils.js";
 import { atr, sma } from "../../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG } from "../../enrichers/momentum-types.js";
 import { MS_PER_DAY } from "../../shared/constants.js";
-import { cagrPct, computeBacktestMetrics } from "../metrics.js";
+import {
+  benchmarkBuyHoldCagrPct,
+  computeBacktestMetrics,
+  fmtNum,
+  fmtPct,
+  type SimPosition,
+} from "../metrics.js";
 import type { ClosedBacktestTrade, EquityPoint, RunBacktestResult } from "../types.js";
 import {
   BACKTEST_INITIAL_CASH_USD,
@@ -58,15 +62,6 @@ const DEFAULT_QUALITY_SNAPSHOT = "data/fundamentals/quality_snapshot_20260520.js
 
 type StrategyExitReason = "TRAILING_STOP" | "MAX_HOLD" | "FORCED_CLOSE";
 
-interface SimPosition {
-  entryDate: string;
-  entryFillPrice: number;
-  shares: number;
-  entryAtr: number;
-  currentStop: number;
-  highestCloseSinceEntry: number;
-}
-
 type EpsHistoryFile = Record<string, Record<string, number>>;
 
 /** Parsed FYE row with numeric fields (from `quality_snapshot_*.json`). */
@@ -80,27 +75,6 @@ type QualitySnapshotFile = Record<string, Record<string, unknown>>;
 
 function calendarDaysHeld(entryDate: string, asOf: string): number {
   return Math.floor((parseIsoUtcMs(asOf) - parseIsoUtcMs(entryDate)) / MS_PER_DAY);
-}
-
-function benchmarkBuyHoldCagrPct(
-  qqqBars: readonly DailyBar[],
-  fromDate: string,
-  toDate: string,
-): number | null {
-  if (qqqBars.length === 0) {
-    return null;
-  }
-  const lbFrom = lowerBoundInclusiveByDate(qqqBars, fromDate);
-  const ubTo = upperBoundInclusiveByDate(qqqBars, toDate);
-  if (lbFrom < 0 || ubTo < 0 || lbFrom > ubTo) {
-    return null;
-  }
-  const start = qqqBars[lbFrom]!.close;
-  const end = qqqBars[ubTo]!.close;
-  const spanFrom = qqqBars[lbFrom]!.date;
-  const spanTo = qqqBars[ubTo]!.date;
-  const yf = calendarYearFraction(spanFrom, spanTo);
-  return cagrPct(start, end, yf);
 }
 
 function qualityBookForTicker(
@@ -283,20 +257,6 @@ function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitR
     case "FORCED_CLOSE":
       return "standardTakeProfit";
   }
-}
-
-function fmtPct(x: number | null, digits = 2): string {
-  if (x === null || Number.isNaN(x)) {
-    return "n/a";
-  }
-  return `${x.toFixed(digits)}%`;
-}
-
-function fmtNum(x: number | null, digits = 3): string {
-  if (x === null || Number.isNaN(x)) {
-    return "n/a";
-  }
-  return x.toFixed(digits);
 }
 
 function printSummary(
