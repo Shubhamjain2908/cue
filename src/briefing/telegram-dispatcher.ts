@@ -21,6 +21,7 @@ import {
   type BuyAlertPendingRow,
   type SellAlertPendingRow,
 } from "./queries.js";
+import { TG_MAX, TG_TRUNCATE_RESERVE } from "../shared/constants.js";
 import { formatWatchlistBench } from "./template.js";
 
 const isMain =
@@ -30,8 +31,6 @@ const isMain =
 export type AlertRunMode = "rebalance" | "stop";
 
 const alertRunModeSchema = z.enum(["rebalance", "stop"]);
-
-const TG_MAX = 4096;
 const RULE = "──────────────────────────────";
 const STOP_PROXIMITY_ATR_THRESHOLD = 0.5;
 
@@ -169,7 +168,7 @@ export function formatTelegramSellAlert(row: SellAlertPendingRow): string {
 
   let text = lines.join("\n");
   if (text.length > TG_MAX) {
-    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+        text = `${text.slice(0, TG_MAX - TG_TRUNCATE_RESERVE)}\n…(truncated)`;
   }
   return text;
 }
@@ -234,7 +233,7 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
 
   let text = lines.join("\n");
   if (text.length > TG_MAX) {
-    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+        text = `${text.slice(0, TG_MAX - TG_TRUNCATE_RESERVE)}\n…(truncated)`;
   }
   return text;
 }
@@ -277,7 +276,7 @@ export function formatDailyPulseMessage(opts: {
 
   let text = lines.join("\n");
   if (text.length > TG_MAX) {
-    text = `${text.slice(0, TG_MAX - 20)}\n…(truncated)`;
+        text = `${text.slice(0, TG_MAX - TG_TRUNCATE_RESERVE)}\n…(truncated)`;
   }
   return text;
 }

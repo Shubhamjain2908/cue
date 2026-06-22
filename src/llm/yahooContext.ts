@@ -10,6 +10,8 @@ import path from "node:path";
 import YahooFinance from "yahoo-finance2";
 import { z } from "zod";
 
+import { MS_PER_DAY } from "../shared/constants.js";
+
 import { getConfig } from "../config/index.js";
 
 export type YahooFinanceHandle = InstanceType<typeof YahooFinance>;
@@ -142,7 +144,7 @@ function filterHeadlinesLast7Days(
   items: Array<{ title: string; source?: string; publishedAt?: string }>,
   nowMs: number,
 ): Array<{ title: string; source?: string; publishedAt?: string }> {
-  const cutoff = nowMs - 7 * 86_400_000;
+  const cutoff = nowMs - 7 * MS_PER_DAY;
   return items.filter((h) => {
     if (!h.publishedAt) {
       return true;

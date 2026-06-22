@@ -37,10 +37,13 @@ import type {
   VixRegimeGate,
 } from "./types.js";
 import {
+  BACKTEST_INITIAL_CASH_USD,
   BACKTEST_MAX_CONCURRENT_POSITIONS,
   BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
   BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
   BACKTEST_POSITION_USD,
+  BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS,
+  BACKTEST_WARMUP_CALENDAR_DAYS,
 } from "./types.js";
 import { loadUniverseTickers } from "../universe/load-universe.js";
 import {
@@ -51,14 +54,6 @@ import {
 type SqliteConnection = InstanceType<typeof Database>;
 
 export const BACKTEST_BENCHMARK_TICKER = "QQQ";
-
-const INITIAL_CASH_USD = 2500;
-
-/** Calendar days to pull before `fromDate` for momentum / SMA / ATR windows. */
-const WARMUP_CALENDAR_DAYS = 550;
-
-/** Calendar days after `toDate` to simulate pending fills through settlement extension. */
-const SETTLEMENT_EXTENSION_CALENDAR_DAYS = 45;
 
 interface SimPosition {
   entryDate: string;
@@ -294,8 +289,8 @@ export function runBacktest(
     a.localeCompare(b),
   );
 
-  const dataFrom = addCalendarDays(fromDate, -WARMUP_CALENDAR_DAYS);
-  const dataTo = addCalendarDays(toDate, SETTLEMENT_EXTENSION_CALENDAR_DAYS);
+  const dataFrom = addCalendarDays(fromDate, -BACKTEST_WARMUP_CALENDAR_DAYS);
+  const dataTo = addCalendarDays(toDate, BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS);
   const rows = hydrateDailyPrices(db, allTickers, dataFrom, dataTo);
   if (rows.length === 0) {
     const span = db
@@ -325,7 +320,7 @@ export function runBacktest(
   const yearFraction = calendarYearFraction(fromDate, toDate);
   const benchmarkCagrPct = benchmarkBuyHoldCagrPct(qqqBars, fromDate, toDate);
 
-  let cash = INITIAL_CASH_USD;
+  let cash = BACKTEST_INITIAL_CASH_USD;
   const positions = new Map<string, SimPosition>();
   const pendingExitReason = new Map<string, StrategyExitReason>();
   const pendingBuys = new Map<string, { entryAtr: number }>();
