@@ -1,5 +1,7 @@
 import { getConfig } from "../config/index.js";
 import { openCueDbReadonly, type CueDatabase } from "../db/provider.js";
+import { addCalendarDays } from "../shared/date-utils.js";
+import { loadQqqTradingDates } from "../shared/market-data-utils.js";
 
 export type RegimeLabel = "BULLISH" | "BEARISH";
 
@@ -9,20 +11,6 @@ export interface OpenPositionPulseRow {
   current_stop_loss: number;
   last_close: number | null;
   atr14: number | null;
-}
-
-function parseIsoUtcMs(iso: string): number {
-  const [y, m, d] = iso.split("-").map(Number);
-  return Date.UTC(y!, m! - 1, d!);
-}
-
-function addCalendarDays(iso: string, days: number): string {
-  const ms = parseIsoUtcMs(iso) + days * 86_400_000;
-  const dt = new Date(ms);
-  const y = dt.getUTCFullYear();
-  const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const da = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${mo}-${da}`;
 }
 
 /** Gregorian weekday for an America/New_York calendar date (0 Sunday … 6 Saturday). */
@@ -74,16 +62,6 @@ export function computeNextRebalanceFriday(etToday: string): string {
   }
   const daysUntil = (6 - dow + 7) % 7;
   return addCalendarDays(etToday, daysUntil);
-}
-
-/** QQQ session dates in `[from, to]` (inclusive), ascending. */
-function loadQqqTradingDates(db: CueDatabase, from: string, to: string): string[] {
-  const rows = db
-    .prepare(
-      `SELECT date FROM daily_prices WHERE ticker = 'QQQ' AND date >= @from AND date <= @to ORDER BY date ASC`,
-    )
-    .all({ from, to }) as { date: string }[];
-  return rows.map((r) => r.date);
 }
 
 /** Count QQQ sessions strictly after `fromExclusive` through `asOfInclusive`. */

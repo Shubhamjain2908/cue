@@ -10,6 +10,7 @@ import YahooFinance from "yahoo-finance2";
 import type Database from "better-sqlite3";
 
 import { getConfig } from "../../config/index.js";
+import { addCalendarDays } from "../../shared/date-utils.js";
 import { persistBacktestArtifacts, runBacktest } from "../runner.js";
 import {
   DEFAULT_BACKTEST_GATES,
@@ -28,20 +29,6 @@ const VIX_TICKER = "^VIX";
 const VIX_FETCH_WARMUP_CALENDAR_DAYS = 550;
 
 type YahooFinanceHandle = InstanceType<typeof YahooFinance>;
-
-function parseIsoUtcMs(iso: string): number {
-  const [y, m, d] = iso.split("-").map(Number);
-  return Date.UTC(y!, m! - 1, d!);
-}
-
-function addCalendarDays(iso: string, days: number): string {
-  const ms = parseIsoUtcMs(iso) + days * 86_400_000;
-  const dt = new Date(ms);
-  const y = dt.getUTCFullYear();
-  const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const da = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${mo}-${da}`;
-}
 
 function mean(nums: readonly number[]): number | null {
   if (nums.length === 0) {
