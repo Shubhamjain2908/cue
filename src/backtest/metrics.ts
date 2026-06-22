@@ -216,7 +216,7 @@ export function benchmarkBuyHoldCagrPct(
   return cagrPct(start, end, yf);
 }
 
-// ── Shared print summary ──────────────────────────────────────────────────
+// ── Shared exit-reason types and helpers ──────────────────────────────────
 
 /** Strategy exit reasons tracked in the exit-bucket breakdown. */
 export type BacktestStrategyExitReason =
@@ -224,6 +224,77 @@ export type BacktestStrategyExitReason =
   | "MAX_HOLD"
   | "REBALANCE_DROP"
   | "FORCED_CLOSE";
+
+/** Map a strategy exit reason to the canonical ClosedBacktestTrade exit-reason label. */
+export function toBacktestExitReason(r: BacktestStrategyExitReason): ClosedBacktestTrade["exitReason"] {
+  switch (r) {
+    case "TRAILING_STOP":
+      return "gapOrStop";
+    case "MAX_HOLD":
+      return "maxHoldDays";
+    case "REBALANCE_DROP":
+      return "standardTrendBreak";
+    case "FORCED_CLOSE":
+      return "standardTakeProfit";
+  }
+}
+
+/** Inverse of toBacktestExitReason: map a DB exit reason back to a strategy label. */
+export function strategyBucketFromClosedTrade(t: ClosedBacktestTrade): BacktestStrategyExitReason {
+  switch (t.exitReason) {
+    case "gapOrStop":
+      return "TRAILING_STOP";
+    case "maxHoldDays":
+      return "MAX_HOLD";
+    case "standardTrendBreak":
+      return "REBALANCE_DROP";
+    case "standardTakeProfit":
+      return "FORCED_CLOSE";
+  }
+}
+
+/** Calendar days between exit and entry (UTC midnight ISO dates). */
+export function calendarHoldDaysHeld(entryDate: string, exitDate: string): number {
+  return (new Date(exitDate).getTime() - new Date(entryDate).getTime()) / (1000 * 60 * 60 * 24);
+}
+
+/** Aggregated stats for a single exit-reason bucket. */
+export interface BacktestExitBucketAgg {
+  count: number;
+  sumPnlPct: number;
+  sumHoldDays: number;
+}
+
+function emptyExitBucketAgg(): Record<BacktestStrategyExitReason, BacktestExitBucketAgg> {
+  return {
+    TRAILING_STOP: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+    MAX_HOLD: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+    REBALANCE_DROP: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+    FORCED_CLOSE: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
+  };
+}
+
+/** Aggregate closed trades into exit-reason buckets for the summary breakdown. */
+export function aggregateExitBuckets(
+  closedTrades: readonly ClosedBacktestTrade[],
+): Record<BacktestStrategyExitReason, BacktestExitBucketAgg> {
+  const out = emptyExitBucketAgg();
+  for (const t of closedTrades) {
+    const bucket = strategyBucketFromClosedTrade(t);
+    const pnlPct =
+      t.entryFillPrice !== 0
+        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+        : 0;
+    const holdDays = calendarHoldDaysHeld(t.entryDate, t.exitDate);
+    const cell = out[bucket];
+    cell.count += 1;
+    cell.sumPnlPct += pnlPct;
+    cell.sumHoldDays += holdDays;
+  }
+  return out;
+}
+
+// ── Shared print summary ──────────────────────────────────────────────────
 
 /** Aggregated stats for a single exit-reason bucket. */
 export interface BacktestExitBucketAgg {

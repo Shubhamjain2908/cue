@@ -36,6 +36,8 @@ import {
   benchmarkBuyHoldCagrPct,
   computeBacktestMetrics,
   printBacktestSummary,
+  toBacktestExitReason,
+  type BacktestStrategyExitReason,
   type SimPosition,
 } from "../metrics.js";
 import type { ClosedBacktestTrade, EquityPoint, RunBacktestResult } from "../types.js";
@@ -59,7 +61,7 @@ const GARP_MAX_CONCURRENT = 3;
 const DEFAULT_EPS_HISTORY = "data/fundamentals/eps_history_20260520.json";
 const DEFAULT_QUALITY_SNAPSHOT = "data/fundamentals/quality_snapshot_20260520.json";
 
-type StrategyExitReason = "TRAILING_STOP" | "MAX_HOLD" | "FORCED_CLOSE";
+type StrategyExitReason = BacktestStrategyExitReason;
 
 type EpsHistoryFile = Record<string, Record<string, number>>;
 
@@ -245,17 +247,6 @@ function computePegSurvivors(
 
   out.sort((a, b) => a.peg - b.peg);
   return out.slice(0, GARP_TOP_N);
-}
-
-function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitReason"] {
-  switch (r) {
-    case "TRAILING_STOP":
-      return "gapOrStop";
-    case "MAX_HOLD":
-      return "maxHoldDays";
-    case "FORCED_CLOSE":
-      return "standardTakeProfit";
-  }
 }
 
 

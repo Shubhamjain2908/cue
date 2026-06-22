@@ -10,7 +10,6 @@ import {
   calendarYearFraction,
   compareIsoDate,
   isoWeekdayMon1ToFri5,
-  parseIsoUtcMs,
 } from "../shared/date-utils.js";
 import {
   closeMarkAsOf,
@@ -26,9 +25,12 @@ import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
 import { atr, sma } from "../enrichers/indicators.js";
 import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
 import {
+  aggregateExitBuckets,
   benchmarkBuyHoldCagrPct,
   computeBacktestMetrics,
   printBacktestSummary,
+  toBacktestExitReason,
+  type BacktestStrategyExitReason,
   type SimPosition,
 } from "./metrics.js";
 import { openCueDb } from "../db/provider.js";
@@ -58,11 +60,7 @@ type SqliteConnection = InstanceType<typeof Database>;
 
 export const BACKTEST_BENCHMARK_TICKER = "QQQ";
 
-type StrategyExitReason =
-  | "TRAILING_STOP"
-  | "MAX_HOLD"
-  | "REBALANCE_DROP"
-  | "FORCED_CLOSE";
+
 
 function tradingDaysHeld(
   sortedDates: readonly string[],
@@ -83,72 +81,6 @@ function tradingDaysHeld(
 }
 
 
-
-function toBacktestExitReason(r: StrategyExitReason): ClosedBacktestTrade["exitReason"] {
-  switch (r) {
-    case "TRAILING_STOP":
-      return "gapOrStop";
-    case "MAX_HOLD":
-      return "maxHoldDays";
-    case "REBALANCE_DROP":
-      return "standardTrendBreak";
-    case "FORCED_CLOSE":
-      return "standardTakeProfit";
-  }
-}
-
-function strategyBucketFromClosedTrade(t: ClosedBacktestTrade): StrategyExitReason {
-  switch (t.exitReason) {
-    case "gapOrStop":
-      return "TRAILING_STOP";
-    case "maxHoldDays":
-      return "MAX_HOLD";
-    case "standardTrendBreak":
-      return "REBALANCE_DROP";
-    case "standardTakeProfit":
-      return "FORCED_CLOSE";
-  }
-}
-
-/** Calendar days between exit and entry (UTC midnight ISO dates). */
-function calendarHoldDaysHeld(entryDate: string, exitDate: string): number {
-  return (parseIsoUtcMs(exitDate) - parseIsoUtcMs(entryDate)) / (1000 * 60 * 60 * 24);
-}
-
-interface ExitBucketAgg {
-  count: number;
-  sumPnlPct: number;
-  sumHoldDays: number;
-}
-
-function emptyExitBucketAgg(): Record<StrategyExitReason, ExitBucketAgg> {
-  return {
-    TRAILING_STOP: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
-    MAX_HOLD: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
-    REBALANCE_DROP: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
-    FORCED_CLOSE: { count: 0, sumPnlPct: 0, sumHoldDays: 0 },
-  };
-}
-
-function aggregateExitBuckets(closedTrades: readonly ClosedBacktestTrade[]): Record<
-  StrategyExitReason,
-  ExitBucketAgg
-> {
-  const out = emptyExitBucketAgg();
-  for (const t of closedTrades) {
-    const bucket = strategyBucketFromClosedTrade(t);
-    const pnlPct =
-      t.entryFillPrice !== 0
-        ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
-        : 0;
-    const holdDays = calendarHoldDaysHeld(t.entryDate, t.exitDate);
-    const cell = out[bucket];
-    cell.count += 1;
-    cell.sumPnlPct += pnlPct;
-    cell.sumHoldDays += holdDays;
-  }
-  return out;
-}
 
 function mean(nums: readonly number[]): number | null {
   if (nums.length === 0) {
@@ -239,13 +171,13 @@ export function runBacktest(
 
   let cash = BACKTEST_INITIAL_CASH_USD;
   const positions = new Map<string, SimPosition>();
-  const pendingExitReason = new Map<string, StrategyExitReason>();
+  const pendingExitReason = new Map<string, BacktestStrategyExitReason>();
   const pendingBuys = new Map<string, { entryAtr: number }>();
 
   const equityPoints: EquityPoint[] = [];
   const closedTrades: ClosedBacktestTrade[] = [];
 
-  const exitBuckets: Record<StrategyExitReason, number> = {
+  const exitBuckets: Record<BacktestStrategyExitReason, number> = {
     TRAILING_STOP: 0,
     MAX_HOLD: 0,
     REBALANCE_DROP: 0,
@@ -261,7 +193,7 @@ export function runBacktest(
     pos: SimPosition,
     exitDate: string,
     exitFillPrice: number,
-    reason: StrategyExitReason,
+    reason: BacktestStrategyExitReason,
   ): void => {
     const proceeds = pos.shares * exitFillPrice;
     cash += proceeds;
