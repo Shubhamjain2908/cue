@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractDashboardPayloadFromDb,
+  getLivePerformanceByExitReason,
+  getLivePerformanceSummary,
   getMomentumBacktestSummary,
   listBuySignalsReadyToAlert,
 } from "../../src/briefing/queries.js";
@@ -296,6 +298,78 @@ describe("extractDashboardPayloadFromDb", () => {
 
     expect(byTicker.ALRT!.alerted_at).toBe(alertedAt);
     expect(byTicker.PEND!.alerted_at).toBeNull();
+
+    db.close();
+  });
+});
+
+describe("live performance queries", () => {
+  function insertClosedPosition(
+    db: SqliteConnection,
+    row: {
+      ticker: string;
+      entryDate: string;
+      exitDate: string;
+      entryPrice: number;
+      exitPrice: number;
+      exitReason: string;
+    },
+  ): void {
+    const ins = insertSignal(db, {
+      ticker: row.ticker,
+      date: row.entryDate,
+      signal: "BUY",
+      price: row.entryPrice,
+      momentumRank: 1,
+      universeRankedCount: 10,
+      momentum12_1Return: 0.5,
+      atr14: 2,
+      initialAtrStop: row.entryPrice * 0.9,
+    });
+    insertPosition(db, {
+      signalId: Number(ins.lastInsertRowid),
+      entryDate: row.entryDate,
+      entryPrice: row.entryPrice,
+      status: "OPEN",
+    });
+    db.prepare(
+      `UPDATE positions SET exit_date = @exitDate, exit_price = @exitPrice, exit_reason = @exitReason, status = 'CLOSED'
+       WHERE signal_id = @signalId`,
+    ).run({
+      exitDate: row.exitDate,
+      exitPrice: row.exitPrice,
+      exitReason: row.exitReason,
+      signalId: Number(ins.lastInsertRowid),
+    });
+  }
+
+  it("excludes REBALANCE_DROP from aggregate live performance", () => {
+    const db = openMemoryDb();
+    insertClosedPosition(db, {
+      ticker: "STOP",
+      entryDate: "2026-01-01",
+      exitDate: "2026-02-01",
+      entryPrice: 100,
+      exitPrice: 120,
+      exitReason: "TRAILING_STOP",
+    });
+    insertClosedPosition(db, {
+      ticker: "DROP",
+      entryDate: "2026-01-01",
+      exitDate: "2026-02-01",
+      entryPrice: 100,
+      exitPrice: 103,
+      exitReason: "REBALANCE_DROP",
+    });
+
+    const summary = getLivePerformanceSummary(db);
+    expect(summary.closed_trades).toBe(1);
+    expect(summary.avg_pnl_pct).toBeCloseTo(20, 5);
+
+    const byExit = getLivePerformanceByExitReason(db);
+    expect(byExit).toHaveLength(2);
+    const drop = byExit.find((r) => r.exit_reason === "REBALANCE_DROP");
+    expect(drop?.trades).toBe(1);
 
     db.close();
   });

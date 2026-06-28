@@ -1,5 +1,7 @@
 import { TG_MAX, TG_TRUNCATE_RESERVE } from "../shared/constants.js";
 import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
+import { formatMomentumRankLabel } from "../shared/momentum-rank-label.js";
+import { loadUniverseTickers } from "../universe/load-universe.js";
 import type { DashboardPayload, WatchlistBriefingRow } from "./queries.js";
 
 /** Three substantive sentences for bench context (Telegram readability). */
@@ -83,7 +85,12 @@ function formatWatchlistHeadLine(row: WatchlistBriefingRow): string {
   const sentiment = formatSentimentWithConfidence(row.sentiment, row.confidence);
   const sector = formatWatchlistSector(row.sector);
   const earnings = formatWatchlistEarnings(row.earningsFlag, row.earningsDate);
-  return `#${row.momentumRank}  ${ticker} ${price}  12-1: ${mom}  ${sentiment} | ${sector} | ${earnings}`;
+  const rankLabel = formatMomentumRankLabel(
+    row.momentumRank,
+    row.universeRankedCount ?? loadUniverseTickers().length,
+    loadUniverseTickers().length,
+  );
+  return `${rankLabel}  ${ticker} ${price}  12-1: ${mom}  ${sentiment} | ${sector} | ${earnings}`;
 }
 
 /** Telegram "Next in Rank" bench — read-only context, not an entry signal. */
@@ -279,8 +286,10 @@ export function renderHtml(payload: DashboardPayload): string {
     }
 
     // Live Performance
+    const exitReasonLabel = r => ({ TRAILING_STOP: 'Trailing stop', REBALANCE_DROP: 'Rebalance drop', MAX_HOLD: 'Max hold', MANUAL: 'Manual', TIME_EXIT: 'Max hold' })[r] ?? (r ?? '—');
     const lp = d.live_performance_summary;
     const lpConf = d.live_performance_by_confidence;
+    const lpExit = d.live_performance_by_exit_reason;
     const fmtPct = v => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
     const fmtPctPlain = v => v == null ? '—' : v.toFixed(2) + '%';
     const fmtWinRate = v => v == null ? '—' : v.toFixed(1) + '%';
@@ -292,11 +301,11 @@ export function renderHtml(payload: DashboardPayload): string {
     let livePerfHtml;
     if (lp.closed_trades === 0) {
       livePerfHtml =
-        '<p style="color:var(--muted);margin:0">No strategy exits recorded yet.</p>' +
+        '<p style="color:var(--muted);margin:0">No stop-quality exits recorded yet (rotation drops shown below).</p>' +
         formatBacktestRef(btRef);
     } else {
       livePerfHtml =
-        '<h3 style="font-size:0.9rem;font-weight:600;margin:0 0 12px">Overall</h3>' +
+        '<h3 style="font-size:0.9rem;font-weight:600;margin:0 0 12px">Overall (excludes rotation drops)</h3>' +
         '<table><thead><tr><th>Metric</th><th>Live</th><th>Backtest (ref)</th></tr></thead><tbody>' +
         '<tr><td>Closed trades</td><td>' + lp.closed_trades + '</td><td>' + (btRef ? btRef.total_trades : '—') + '</td></tr>' +
         '<tr><td>Expectancy</td><td>' + fmtPct(lp.avg_pnl_pct) + '</td><td>' + btExpRef + '</td></tr>' +
@@ -307,7 +316,7 @@ export function renderHtml(payload: DashboardPayload): string {
 
       livePerfHtml += '<h3 style="font-size:0.9rem;font-weight:600;margin:20px 0 12px">P&amp;L by confidence tier</h3>';
       if (lpConf.length === 0) {
-        livePerfHtml += '<p style="color:var(--muted)">No closed trades with recorded exit prices yet.</p>';
+        livePerfHtml += '<p style="color:var(--muted)">No closed trades with enrichment confidence yet.</p>';
       } else {
         livePerfHtml += '<table><thead><tr><th>Confidence</th><th>Trades</th><th>Avg P&amp;L %</th></tr></thead><tbody>' +
           lpConf.map(r =>
@@ -317,11 +326,19 @@ export function renderHtml(payload: DashboardPayload): string {
       }
       livePerfHtml += '<p class="meta" style="margin-top:16px;margin-bottom:0">Confidence tiers meaningful at ≥10 trades each.</p>';
     }
+
+    if (lpExit.length > 0) {
+      livePerfHtml += '<h3 style="font-size:0.9rem;font-weight:600;margin:20px 0 12px">Exit reason breakdown</h3>' +
+        '<table><thead><tr><th>Exit reason</th><th>Trades</th><th>Avg P&amp;L %</th></tr></thead><tbody>' +
+        lpExit.map(r =>
+          '<tr><td>' + exitReasonLabel(r.exit_reason) + '</td><td>' + r.trades + '</td><td>' + fmtPctPlain(r.avg_pnl_pct) + '</td></tr>'
+        ).join('') +
+        '</tbody></table>';
+    }
     document.getElementById('live-perf-section').innerHTML = livePerfHtml;
 
     // Signals table
     const sentimentColor = s => s === 'BULLISH' ? 'var(--green)' : s === 'BEARISH' ? 'var(--red)' : 'var(--amber)';
-    const exitReasonLabel = r => ({ TRAILING_STOP: 'Trailing stop', REBALANCE_DROP: 'Rebalance drop', MAX_HOLD: 'Max hold', MANUAL: 'Manual' })[r] ?? (r ?? '—');
     document.getElementById('signals-body').innerHTML = d.recent_signals.map(s => {
       let sectorCell, sentimentCell, rationaleCell;
       if (s.signal_type === 'SELL') {

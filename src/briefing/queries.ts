@@ -259,6 +259,7 @@ export interface WatchlistBriefingRow {
   id: number;
   ticker: string;
   momentumRank: number;
+  universeRankedCount?: number;
   price: number;
   atr14: number | null;
   momentum12_1Return: number;
@@ -284,6 +285,7 @@ export function listWatchlistSignalsForBriefing(
       s.id AS id,
       s.ticker AS ticker,
       s.momentum_rank AS momentumRank,
+      s.universe_ranked_count AS universeRankedCount,
       s.price AS price,
       s.atr14 AS atr14,
       s.momentum_12_1_return AS momentum12_1Return,
@@ -434,7 +436,7 @@ export function getLivePerformanceSummary(db: CueDatabase): LivePerformanceSumma
       WHERE status != 'OPEN'
         AND exit_price IS NOT NULL
         AND exit_price > 0
-        AND exit_reason != 'MANUAL'
+        AND exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
         AND exit_date > entry_date
     `,
     )
@@ -460,13 +462,41 @@ export function getLivePerformanceByConfidence(db: CueDatabase): LivePerformance
       WHERE p.status != 'OPEN'
         AND p.exit_price IS NOT NULL
         AND p.exit_price > 0
-        AND p.exit_reason != 'MANUAL'
+        AND p.exit_reason NOT IN ('MANUAL', 'REBALANCE_DROP')
         AND p.exit_date > p.entry_date
       GROUP BY e.confidence
       ORDER BY avg_pnl_pct DESC
     `,
     )
     .all() as LivePerformanceByConfidenceRow[];
+}
+
+export interface LivePerformanceByExitReasonRow {
+  exit_reason: string;
+  trades: number;
+  avg_pnl_pct: number;
+}
+
+/** Closed live trades — avg P&L by exit reason (dashboard breakout; includes REBALANCE_DROP). */
+export function getLivePerformanceByExitReason(db: CueDatabase): LivePerformanceByExitReasonRow[] {
+  return db
+    .prepare(
+      `
+      SELECT exit_reason,
+             COUNT(*) AS trades,
+             ROUND(AVG((exit_price - entry_price) / entry_price * 100), 2) AS avg_pnl_pct
+      FROM positions
+      WHERE status != 'OPEN'
+        AND exit_price IS NOT NULL
+        AND exit_price > 0
+        AND exit_reason IS NOT NULL
+        AND exit_reason != 'MANUAL'
+        AND exit_date > entry_date
+      GROUP BY exit_reason
+      ORDER BY trades DESC
+    `,
+    )
+    .all() as LivePerformanceByExitReasonRow[];
 }
 
 export interface DashboardPayload {
@@ -478,6 +508,7 @@ export interface DashboardPayload {
   sector_allocation: { sector: string; count: number }[];
   live_performance_summary: LivePerformanceSummary;
   live_performance_by_confidence: LivePerformanceByConfidenceRow[];
+  live_performance_by_exit_reason: LivePerformanceByExitReasonRow[];
 }
 
 interface RegimeRow {
@@ -621,6 +652,7 @@ export function extractDashboardPayloadFromDb(db: CueDatabase): DashboardPayload
       sector_allocation,
       live_performance_summary: getLivePerformanceSummary(db),
       live_performance_by_confidence: getLivePerformanceByConfidence(db),
+      live_performance_by_exit_reason: getLivePerformanceByExitReason(db),
     };
 }
 

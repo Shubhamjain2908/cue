@@ -6,6 +6,8 @@ import { z } from "zod";
 
 import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
+import { formatMomentumRankLabel } from "../shared/momentum-rank-label.js";
+import { loadUniverseTickers } from "../universe/load-universe.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
 import { markSignalAlerted, markWatchlistSignalsAlerted } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
@@ -189,7 +191,10 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
   const sentiment = row.sentiment?.toUpperCase() ?? "";
   const confidence = row.confidence?.toUpperCase() ?? "";
 
-  let header = `🟢 BUY ${row.ticker}  |  Rank #${row.momentumRank}/${row.universeRankedCount}`;
+  const universeTotal = loadUniverseTickers().length;
+  const rankLabel = formatMomentumRankLabel(row.momentumRank, row.universeRankedCount, universeTotal);
+
+  let header = `🟢 BUY ${row.ticker}  |  Rank ${rankLabel}`;
   if (sentiment || confidence) {
     const sc = [sentiment, confidence].filter((s) => s.length > 0).join(" ");
     header += `  |  ${sc}`;
