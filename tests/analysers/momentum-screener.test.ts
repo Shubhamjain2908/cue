@@ -327,6 +327,30 @@ describe("runLiveScreen WATCHLIST bench", () => {
     db.close();
   });
 
+  it("rebalance ranks eligible tickers only when one universe name lacks 252-bar history", () => {
+    const db = openTestDb();
+    seedUniverse(db, "2099-12-31");
+    const asOf = latestQqqDate(db);
+    const keepFrom = qqqDateOffset(db, asOf, 20);
+    db.prepare(`DELETE FROM daily_prices WHERE ticker = 'HHH' AND date < ?`).run(keepFrom);
+
+    runLiveScreen(db, "rebalance", { asOf });
+
+    const buy = db
+      .prepare(
+        `SELECT universe_ranked_count AS n FROM signals WHERE signal = 'BUY' ORDER BY momentum_rank ASC LIMIT 1`,
+      )
+      .get() as { n: number };
+    expect(buy.n).toBe(UNIVERSE_TICKERS.length - 1);
+
+    const watchlist = db
+      .prepare(`SELECT COUNT(*) AS c FROM signals WHERE signal = 'WATCHLIST'`)
+      .get() as { c: number };
+    expect(watchlist.c).toBeGreaterThan(0);
+
+    db.close();
+  });
+
   it("writes no WATCHLIST rows when WATCHLIST_BENCH_DEPTH=0", () => {
     process.env.WATCHLIST_BENCH_DEPTH = "0";
     resetConfigCache();
