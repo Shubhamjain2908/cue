@@ -105,7 +105,7 @@ Momentum screen outputs: actionable **BUY** / **SELL**, plus rebalance-only **WA
 | `price` | REAL at signal |
 | `alerted` | 0/1 — Telegram / brief idempotency (BUY alerts and watchlist bench) |
 | `alerted_at` | TEXT — ISO timestamp written when `alerted=1` is set; NULL if not yet alerted |
-| `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context (required for BUY and WATCHLIST at insert) |
+| `momentum_rank`, `universe_ranked_count`, `momentum_12_1_return` | Cross-sectional rank context (required for BUY and WATCHLIST at insert). **`universe_ranked_count`** = tickers **eligible** for ranking at insert (≥252 bars through `asOf`); may be &lt; full universe when history is short — rank labels use `formatMomentumRankLabel()` |
 | `atr14`, `initial_atr_stop` | Stop ladder inputs; `initial_atr_stop` set on BUY; optional on WATCHLIST |
 
 **Written by:** `cue screen` (`momentum-screener.ts`). **WATCHLIST** rows: **Sunday rebalance** path only, ranks `topN+1` … `topN+WATCHLIST_BENCH_DEPTH` (default depth 5 → ranks 4–8 when `topN=3`). No `positions` row. `WATCHLIST_BENCH_DEPTH=0` disables WATCHLIST writes and bench Telegram.
@@ -147,7 +147,7 @@ Open and closed book from **BUY** signals only (not WATCHLIST).
 
 **Live exit mapping:** `TRAILING_STOP` → `TRAILING_STOP`; `MAX_HOLD` → `TIME_EXIT`; `REBALANCE_DROP` → `REBALANCE_DROP`; `FORCED_CLOSE` → `MANUAL`.
 
-**Dashboard Live Performance** (`src/briefing/queries.ts`): closed-position aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')` so rotation drops do not appear as strategy P&amp;L. Zero-state copy uses **`formatBacktestRef`** from the locked momentum backtest row (see `backtest_runs` below).
+**Dashboard Live Performance** (`src/briefing/queries.ts`): `getLivePerformanceSummary` / `getLivePerformanceByConfidence` **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')` and same-day artefacts so rotation drops do not appear as strategy P&amp;L. **`getLivePerformanceByExitReason`** is a separate breakout (includes `REBALANCE_DROP`, excludes `MANUAL` only). Zero-state copy uses **`formatBacktestRef`** from the locked momentum backtest row (see `backtest_runs` below).
 
 ### `stop_movements`
 
