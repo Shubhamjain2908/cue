@@ -55,6 +55,48 @@ const LOCKED_TOP_N = 3 as const;
 
 type ExitReason = "TRAILING_STOP" | "MAX_HOLD" | "REBALANCE_DROP";
 
+interface RankingCoverageExcluded {
+  ticker: string;
+  bars: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  reason: "missing_series" | "insufficient_history";
+}
+
+/** Universe tickers excluded from 12-1 ranking (missing bars or < lookbackDays history). */
+export function collectRankingExclusions(input: {
+  universe: readonly string[];
+  byTicker: Map<string, DailyBar[]>;
+  asOf: string;
+  lookbackDays: number;
+}): RankingCoverageExcluded[] {
+  const excluded: RankingCoverageExcluded[] = [];
+  for (const ticker of input.universe) {
+    const series = input.byTicker.get(ticker);
+    if (!series) {
+      excluded.push({
+        ticker,
+        bars: 0,
+        firstDate: null,
+        lastDate: null,
+        reason: "missing_series",
+      });
+      continue;
+    }
+    const slice = sliceBarsThrough(series, input.asOf);
+    if (!slice || slice.length < input.lookbackDays) {
+      excluded.push({
+        ticker,
+        bars: slice?.length ?? 0,
+        firstDate: slice?.[0]?.date ?? null,
+        lastDate: slice?.at(-1)?.date ?? null,
+        reason: "insufficient_history",
+      });
+    }
+  }
+  return excluded;
+}
+
 /** As-of bar from day map, else last bar on or before `asOf` in the ticker series. */
 function resolveAsOfBar(
   ticker: string,
@@ -361,6 +403,12 @@ export function runLiveScreen(
       );
     }
 
+    const rankingExclusions = collectRankingExclusions({
+      universe,
+      byTicker,
+      asOf,
+      lookbackDays: cfg.lookbackDays,
+    });
     const priceMap = new Map<string, number[]>();
     for (const t of universe) {
       const series = byTicker.get(t);
@@ -379,10 +427,27 @@ export function runLiveScreen(
       skipDays: cfg.skipDays,
       topN: cfg.topN,
     });
+    const eligibleCount = fullRanked.length;
+    const universeTotal = universe.length;
+    if (rankingExclusions.length > 0) {
+      cueLogger.warn(
+        `screen: ranking coverage ${String(eligibleCount)}/${String(universeTotal)} eligible — ` +
+          `${String(rankingExclusions.length)} excluded (<${String(cfg.lookbackDays)} bars)`,
+        {
+          excluded: rankingExclusions.map((e) => ({
+            ticker: e.ticker,
+            bars: e.bars,
+            firstDate: e.firstDate,
+            lastDate: e.lastDate,
+            reason: e.reason,
+          })),
+        },
+      );
+    }
     const quorum = universe.length * 0.8;
-    if (fullRanked.length < quorum) {
+    if (eligibleCount < quorum) {
       console.warn(
-        `screen: partial cross-section — ranked ${String(fullRanked.length)} of ${String(universe.length)} universe tickers (12-1 needs full history; quorum ~${String(Math.ceil(quorum))})`,
+        `screen: partial cross-section — ranked ${String(eligibleCount)} of ${String(universeTotal)} universe tickers (12-1 needs full history; quorum ~${String(Math.ceil(quorum))})`,
       );
     }
     const topSet = new Set(fullRanked.slice(0, effectiveTopN).map((r) => r.ticker));
@@ -630,6 +695,10 @@ export function runLiveScreen(
       `${baseSummary} rankedUniverse=skipped (intentional stop-mode execution; cross-sectional ranking not run)`,
     );
     cueLogger.info(baseSummary);
+  } else if (mode === "rebalance") {
+    cueLogger.info(
+      `${baseSummary} rankedEligible=${String(fullRanked.length)}/${String(universe.length)} universe`,
+    );
   } else {
     cueLogger.info(`${baseSummary} rankedUniverse=${fullRanked.length}`);
   }

@@ -135,8 +135,9 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: previous ET weekday session, T-1; Mon → Fri), `--ticker SYM`, `--force` refetches that session |
 | `pnpm run cue -- adjust-splits` | Yahoo split events → `corporate_actions`; adjusts OPEN `positions` / linked `signals` and retroactive `daily_prices` (OHLC ÷ factor, volume × factor) for `date < ex_date`. Idempotent via `corporate_actions` UNIQUE |
 | `pnpm run cue -- backfill-splits` | One-shot: replay existing `corporate_actions` rows against `daily_prices` (idempotent via `pipeline_state`; run once when the ledger has historical splits) |
+| `pnpm run cue -- backfill-prices` | Deep grouped-daily OHLCV backfill for universe + QQQ over a date range (fills &lt;252-bar ranking gaps). Options: `--from YYYY-MM-DD` (default: 600 calendar days before `--to`), `--to YYYY-MM-DD` (default: latest QQQ date in DB), `--min-bars N` (coverage report threshold, default 252) |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache + `fundamentals_cache`. Default: 3 uncached tickers/run (rotates through universe). `--force` = full universe in one run; `--limit N` = larger batch; `--ticker SYM` = one name |
-| `pnpm run cue -- screen` | Momentum screener / ranking. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
+| `pnpm run cue -- screen` | Momentum screener / ranking. Ranks eligible tickers only (&lt;252 bars excluded, logged); alerts show `#rank of eligible (universe total)`. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
 
 ### LLM & brief

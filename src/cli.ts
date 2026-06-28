@@ -74,6 +74,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   ingest               Nasdaq 100 (+ QQQ) EOD OHLCV via Massive
   adjust-splits        Adjust open position price levels for recent stock splits (Yahoo)
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
+  backfill-prices      Deep grouped-daily OHLCV backfill for universe ranking gaps
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUY and WATCHLIST signals
   refresh-thesis       Daily position thesis refresh (P7-F; gated on 15+ genuine closed trades)
@@ -192,6 +193,26 @@ enrichFundamentals.action(
       force: o.force,
       date: o.date,
       limit: Number.isFinite(limit) ? limit : 3,
+    });
+  }),
+);
+
+const backfillPrices = program
+  .command("backfill-prices")
+  .description("Deep grouped-daily OHLCV backfill for universe + QQQ (fills <252-bar gaps)")
+  .option("--from <ymd>", "start date YYYY-MM-DD (default: 600 calendar days before --to)")
+  .option("--to <ymd>", "end date YYYY-MM-DD (default: latest QQQ date in DB)")
+  .option("--min-bars <n>", "coverage report threshold (default 252)", "252");
+
+backfillPrices.action(
+  wrap("backfill-prices", async () => {
+    const o = backfillPrices.opts<{ from?: string; to?: string; minBars: string }>();
+    const { runHistoricalPriceBackfill } = await import("./ingestors/massive-price-ingestor.js");
+    const minBars = Number.parseInt(o.minBars, 10);
+    await runHistoricalPriceBackfill({
+      from: o.from,
+      to: o.to,
+      minBars: Number.isFinite(minBars) ? minBars : 252,
     });
   }),
 );

@@ -49,6 +49,7 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 - **Entry:** top **3** names by momentum rank on rebalance.
 - **Rebalance cadence:** **Sunday 06:00–06:10 ET** (`REBALANCE_DAY_OF_WEEK = 0` in `daily-workflow.ts`) using **Friday** session OHLCV (T-1 from Massive); **Tue–Sat** runs **execute-stops** at **06:00–06:10 ET** (next-morning cadence; Monday is idle).
 - **Regime filter:** **QQQ close > SMA(200)**. If false → **suppress new BUYs**; SELL / stop paths still run.
+- **Ranking coverage:** cross-sectional rank uses only tickers with **≥252** bars through `asOf`. Tickers with insufficient history are **excluded** (warn-logged with bar counts); rebalance/stops/Telegram **never hard-fail** on partial coverage. `universe_ranked_count` on `signals` = eligible count; alerts/dashboard use `#N of eligible (universe total)` when eligible &lt; universe (see `src/shared/momentum-rank-label.ts`).
 
 ### 3.2 ATR trailing stop (close-based)
 
@@ -59,7 +60,7 @@ momentum_12_1_return = (close[today-21] - close[today-252]) / close[today-252]
 
 **Failsafe:** **`MAX_HOLD_DAYS`** (env, default **40**).
 
-**Exit reasons (conceptual):** trailing stop, initial stop, time exit, manual — see screener / stop CLI.
+**Exit reasons (live):** `TRAILING_STOP`, `TIME_EXIT`, `REBALANCE_DROP` (Sunday rotation out of top-3), `MANUAL` — see screener / stop CLI and `spec/cue-reference.md` §2.3.
 
 ### 3.3 Validated backtest benchmarks (Phase 1 gate — LOCKED)
 
@@ -135,7 +136,7 @@ interface PipelineStep {
 `src/briefing/telegram-dispatcher.ts` consumes **`--mode rebalance|stop`**.
 
 - **Both modes:** First dispatch **SELL alerts** (`listSellSignalsReadyToAlert` — `signals` SELL + `alerted=0` + `exit_date > entry_date`, joined to BUY entry context). Formatted with exit reason emoji (🔴 TRAILING_STOP, 🔄 REBALANCE_DROP, ⏱ TIME_EXIT, ✋ MANUAL), entry/exit prices, and P&L %. Each marked `alerted=1` + `alerted_at = CURRENT_TIMESTAMP` after send.
-- **`rebalance`** → SELL alerts → formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`INNER JOIN` for ready-to-alert BUYs in `src/db/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, and a trimmed rationale. Share sizing is ATR-normalised when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`** (capped at 5% of implied book via `deriveBuyAlertShares`). Then, when **`WATCHLIST_BENCH_DEPTH` > 0**, send a second Telegram message **"Next in Rank"** for unalerted **`WATCHLIST`** rows on the session `asOf` (rank, 12-1 fraction, sentiment/sector from enrichment — up to 3 sentences / 280 chars).
+- **`rebalance`** → SELL alerts → formatted **BUY** alerts from **`signals`** plus optional **`enrichments`** (`INNER JOIN` for ready-to-alert BUYs in `src/db/queries.ts`). The message is order-ready: entry range (±1%), stop, 1R target, position size, sector / earnings, momentum rank (`#N of M` or `#N of M eligible (U universe)`), and a trimmed rationale. Share sizing is ATR-normalised when **`PORTFOLIO_VALUE_USD`** is set, with fallback to **`POSITION_SIZE_USD`** (capped at 5% of implied book via `deriveBuyAlertShares`). Then, when **`WATCHLIST_BENCH_DEPTH` > 0**, send a second Telegram message **"Next in Rank"** for unalerted **`WATCHLIST`** rows on the session `asOf` (rank, 12-1 fraction, sentiment/sector from enrichment — up to 3 sentences / 280 chars).
 - **`stop`** → SELL alerts → **Daily Pulse** (`sendDailyPulse(db, sellCount)`). **Suppressed** when there are 0 OPEN positions **and** `sellCount === 0`. Otherwise: reads OPEN positions + latest `daily_prices.close`, computes unrealised P&L, labels stops **BASE** vs **TIGHT**, flags **`⚠️ NEAR STOP`** when cushion < 0.5× ATR(14), shows next ET rebalance Friday.
 - Invalid / missing `--mode` fails loudly.
 
@@ -150,6 +151,7 @@ interface PipelineStep {
 | Env | `src/config/index.ts` | `getConfig()` |
 | Universe files | `data/universe/*.json`, `data/universe/_meta.json` | `UNIVERSE` env key; loader `src/universe/load-universe.ts` |
 | Ingest | `src/ingestors/massive-price-ingestor.ts` | `cue ingest` |
+| Deep price backfill | `src/ingestors/massive-price-ingestor.ts` | `cue backfill-prices` (one-shot historical grouped-daily sweep; fills &lt;252-bar ranking gaps — not in daily pipeline) |
 | Corporate actions | `src/ingestors/corporate-actions.ts`, `scripts/backfill_historical_split_adjustments.ts` | `cue adjust-splits` (live splits); `cue backfill-splits` (one-shot replay of `corporate_actions` → `daily_prices`) |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
@@ -158,7 +160,7 @@ interface PipelineStep {
 | Registry pipeline | `src/agents/daily-workflow.ts` | `cue run-all`, `cue pipeline --now` |
 | Scheduler | `src/agents/scheduler.ts` | `cue schedule`, `cue pipeline` |
 | Healthcheck | `src/agents/healthcheck.ts` | `cue healthcheck` |
-| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts`, `src/briefing/template.ts` (`formatWatchlistBench`, `formatBacktestRef` + `window_label`) | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + watchlist bench; stop-path Daily Pulse; dashboard Live Performance + **locked** MOMENTUM backtest ref)* |
+| Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts`, `src/briefing/template.ts` (`formatWatchlistBench`, `formatBacktestRef` + `window_label`) | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + watchlist bench; stop-path Daily Pulse; dashboard Live Performance + exit-reason breakout + **locked** MOMENTUM backtest ref)* |
 | DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
 
@@ -173,7 +175,7 @@ interface PipelineStep {
 - **Currency guard:** per-symbol **`MAX(date)`** in `daily_prices` vs expected last **US** session (ET-aware helpers share **`cue-timezone`** constants); no disk OHLCV cache on this path.
 - **Lag:** vendor EOD often **1–2 sessions** behind — `asOf` in logs is **last bar**, not “yesterday” by wall clock.
 
-**Historical depth:** prior **~400-day** per-ticker backfill is no longer performed by `cue ingest`; long lookbacks require rows already present in `daily_prices` (e.g. from earlier installs or a separate backfill).
+**Historical depth:** `cue ingest` does **not** perform a deep per-ticker backfill. The 12-1 lookback requires **≥252** bars in `daily_prices`. Operator one-shot: **`cue backfill-prices`** — grouped-daily sweep over `--from`…`--to` (default `--from` = 600 calendar days before `--to`; default `--to` = latest QQQ date). Skips sessions where all universe+QQQ tickers already have rows; `requireQuorum: false` for partial historical payloads; **300ms** delay between API calls; prints coverage report for tickers with fewer than `--min-bars` (default 252). Run after universe reconstitution or fresh DB restore. Recent auto-backfill (last 5 weekdays) only covers short gaps.
 
 ### 6.2 Yahoo Finance (two call sites)
 
@@ -199,7 +201,7 @@ interface PipelineStep {
 - **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (**id=82**, 2023–2025 bull window; PR-6 ceremony 2026-06-04 — `REBALANCE_DROP` mapping fix). Migration `009` locked ids 73–74; id=82 supersedes via ceremony. Unlocked research runs do not displace the pin.
 - **Split adjustment (PR-4):** `cue adjust-splits` records splits in **`corporate_actions`**, adjusts OPEN **`positions` / `signals`**, and retroactively adjusts **`daily_prices`** for `date < ex_date` (OHLC ÷ `factor`, volume × `factor`) so momentum/backtest inputs stay continuous. One-shot **`cue backfill-splits`** replays existing ledger rows (oldest `ex_date` first); idempotent via **`pipeline_state`** key `backfill_split_applied:{ticker}:{ex_date}`.
 - **Live `positions` exit mapping** (`mapLiveExitReason` / `006`): `TRAILING_STOP → TRAILING_STOP`; `MAX_HOLD → TIME_EXIT`; **`REBALANCE_DROP → REBALANCE_DROP`**; `FORCED_CLOSE → MANUAL`.
-- **Live Performance dashboard:** `getLivePerformanceSummary` / `getLivePerformanceByConfidence` exclude **`MANUAL`** and **`REBALANCE_DROP`**; backtest comparison metrics come from **`getMomentumBacktestSummary`** (`formatBacktestRef` in `template.ts`), not hardcoded constants.
+- **Live Performance dashboard:** `getLivePerformanceSummary` / `getLivePerformanceByConfidence` exclude **`MANUAL`**, **`REBALANCE_DROP`**, and same-day artefacts; **`getLivePerformanceByExitReason`** breakout includes rotation drops. Backtest comparison metrics come from **`getMomentumBacktestSummary`** (`formatBacktestRef` in `template.ts`), not hardcoded constants.
 - **`backtest_trades` exit mapping** (simulator only, `closedTradeToDbExit` in `runner.ts`): `gapOrStop → TRAILING_STOP`; `maxHoldDays → TIME_EXIT`; `standardTakeProfit → MANUAL`; **`standardTrendBreak → REBALANCE_DROP`** (fixed in PR-6 migration `015`). `INITIAL_STOP` reserved in CHECK but not emitted by the current runner.
 - **T-1 staleness flag:** `massive-price-ingestor.ts` writes `pipeline_state.last_ingest_was_stale = "1"` when the resolved session date was already in `daily_prices`. `healthcheck.ts` check `ingest_staleness` reads this flag and returns FAIL if set.
 - **Pipeline step exit codes:** `runPipelineWithSteps` persists `step:{name}:last_exit_code` / `step:{name}:last_run_at` after every registry step. `healthcheck.ts` **`checkPipelineStepState`** FAILs when critical steps (`ingest`+`screen` on Sunday, `ingest`+`execute-stops` Tue–Sat) last exited non-zero; absent keys warn only.
@@ -263,10 +265,11 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 
 | ID | Severity           | Issue | Status                                                                                                                                            |
 |---|--------------------|---|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| S4 | FIXED              | Massive **free-tier / call count** | ✅ **RESOLVED:** `cue ingest` uses **grouped daily** (one REST call / run); optional multi-day backfill / vendor paging remains separate future work |
+| S4 | FIXED              | Massive **free-tier / call count** | ✅ **RESOLVED:** `cue ingest` uses **grouped daily** (one REST call / run); deep gaps → operator **`cue backfill-prices`** |
 | S5 | FIXED              | `rankedUniverse=0` log on stop runs (misleading) | ✅ **RESOLVED:** stop path no longer emits misleading `info`-level ranking noise |
 | S6 | FIXED              | `backtest_trades` writer | ✅ **CONFIRMED LIVE:** `persistBacktestArtifacts()` captures inserted run id and persists per-trade rows when `backtest_trades` exists |
 | — | DATA               | Massive EOD **lag** 1–2d | Accepted                                                                                                                                          |
+| — | DATA               | Partial ranking coverage (&lt;252 bars for some universe tickers) | Operational — run **`cue backfill-prices`**; screener excludes-and-reports (never aborts pipeline) |
 | — | DATA               | `fundamentals_cache` only reflects run dates | Accepted — table grows organically via `cue enrich-fundamentals`; historical backfill deferred |
 | — | FIXED (repo)       | `--force-rebalance` not reaching screen | ✅ `forwardArgs` / `pnpmRunArgs`                                                                                                                   |
 | — | FIXED (repo)       | Ingest cache used request time not **DB** max date | ✅ `MAX(date)` guard                                                                                                                               |
@@ -357,7 +360,17 @@ Full record: **`spec/cue-phase9-complete.md`**.
 - Backlog #9: Regime hysteresis (asymmetric ±0.5% QQQ envelope)
 - Backlog #12: Intraday stop semantics (`low ≤ stop`, `exit_price = min(open, stop)`)
 - Backlog #16: Historical split discovery sweep
-- **Backlog #17 (new 2026-06-07):** Re-entry cooldown after `TRAILING_STOP` — skip re-entry for 1 rebalance cycle on same ticker. Motivated by MU stopped out Sat Jun-6 and re-bought Sun Jun-7 at same price ($864.01). Parameter sweep N={1,2,3} weeks. Same gate as #9.
+- Backlog #17: Re-entry cooldown after `TRAILING_STOP` — skip re-entry for 1 rebalance cycle on same ticker; parameter sweep N={1,2,3} weeks (motivating cases: MU stopped Sat Jun-6 re-bought Sun Jun-7; MU `TRAILING_STOP` 2026-06-23, re-bought 2026-06-26). Same gate as #9.
+- Backlog #18: Sector / theme concentration cap (e.g. max 2 Technology positions) — new backtest thread required before production
+
+## 14e. Signal integrity (June 2026)
+
+| Task | Status |
+|------|--------|
+| `collectRankingExclusions()` — exclude &lt;252-bar tickers, warn, never abort rebalance | ✅ `momentum-screener.ts` |
+| `formatMomentumRankLabel()` — `#N of eligible (universe total)` in Telegram, LLM prompt, dashboard | ✅ `src/shared/momentum-rank-label.ts` |
+| `cue backfill-prices` — deep grouped-daily historical sweep + coverage report | ✅ `massive-price-ingestor.ts`, `cli.ts` |
+| Live P&amp;L excludes `REBALANCE_DROP`; exit-reason breakout table on dashboard | ✅ `briefing/queries.ts`, `template.ts` |
 
 ---
 

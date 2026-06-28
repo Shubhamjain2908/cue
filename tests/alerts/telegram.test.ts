@@ -193,7 +193,7 @@ describe("formatWatchlistBench", () => {
       "2026-05-29",
     );
     expect(text).toContain("📊 Next in Rank — 2026-05-29");
-    expect(text).toContain("#4  AMD");
+    expect(text).toContain("#4 of 101");
     expect(text).toContain("$172.34");
     expect(text).toContain("12-1: 2.03");
     expect(text).toContain("BULLISH HIGH");
@@ -314,8 +314,8 @@ describe("formatWatchlistBench", () => {
       ],
       "2026-05-29",
     );
-    expect(text).toMatch(/#7\s+KLAC\s+\$1921\.71/);
-    expect(text).toMatch(/#8\s+GOOGL\s+\$380\.34/);
+    expect(text).toMatch(/#7 of 101\s+KLAC\s+\$1921\.71/);
+    expect(text).toMatch(/#8 of 101\s+GOOGL\s+\$380\.34/);
   });
 
   it("abbreviates Communication Services sector label", () => {

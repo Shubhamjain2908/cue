@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.6 · June 2026 — Phase 9b (arch-review gap closure: WAL pragmas, unified registry, pulse suppression, migration preflight)*
+*v1.7 · June 2026 — Phase 9b + signal integrity (ranking coverage exclude-and-report, `backfill-prices`, live P&amp;L exit-reason breakout)*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
@@ -17,7 +17,8 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **Corporate actions** | `cue adjust-splits` after **ingest** on both pipeline routes. **`critical: false`**. Idempotent via `corporate_actions` UNIQUE. Adjusts OPEN book **and** `daily_prices` for `date < ex_date` (OHLC ÷ factor, volume × factor). | `src/ingestors/corporate-actions.ts`, `daily-workflow.ts` |
 | **Split historical replay** | One-shot `cue backfill-splits` replays `corporate_actions` in `ex_date` ASC order; per-row transaction; `pipeline_state` key `backfill_split_applied:{ticker}:{ex_date}`. | `scripts/backfill_historical_split_adjustments.ts` |
 | **Backtest reference** | Dashboard pins to `WHERE strategy = 'MOMENTUM' AND locked = 1`. New runs default **unlocked**. Current lock **id=82** (2026-06-04 ceremony). Lock rotation after gate ceremony when metrics shift >1%. | `src/briefing/queries.ts`, `spec/cue-handoff.md` §2.2 |
-| **Live performance scope** | Dashboard live P&amp;L aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')`. Rotation drops must not inflate closed-trade counts or show 0% win-rate noise. | `briefing/queries.ts` |
+| **Live performance scope** | Dashboard live P&amp;L aggregates **exclude** `exit_reason IN ('MANUAL', 'REBALANCE_DROP')` and same-day artefacts (`exit_date = entry_date`). Rotation drops must not inflate closed-trade counts or show 0% win-rate noise. A separate **Exit reason breakdown** table (`getLivePerformanceByExitReason`) includes `REBALANCE_DROP` for transparency. | `briefing/queries.ts`, `briefing/template.ts` |
+| **Ranking coverage (exclude-and-report)** | Tickers with **&lt;252** `daily_prices` bars through `asOf` are **excluded** from cross-sectional rank. Rebalance, stops, and Telegram **never abort** on partial coverage — warn with excluded ticker list + bar counts. `signals.universe_ranked_count` stores **eligible** count; rank labels show `#N of eligible (universe total)` when counts differ. | `collectRankingExclusions()`, `momentum-screener.ts`, `shared/momentum-rank-label.ts` |
 | **Live `REBALANCE_DROP` fidelity** | Screener rotation closes persist **`REBALANCE_DROP`** on `positions` (not aliased to `MANUAL`). | `006`, `mapLiveExitReason`, `momentum-screener.ts` |
 | **Momentum formula locked** | `(close[today-21] - close[today-252]) / close[today-252]`. Formula unchanged; **split-adjusted `daily_prices`** required (PR-4). Any strategy change requires backtest re-validation against locked gate metrics (id=82 baseline). | `src/enrichers/momentum-technical.ts`, `corporate-actions.ts` |
 | **ATR multipliers locked** | Base: 4.0×. Tight: 1.5×. Tight trigger: ≥ 25% unrealized. | `src/analysers/momentum-screener.ts` — constants / config as designed |
@@ -36,6 +37,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **Fetcher currency guard** | Per ticker: `MAX(date)` in `daily_prices` vs expected last ET session. `--force` bypasses. | `src/ingestors/massive-price-ingestor.ts` |
 | **T+0 → T−1 ingest fallback** | Default path tries **T+0** (`currentEtWeekdaySession`) first; on 0 bars or recoverable fetch failure, falls back to **T−1** (`previousWeekdayBeforeEtCivil`). `--date` bypasses. **Market holidays:** Massive grouped daily may omit `results` (not `[]`) — `fetchGroupedDaily()` treats `results === undefined` or `resultsCount === 0` as 0 bars before Zod (not a validation abort). Auto-backfill covers last 5 weekdays after primary insert (universe runs only; only dates `< primarySessionDate` attempted). | `src/ingestors/massive-price-ingestor.ts` |
 | **Data lag accepted** | Massive EOD may lag 1–2 sessions. | Operational assumption |
+| **Deep price backfill (operator)** | `cue backfill-prices` is a **one-shot** grouped-daily sweep for historical gaps (&lt;252 bars); not in the daily pipeline. Per-ticker skip when row exists; 300ms delay between API calls; coverage report at end. | `massive-price-ingestor.ts`, `cli.ts` |
 | **Yahoo context TTL** | Cache policy in Yahoo bundle fetch. | `src/llm/yahooContext.ts` |
 
 ---

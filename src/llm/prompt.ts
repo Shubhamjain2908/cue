@@ -1,6 +1,8 @@
 import type { BuySignalForEnrichmentRow } from "../db/queries.js";
 import { ENRICHMENT_RATIONALE_MAX_CHARS } from "./enrichment.js";
 import { MS_PER_DAY } from "../shared/constants.js";
+import { formatMomentumRankLabel } from "../shared/momentum-rank-label.js";
+import { loadUniverseTickers } from "../universe/load-universe.js";
 import type { YahooEnrichmentDto } from "./yahooContext.js";
 
 export interface EnrichmentPrompt {
@@ -54,6 +56,12 @@ Confidence (from provided context only):
 
 ${earningsRiskClause}`;
 
+  const rankLabel = formatMomentumRankLabel(
+    signal.momentumRank,
+    signal.universeRankedCount,
+    loadUniverseTickers().length,
+  );
+
   const user = `Ticker: ${ticker}
 Sector (from overview): ${yahoo.sector ?? "unknown"}
 Market Cap: ${yahoo.marketCap === null ? "unknown" : String(yahoo.marketCap)}
@@ -64,7 +72,7 @@ ${headlinesBlock}
 Upcoming Earnings: ${upcoming}
 Days Until Earnings (from signal date ${signalDate}): ${daysUntil}
 
-12-1 Momentum Rank: #${signal.momentumRank} of ${signal.universeRankedCount} (score: ${returnPctDisplay.toFixed(2)}%)
+12-1 Momentum Rank: ${rankLabel} (score: ${returnPctDisplay.toFixed(2)}%)
 Current Price: ${signal.price}
 ATR(14): ${signal.atr14}
 Initial Stop: ${signal.initialAtrStop ?? "N/A"}

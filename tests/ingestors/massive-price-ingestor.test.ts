@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCueLogger } from "../../src/cli/cue-logger.js";
 
-import { getPipelineState } from "../../src/db/queries.js";
+import { getPipelineState, insertDailyPrices } from "../../src/db/queries.js";
 import { initSchema } from "../../src/db/schema.js";
 import {
   fetchGroupedDaily,
   previousWeekdayBeforeEtCivil,
+  reportUniversePriceCoverage,
   resolveSessionDateAndResults,
+  weekdaysBetweenInclusive,
 } from "../../src/ingestors/massive-price-ingestor.js";
 import type { MassiveGroupedBar } from "../../src/ingestors/types.js";
 
@@ -224,5 +226,38 @@ describe("fetchGroupedDaily holiday handling", () => {
     await expect(fetchGroupedDaily({ apiKey: "key", dateString: "2026-06-18" })).rejects.toThrow(
       "Massive grouped HTTP 503",
     );
+  });
+});
+
+describe("weekdaysBetweenInclusive", () => {
+  it("returns Mon–Fri dates across a week boundary", () => {
+    expect(weekdaysBetweenInclusive("2026-06-22", "2026-06-26")).toEqual([
+      "2026-06-22",
+      "2026-06-23",
+      "2026-06-24",
+      "2026-06-25",
+      "2026-06-26",
+    ]);
+  });
+});
+
+describe("reportUniversePriceCoverage", () => {
+  it("lists tickers below minBars threshold", () => {
+    const db = openMemoryDb();
+    insertDailyPrices(db, "AAA", [{ date: "2026-06-01", open: 1, high: 1, low: 1, close: 1, volume: 1 }]);
+    insertDailyPrices(db, "BBB", Array.from({ length: 3 }, (_, i) => ({
+      date: `2026-06-${String(i + 1).padStart(2, "0")}`,
+      open: 1,
+      high: 1,
+      low: 1,
+      close: 1,
+      volume: 1,
+    })));
+
+    const report = reportUniversePriceCoverage(db, ["AAA", "BBB"], 2);
+    expect(report.eligible).toBe(1);
+    expect(report.short).toHaveLength(1);
+    expect(report.short[0]!.ticker).toBe("AAA");
+    db.close();
   });
 });
