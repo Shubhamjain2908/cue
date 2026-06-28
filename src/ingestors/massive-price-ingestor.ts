@@ -15,6 +15,7 @@ import { getConfig } from "../config/index.js";
 import { setPipelineState } from "../db/queries.js";
 import { openCueDb, type CueDatabase } from "../db/provider.js";
 import { parseOptionalYmdFromArgv } from "../cli/ymd-arg.js";
+import { addCalendarDays } from "../shared/date-utils.js";
 import {
   loadUniverseTickers,
   tryLoadUniverseMeta,
@@ -337,17 +338,24 @@ function insertGroupedSessionRows(input: {
   expectedMaskCount: number;
   rows: MassiveGroupedBar[];
   logger: winston.Logger;
+  /** When false, insert matched rows even if below 80% universe quorum (historical backfill). */
+  requireQuorum?: boolean;
 }): void {
   const { db, sessionDate, tickerMask, expectedMaskCount, rows, logger } = input;
+  const requireQuorum = input.requireQuorum !== false;
 
   const matched = rows.filter((r) => tickerMask.has(r.T.toUpperCase()));
   const quorum = expectedMaskCount * QUORUM_THRESHOLD;
-  if (matched.length < quorum) {
+  if (requireQuorum && matched.length < quorum) {
     logger.warn(
       `Partial data anomaly: expected at least ${String(Math.ceil(quorum))} universe matches for ${sessionDate}, found ${String(matched.length)}. Aborting transactional commit.`,
       { sessionDate, expectedMaskCount, matchedCount: matched.length },
     );
     throw new Error("Ingestion aborted: Massive grouped payload is incomplete.");
+  }
+  if (!requireQuorum && matched.length === 0) {
+    logger.info(`Grouped ingest: 0 universe matches for ${sessionDate}; skipping.`);
+    return;
   }
 
   const insertStmt = db.prepare(`
@@ -529,6 +537,161 @@ async function resolveSessionDateAndResults(input: {
   return { sessionDate: t1, results };
 }
 
+/** Mon–Fri ISO dates from `start` through `end` inclusive (UTC calendar walk). */
+export function weekdaysBetweenInclusive(start: string, end: string): string[] {
+  const results: string[] = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const dow = new Date(`${cursor}T12:00:00Z`).getUTCDay();
+    if (dow !== 0 && dow !== 6) {
+      results.push(cursor);
+    }
+    cursor = addCalendarDays(cursor, 1);
+  }
+  return results;
+}
+
+export interface UniversePriceCoverageRow {
+  ticker: string;
+  bars: number;
+  firstDate: string | null;
+  lastDate: string | null;
+}
+
+/** Count `daily_prices` bars per universe ticker through optional `asOf`. */
+export function reportUniversePriceCoverage(
+  db: CueDatabase,
+  universe: readonly string[],
+  minBars: number,
+  asOf?: string,
+): { short: UniversePriceCoverageRow[]; eligible: number } {
+  const stmt = asOf
+    ? db.prepare(
+        `SELECT COUNT(*) AS bars, MIN(date) AS firstDate, MAX(date) AS lastDate
+         FROM daily_prices WHERE ticker = ? AND date <= ?`,
+      )
+    : db.prepare(
+        `SELECT COUNT(*) AS bars, MIN(date) AS firstDate, MAX(date) AS lastDate
+         FROM daily_prices WHERE ticker = ?`,
+      );
+
+  const short: UniversePriceCoverageRow[] = [];
+  let eligible = 0;
+  for (const ticker of universe) {
+    const row = (
+      asOf ? stmt.get(ticker, asOf) : stmt.get(ticker)
+    ) as { bars: number; firstDate: string | null; lastDate: string | null };
+    if (row.bars >= minBars) {
+      eligible += 1;
+      continue;
+    }
+    short.push({
+      ticker,
+      bars: row.bars,
+      firstDate: row.firstDate,
+      lastDate: row.lastDate,
+    });
+  }
+  return { short, eligible };
+}
+
+export interface HistoricalPriceBackfillOpts {
+  readonly from?: string;
+  readonly to?: string;
+  readonly minBars?: number;
+}
+
+/**
+ * Deep grouped-daily backfill for universe + QQQ over a date range.
+ * ponytail: one HTTP call per session day; `requireQuorum: false` so partial historical payloads still land.
+ */
+export async function runHistoricalPriceBackfill(
+  opts: HistoricalPriceBackfillOpts = {},
+): Promise<void> {
+  const config = getConfig();
+  const logger = createLogger();
+  const projectRoot = process.cwd();
+  const universe = loadUniverseTickers(projectRoot);
+  const tickersForMask = [...universe, "QQQ"];
+  const tickerMask = new Set(tickersForMask.map((t) => t.toUpperCase()));
+  const expectedMaskCount = tickerMask.size;
+  const minBars = opts.minBars ?? 252;
+
+  const db = openCueDb(config.DB_PATH);
+  try {
+    const latestRow = db
+      .prepare(`SELECT MAX(date) AS d FROM daily_prices WHERE ticker = 'QQQ'`)
+      .get() as { d: string | null };
+    const to = opts.to ?? latestRow.d ?? resolveLastETSession();
+    const from = opts.from ?? addCalendarDays(to, -600);
+
+    if (from > to) {
+      throw new Error(`backfill-prices: --from ${from} is after --to ${to}`);
+    }
+
+    const sessions = weekdaysBetweenInclusive(from, to);
+    logger.info(
+      `backfill-prices: ${String(sessions.length)} session(s) from ${from} to ${to} for ${String(universe.length)} universe tickers`,
+    );
+
+    let filled = 0;
+    const missingForDateStmt = db.prepare(
+      `SELECT COUNT(*) AS c FROM daily_prices WHERE ticker = ? AND date = ? LIMIT 1`,
+    );
+    for (const sessionDate of sessions) {
+      let missing = 0;
+      for (const t of tickersForMask) {
+        const row = missingForDateStmt.get(t, sessionDate) as { c: number };
+        if ((row?.c ?? 0) === 0) {
+          missing += 1;
+        }
+      }
+      if (missing === 0) {
+        continue;
+      }
+      try {
+        const results = await fetchGroupedDaily({
+          apiKey: config.POLYGON_API_KEY,
+          dateString: sessionDate,
+        });
+        if (results.length === 0) {
+          logger.info(`backfill-prices: ${sessionDate} — 0 bars (holiday), skipping`);
+          continue;
+        }
+        insertGroupedSessionRows({
+          db,
+          sessionDate,
+          tickerMask,
+          expectedMaskCount,
+          rows: results,
+          logger,
+          requireQuorum: false,
+        });
+        filled += 1;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`backfill-prices: ${sessionDate} failed: ${msg}`);
+      }
+      // ponytail: free-tier Massive caps requests/min; 300ms keeps deep backfill under limit
+      await delay(300);
+    }
+
+    const coverage = reportUniversePriceCoverage(db, universe, minBars, to);
+    logger.info(
+      `backfill-prices: wrote ${String(filled)} new session(s); coverage ${String(coverage.eligible)}/${String(universe.length)} tickers with >=${String(minBars)} bars through ${to}`,
+    );
+    if (coverage.short.length > 0) {
+      for (const row of coverage.short) {
+        logger.warn(
+          `backfill-prices: short history ${row.ticker} bars=${String(row.bars)} first=${row.firstDate ?? "n/a"} last=${row.lastDate ?? "n/a"}`,
+        );
+      }
+    }
+  } finally {
+    db.close();
+  }
+}
+
 const isMain =
   path.resolve(fileURLToPath(import.meta.url)) ===
   path.resolve(process.argv[1] ?? "");
@@ -558,6 +721,7 @@ export function resolveLastETSession(now: Date = new Date()): string {
 export {
   currentEtWeekdaySession,
   fetchGroupedDaily,
+  insertGroupedSessionRows,
   markT1IngestStaleness,
   previousWeekdayBeforeEtCivil,
   resolveSessionDateAndResults,
