@@ -111,6 +111,41 @@ export interface VixRegimeGate {
   maxVix: number;
 }
 
+/**
+ * Portfolio-level drawdown halt overlay (research only).
+ * Suppresses new BUYs when peak-to-trough drawdown ≥ haltThresholdPct;
+ * resumes when drawdown recovers below resumeThresholdPct (hysteresis).
+ */
+export interface DrawdownHaltConfig {
+  haltThresholdPct: number;
+  resumeThresholdPct: number;
+}
+
+/** Per-session halt diagnostic (research harness only). */
+export interface DrawdownHaltSessionTrace {
+  date: string;
+  /** NAV at halt check (pre-rebalance MTM, same series the overlay keys on). */
+  navAtHaltCheck: number;
+  halted: boolean;
+  drawdownPctAtCheck: number;
+  /** End-of-day MTM NAV recorded on the equity curve (MaxDD source). */
+  eodNav: number;
+}
+
 export interface MomentumBacktestOptions {
   vixGate?: VixRegimeGate;
+  drawdownHalt?: DrawdownHaltConfig;
+  /** When set with `drawdownHalt`, appends per-session halt vs EOD NAV trace. */
+  sessionTrace?: DrawdownHaltSessionTrace[];
 }
+
+/** `backtest_runs.strategy` label for drawdown-halt threshold sweep (research only). */
+export const DRAWDOWN_HALT_RESEARCH_STRATEGY = "DRAWDOWN_HALT_RESEARCH";
+
+/** Halt thresholds (%) swept against bull and extended windows. */
+export const DRAWDOWN_HALT_THRESHOLDS = [10, 15, 20] as const;
+
+export type DrawdownHaltThreshold = (typeof DRAWDOWN_HALT_THRESHOLDS)[number];
+
+export const DRAWDOWN_HALT_WINDOW_BULL = "2023-2025 (bull)" as const;
+export const DRAWDOWN_HALT_WINDOW_EXTENDED = "2022-2025 (extended)" as const;

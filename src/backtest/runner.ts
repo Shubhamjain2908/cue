@@ -50,6 +50,7 @@ import {
   BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS,
   BACKTEST_WARMUP_CALENDAR_DAYS,
 } from "./types.js";
+import { stepDrawdownHalt, type DrawdownHaltState } from "./drawdown-halt.js";
 import { loadUniverseTickers } from "../universe/load-universe.js";
 import {
   printQualityGarpSummary,
@@ -116,6 +117,11 @@ export function allowNewBuysForVixSession(sessionDate: string, vixGate?: VixRegi
   return vixClose <= vixGate.maxVix;
 }
 
+/** Portfolio drawdown halt: block new BUYs when overlay state is halted. */
+export function allowNewBuysForDrawdownHalt(haltState?: DrawdownHaltState): boolean {
+  return haltState === undefined || !haltState.halted;
+}
+
 /**
  * Weekly rebalance cross-sectional momentum (§6.2) with ATR trailing stops (§6.3).
  */
@@ -177,6 +183,11 @@ export function runBacktest(
   const equityPoints: EquityPoint[] = [];
   const closedTrades: ClosedBacktestTrade[] = [];
 
+  const drawdownHaltCfg = options?.drawdownHalt;
+  const drawdownHaltState: DrawdownHaltState | undefined = drawdownHaltCfg
+    ? { peakNav: 0, halted: false }
+    : undefined;
+
   const exitBuckets: Record<BacktestStrategyExitReason, number> = {
     TRAILING_STOP: 0,
     MAX_HOLD: 0,
@@ -210,6 +221,22 @@ export function runBacktest(
     exitBuckets[reason] += 1;
     positions.delete(ticker);
     pendingExitReason.delete(ticker);
+  };
+
+  const markToMarketEquity = (asOf: string): number => {
+    let mtm = cash;
+    for (const [ticker, pos] of positions) {
+      const series = byTicker.get(ticker);
+      if (!series) {
+        continue;
+      }
+      const px = closeMarkAsOf(series, asOf);
+      if (px === null) {
+        continue;
+      }
+      mtm += pos.shares * px;
+    }
+    return mtm;
   };
 
   for (let di = 0; di < sortedTradingDates.length; di++) {
@@ -295,6 +322,27 @@ export function runBacktest(
     const inSignalWindow =
       compareIsoDate(date, fromDate) >= 0 && compareIsoDate(date, toDate) <= 0;
 
+    if (inSignalWindow && drawdownHaltState !== undefined && drawdownHaltCfg !== undefined) {
+      const navAtHaltCheck = markToMarketEquity(date);
+      stepDrawdownHalt(
+        drawdownHaltState,
+        navAtHaltCheck,
+        drawdownHaltCfg.haltThresholdPct,
+        drawdownHaltCfg.resumeThresholdPct,
+      );
+      if (options?.sessionTrace !== undefined) {
+        const peak = drawdownHaltState.peakNav;
+        const ddAtCheck = peak > 0 ? ((peak - navAtHaltCheck) / peak) * 100 : 0;
+        options.sessionTrace.push({
+          date,
+          navAtHaltCheck,
+          halted: drawdownHaltState.halted,
+          drawdownPctAtCheck: ddAtCheck,
+          eodNav: 0,
+        });
+      }
+    }
+
     const dow = isoWeekdayMon1ToFri5(date);
     const isRebalance = dow === cfg.rebalanceDayOfWeek;
     if (isRebalance && qqqBar && inSignalWindow) {
@@ -330,7 +378,9 @@ export function runBacktest(
           }
         }
 
-        const allowNewBuys = allowNewBuysForVixSession(date, options?.vixGate);
+        const allowNewBuys =
+          allowNewBuysForVixSession(date, options?.vixGate) &&
+          allowNewBuysForDrawdownHalt(drawdownHaltState);
         if (allowNewBuys) {
           for (const t of ranked.slice(0, cfg.topN)) {
             if (positions.size + pendingBuys.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
@@ -414,19 +464,14 @@ export function runBacktest(
     }
 
     if (inSignalWindow) {
-      let mtm = cash;
-      for (const [ticker, pos] of positions) {
-        const series = byTicker.get(ticker);
-        if (!series) {
-          continue;
+      const eodNav = markToMarketEquity(date);
+      if (options?.sessionTrace !== undefined && options.sessionTrace.length > 0) {
+        const last = options.sessionTrace[options.sessionTrace.length - 1]!;
+        if (last.date === date) {
+          last.eodNav = eodNav;
         }
-        const px = closeMarkAsOf(series, date);
-        if (px === null) {
-          continue;
-        }
-        mtm += pos.shares * px;
       }
-      equityPoints.push({ date, equityUsd: mtm });
+      equityPoints.push({ date, equityUsd: eodNav });
     }
   }
 
@@ -442,11 +487,11 @@ export function runBacktest(
 function parseCli(): {
   from: string;
   to: string;
-  strategy: "momentum" | "quality-garp" | "vix-momentum";
+  strategy: "momentum" | "quality-garp" | "vix-momentum" | "drawdown-halt";
 } {
   let from = "2021-01-01";
   let to = "2023-12-31";
-  let strategy: "momentum" | "quality-garp" | "vix-momentum" = "momentum";
+  let strategy: "momentum" | "quality-garp" | "vix-momentum" | "drawdown-halt" = "momentum";
   let fromExplicit = false;
   let toExplicit = false;
   const argv = process.argv.slice(2);
@@ -464,6 +509,8 @@ function parseCli(): {
         strategy = "quality-garp";
       } else if (s === "vix-momentum") {
         strategy = "vix-momentum";
+      } else if (s === "drawdown-halt") {
+        strategy = "drawdown-halt";
       } else {
         strategy = "momentum";
       }
@@ -607,6 +654,9 @@ if (isMain) {
     } else if (strategy === "vix-momentum") {
       const { runVixMomentumSweep } = await import("./strategies/vix-momentum.js");
       await runVixMomentumSweep(db, from, to);
+    } else if (strategy === "drawdown-halt") {
+      const { runDrawdownHaltSweep } = await import("./strategies/drawdown-halt-sweep.js");
+      runDrawdownHaltSweep(db);
     } else {
       const result = runBacktest(db, from, to);
       const expectancyPctPerTrade = mean(

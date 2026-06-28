@@ -118,6 +118,49 @@ export function maxDrawdownPct(equityUsd: readonly number[]): number | null {
   return maxDd;
 }
 
+/** Peak/trough window that sets `maxDrawdownPct` on an equity curve. */
+export function findMaxDrawdownWindow(
+  points: readonly EquityPoint[],
+): { peakDate: string; troughDate: string; peakNav: number; troughNav: number; drawdownPct: number } | null {
+  if (points.length === 0) {
+    return null;
+  }
+  let peakNav = 0;
+  let peakDate = points[0]!.date;
+  let maxDd = 0;
+  let troughDate = points[0]!.date;
+  let troughNav = points[0]!.equityUsd;
+  let bestPeakDate = peakDate;
+  let bestPeakNav = peakNav;
+
+  for (const p of points) {
+    if (p.equityUsd > peakNav) {
+      peakNav = p.equityUsd;
+      peakDate = p.date;
+    }
+    if (peakNav > 0) {
+      const dd = ((peakNav - p.equityUsd) / peakNav) * 100;
+      if (dd > maxDd) {
+        maxDd = dd;
+        troughDate = p.date;
+        troughNav = p.equityUsd;
+        bestPeakDate = peakDate;
+        bestPeakNav = peakNav;
+      }
+    }
+  }
+  if (peakNav <= 0) {
+    return null;
+  }
+  return {
+    peakDate: bestPeakDate,
+    troughDate,
+    peakNav: bestPeakNav,
+    troughNav,
+    drawdownPct: maxDd,
+  };
+}
+
 /**
  * Win rate in percentage points. Null when there are no closed trades.
  */
