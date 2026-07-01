@@ -113,4 +113,8 @@ export interface VixRegimeGate {
 
 export interface MomentumBacktestOptions {
   vixGate?: VixRegimeGate;
+  /** Phase 3: minimum Financial Health Score to allow a BUY. Null/undefined = no filter. */
+  qualityFloor?: number;
+  /** Phase 3: pre-computed quality scores keyed by ticker. `financialHealthScore` from signal-quality. */
+  qualityByTicker?: ReadonlyMap<string, number>;
 }
