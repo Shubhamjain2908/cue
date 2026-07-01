@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.7 · June 2026 — Phase 9b + signal integrity (ranking coverage exclude-and-report, `backfill-prices`, live P&amp;L exit-reason breakout)*
+*v1.8 · July 2026 — Phase 1 quality score (advisory, no BUY suppression)*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
@@ -25,6 +25,8 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **ATR golden rule** | `current_stop_loss` never decreases. `new_stop = MAX(candidate, current_stop_loss)`. | Stop evaluation in `momentum-screener.ts` |
 | **MAX_HOLD_DAYS** | Forced time exit on stop evaluation when trading days held (counted as daily_prices rows between entry_date and asOf inclusive) ≥ MAX_HOLD_DAYS. | `src/config/index.ts` + screener |
 | **Backtest gate** | Any strategy parameter change must re-run backtest and clear: CAGR > 12%, MaxDD < 20%, Sharpe > 1.0, Expectancy > 0. | Manual / CI process |
+| **Quality score advisory (Phase 1)** | Financial Health Score surfaced in Telegram, dashboard, and LLM prompt — **no BUY suppression**. Scores are informational only. Phase 2+ requires backtest research and a separate gate ceremony. | `src/analysers/signal-quality.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/template.ts`, `src/llm/prompt.ts` |
+| **Quality-last-writer** | `quality-snapshot` runs **after** `enrich-fundamentals` in the Sunday rebalance pipeline — it is the last writer to `fundamentals_cache.payload_json.quality`. The Yahoo payload must already be in the DB before the quality block is merged. | `src/agents/daily-workflow.ts`, `src/analysers/quality-snapshot-cli.ts` |
 
 ---
 

@@ -29,6 +29,35 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `016_signals_alerted_at` | ALTER TABLE `signals` ADD COLUMN `alerted_at` TEXT; NULL until alert fires; written by `markSignalAlerted` |
 | `017_positions_current_rank` | ALTER TABLE `positions` ADD COLUMN `current_rank` INTEGER; NULL until first Sunday rebalance after migration; stamped by `runLiveScreen()` on rebalance path |
 
+**`payload_json` quality block (Phase 1, advisory):** `cue quality-snapshot` writes a `quality` key into `payload_json` after the Yahoo payload is persisted. Shape:
+
+```json
+{
+  "yahoo": { /* Yahoo fundamentals bundle */ },
+  "quality": {
+    "financialHealthScore": 7.2,
+    "flags": ["HIGH_DEBT"],
+    "subscores": {
+      "profitability": 0.85,
+      "cashHealth": 0.75,
+      "valuation": 0.55,
+      "trendConfirm": 0.65,
+      "completeness": 0.90
+    },
+    "metrics": {
+      "returnOnAssets": 0.08,
+      "grossMargins": 0.45,
+      "operatingMargins": 0.22,
+      "profitMargins": 0.15,
+      "currentRatio": 2.1,
+      "debtToEquity": 0.8,
+      "peRatio": 14.5,
+      "priceToBook": 3.2
+    }
+  }
+}
+```
+
 **Next migration:** `018`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).

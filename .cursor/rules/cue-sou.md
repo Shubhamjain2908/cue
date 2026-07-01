@@ -1,6 +1,6 @@
 # Cue — Project specification (engineering)
 
-*Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, and **Phase 9b** behaviour (T-1 next-morning ingestor, 06:00 ET pipeline window, stop-replay correctness, SELL Telegram alerts, arch-review gap closure).*
+*Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, **Phase 9b** behaviour (T-1 next-morning ingestor, 06:00 ET pipeline window, stop-replay correctness, SELL Telegram alerts, arch-review gap closure), and **Phase 1 quality score** (advisory Financial Health Score, 3 PRs).*
 
 **Also read:** root **`README.md`** (operator quickstart), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`016`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
@@ -85,7 +85,7 @@ All operations: **`pnpm run cue -- <subcommand>`**. Help: **`pnpm run cue -- --h
 
 | Day | Mode | Steps (`pnpm run cue -- …`) |
 |-----|------|-----------------------------|
-| **Sunday** | `rebalance` | ingest → adjust-splits → enrich-fundamentals → screen → enrich → brief `--mode rebalance` |
+| **Sunday** | `rebalance` | ingest → adjust-splits → enrich-fundamentals → screen → quality-snapshot → enrich → brief `--mode rebalance` |
 | **Tuesday–Saturday** | `stop` | ingest → adjust-splits → execute-stops → brief `--mode stop` |
 | **Monday** | — | skip (idle) |
 
@@ -154,6 +154,7 @@ interface PipelineStep {
 | Deep price backfill | `src/ingestors/massive-price-ingestor.ts` | `cue backfill-prices` (one-shot historical grouped-daily sweep; fills &lt;252-bar ranking gaps — not in daily pipeline) |
 | Corporate actions | `src/ingestors/corporate-actions.ts`, `scripts/backfill_historical_split_adjustments.ts` | `cue adjust-splits` (live splits); `cue backfill-splits` (one-shot replay of `corporate_actions` → `daily_prices`) |
 | Fundamentals cache CLI | `src/ingestors/enrich-fundamentals-cli.ts` + `src/llm/yahooContext.ts` | `cue enrich-fundamentals` |
+| Quality snapshot (Phase 1) | `src/analysers/quality-snapshot-cli.ts`, `src/analysers/signal-quality.ts` | `cue quality-snapshot` |
 | Screen / stops | `src/analysers/momentum-screener.ts` | `cue screen`, `cue execute-stops` (optional `--date YYYY-MM-DD` = as-of session; default latest QQQ bar in DB) |
 | LLM | `src/llm/factory.ts`, `src/llm/types.ts`, `src/llm/json.ts`, `src/llm/enricher.ts`, `src/llm/prompt.ts` | via `cue enrich` |
 | Thesis batch | `src/agents/thesis-generator.ts` | `cue enrich` (pending **BUY**, then pending **WATCHLIST**; watchlist failures are warn-only) |
@@ -183,6 +184,8 @@ interface PipelineStep {
 |-----|--------|---------|
 | LLM enrichment / fundamentals CLI | `src/llm/yahooContext.ts` | `search()`, `quoteSummary()` — disk cache under **`CACHE_DIR`** |
 | Corporate split events | `src/ingestors/corporate-actions.ts` | `chart()` — persisted in **`corporate_actions`** (`008`) |
+
+**`cue quality-snapshot` (Phase 1 — advisory):** runs after `enrich-fundamentals` on the Sunday rebalance path. For each BUY-signal ticker (or `--ticker SYM`), fetches fresh Yahoo data (`forceRefresh=true`), computes the Financial Health Score via `signal-quality.ts`, and merges the `quality` block into `fundamentals_cache.payload_json`. The score is **advisory only** — no BUY suppression in Phase 1. Formula: `0.25×profitability + 0.25×cashHealth + 0.25×valuation + 0.15×trendConfirm + 0.10×completeness`. Flags: `HIGH_DEBT`, `LOW_LIQUIDITY`, `EARNINGS_SHRINKING`, `REVENUE_SHRINKING`, `HIGH_PE`, `NEGATIVE_MARGINS`, `NEGATIVE_FCF`.
 
 **`cue enrich-fundamentals` batch rotation (PR-14):** default pipeline run fetches **3** universe tickers per invocation (Yahoo rate-limit guard). `selectFundamentalsBatchTickers()` in `queries.ts` walks `nasdaq100.json` order and **skips** tickers already present in `fundamentals_cache` for today's `as_of_date` (`getExchangeDateString()`). Each run advances to the next uncached names (~34 Sunday runs to cover ~101 tickers). When all tickers are cached for today, the step logs `enrich_fundamentals_skip` and exits without API calls. **`--force`** refreshes the **entire** universe in one command; **`--limit N`** raises the per-run batch size (still rotates). **`--ticker SYM`** fetches one name only.
 
@@ -355,6 +358,25 @@ Full record: **`spec/cue-phase9-complete.md`**.
 | `enrich-fundamentals` batch rotation via `fundamentals_cache` | PR-14 | ✅ `selectFundamentalsBatchTickers()` in `queries.ts` |
 
 **Queued PRs:** None.
+
+## 14f. Phase 1 — Quality Score (July 2026)
+
+*Phase 1 delivers an advisory Financial Health Score overlaid on the existing momentum screener. No BUY suppression — scores are surfaced in Telegram, the dashboard, and the LLM enrich prompt.*
+
+| PR | Deliverable | Status |
+|----|-------------|--------|
+| PR-1 (#66) | Foundation: Yahoo probe, schema widening (17 new financial fields), `signal-quality.ts` scoring engine | ✅ Merged |
+| PR-2 (#67) | Pipeline: `cue quality-snapshot` CLI, DB helpers (`upsertFundamentalsPayloadQuality`), pipeline reorder (screen → enrich-fundamentals → quality-snapshot → enrich) | ✅ Merged |
+| PR-3 (#68) | Output: quality score in Telegram alerts (`Quality: 7.2/10 ⚠️ LOW`), dashboard badges (green ≥7 / amber ≥4 / red <4), LLM enrich prompt injection | ✅ Merged |
+| PR-4 (#69) | Docs: Phase 1 documentation in cue-sou.md, cue-guardrails.md, cue-db-schema.md | ✅ Merged |
+
+**Phase 1.5 — Watchlist quality (July 2026):** adds quality data to the "Next in Rank" bench Telegram message. Same score format as BUY alerts.
+
+**Phase 2 — Soft gates (deferred):** sector concentration warning, LOW QUALITY badge in Telegram BUY header. No BUY suppression.
+
+**Phase 3 — Hard gates (backtest research required):** Piotroski-style quality floors, max sector allocation caps.
+
+---
 
 **Parked (backtest-gated, ≥15 genuine closed trades):**
 - Backlog #9: Regime hysteresis (asymmetric ±0.5% QQQ envelope)
