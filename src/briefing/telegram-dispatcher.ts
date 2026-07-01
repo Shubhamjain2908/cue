@@ -15,11 +15,13 @@ import {
   computeNextRebalanceFriday,
   getOpenPositionsWithLastClose,
   getRegimeLabel,
+  getSectorConcentrationRows,
   listBuySignalsReadyToAlert,
   listSellSignalsReadyToAlert,
   listWatchlistSignalsForBriefing,
   resolvePulseAsOfDate,
   type BuyAlertPendingRow,
+  type SectorConcentrationRow,
   type SellAlertPendingRow,
 } from "./queries.js";
 import { TG_MAX, TG_TRUNCATE_RESERVE } from "../shared/constants.js";
@@ -176,7 +178,10 @@ export async function sendSellAlerts(db: CueDatabase): Promise<number> {
   return sent;
 }
 
-export function formatTelegramAlert(row: BuyAlertPendingRow): string {
+export function formatTelegramAlert(
+  row: BuyAlertPendingRow,
+  sectorConcentration?: readonly SectorConcentrationRow[],
+): string {
   const config = getConfig();
   const entryMid = row.price;
   const { shares, positionUsd } = deriveBuyAlertShares(row, config);
@@ -223,6 +228,14 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
     lines.push(qualityLine);
   }
 
+  // Phase 2: Sector concentration warning
+  if (sectorConcentration && sectorConcentration.length > 0) {
+    const warnings = sectorConcentration.map(
+      (sc) => `${sc.sector} (${sc.count})`,
+    );
+    lines.push(`⚠️ Sector concentration: ${warnings.join(", ")}`);
+  }
+
   if (row.enrichmentStatus !== "OK") {
     lines.push(`⚠️ enrichment unavailable (${row.enrichmentStatus})`);
   }
@@ -254,9 +267,21 @@ export function formatDailyPulseMessage(opts: {
   maxPositions: number;
   openCount: number;
   positions: DailyPulsePositionLine[];
+  /** Phase 2: sectors with 3+ positions (advisory warning). */
+  sectorConcentration?: readonly SectorConcentrationRow[];
 }): string {
   const header = `📊 Cue Daily  |  ${opts.asOf}  |  ${opts.regimeLabel}`;
-  const lines = [header, RULE];
+  const lines = [header];
+
+  // Phase 2: Sector concentration warning between header and RULE
+  if (opts.sectorConcentration && opts.sectorConcentration.length > 0) {
+    const warnings = opts.sectorConcentration.map(
+      (sc) => `${sc.sector} (${sc.count})`,
+    );
+    lines.push(`⚠️ Sector concentration: ${warnings.join(", ")}`);
+  }
+
+  lines.push(RULE);
 
   if (opts.openCount === 0) {
     lines.push("No open positions.");
@@ -340,6 +365,7 @@ export async function sendDailyPulse(db: CueDatabase, sellCount: number): Promis
     });
   }
 
+  const sectorConcentration = getSectorConcentrationRows(db);
   const text = formatDailyPulseMessage({
     asOf,
     regimeLabel,
@@ -347,6 +373,7 @@ export async function sendDailyPulse(db: CueDatabase, sellCount: number): Promis
     maxPositions: MAX_POSITIONS,
     openCount: raw.length,
     positions,
+    sectorConcentration,
   });
 
   await sendAndMark(text, null);
@@ -418,8 +445,9 @@ export async function runBriefAlertCli(argv: readonly string[] = process.argv): 
     if (pending.length === 0) {
       logger.info("No BUY signals pending alert (enriched + not alerted).");
     } else {
+      const sectorConcentration = getSectorConcentrationRows(db);
       for (const row of pending) {
-        const text = formatTelegramAlert(row);
+        const text = formatTelegramAlert(row, sectorConcentration);
         await sendAndMark(text, () => {
           markSignalAlerted(db, row.id);
         });
