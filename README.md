@@ -170,7 +170,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm cue` | `tsx src/cli.ts` (pass args after the script name, e.g. `pnpm run cue ingest --date …` or `pnpm run cue -- ingest --date …`) |
 | `pnpm db:init` | `tsx src/db/schema.ts` (init + migrate from config) |
 | `pnpm db:migrate` | `pnpm run cue -- db:migrate` |
-| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Override window with `--from` / `--to` |
+| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Phase 3 quality-floor research: `pnpm run backtest -- --quality-floor N` runs a sweep at thresholds ≥ N with sector-relative Financial Health Scores. Override window with `--from` / `--to` |
 | `pnpm ingest` / `pnpm fetch` | `pnpm run cue -- ingest` |
 | `pnpm screen` | `pnpm run cue -- screen` |
 | `pnpm enrich` | `pnpm run cue -- enrich` |
@@ -248,6 +248,43 @@ pnpm run lint          # eslint
 ```
 
 Conventions: strict TypeScript, ESM **`import`/`export`**, no ORM (prepared SQL in `queries.ts`), env only through **`getConfig()`**.
+
+---
+
+## Backtest Research: Quality Floor (Phase 3)
+
+Phase 3 developed a **sector-relative Financial Health Score** calibrated for the Nasdaq 100 and ran a full backtest sweep (2023–2025) to find a viable quality floor.
+
+### Formula (NDX-calibrated)
+
+| Sub-score | Weight | Scoring method |
+|-----------|--------|----------------|
+| Profitability | 0.30 | ROE sector-relative (2× median = 1.0, at median = 0.7) |
+| Cash health | 0.20 | D/E sector-relative (≤0.5× median = 1.0, at median = 0.7) |
+| Valuation | 0.25 | P/E/P/S/P/B sector-relative (≤0.67× median = 1.0) |
+| Trend confirm | 0.20 | Close above SMA200 = 1.0 |
+| Completeness | 0.05 | Fraction of 15 Yahoo fields non-null |
+
+### Sweep Results
+
+| Filter | CAGR | MaxDD | Sharpe | WinRate | Trades |
+|--------|:----:|:-----:|:------:|:-------:|:-----:|
+| Baseline | **21.82%** | 10.51% | 1.198 | 54.9% | 102 |
+| **Q ≥ 1.5** | **22.07%** ✨ | **9.15%** | **1.237** ✨ | 55.7% | 97 |
+| Q ≥ 2.0 | 8.64% | 9.15% | 0.456 | 51.4% | 74 |
+| Q ≥ 3.0 | 6.63% | 11.07% | 0.303 | 49.2% | 59 |
+
+### Verdict
+
+- **Soft gate (Q ≥ 1.5):** ✅ Viable — slightly beats baseline with better Sharpe and lower drawdown. Excludes only 5 of the worst-quality tickers.
+- **Hard gate (≥ 2.0):** ❌ Not recommended — any threshold that excludes >10% of trades cuts CAGR by more than half.
+
+Run the sweep yourself:
+```bash
+pnpm run backtest -- --quality-floor 1.5 --from 2023-01-01 --to 2025-12-31
+```
+
+Full research archive: **`spec/cue-phase3-complete.md`**.
 
 ---
 
