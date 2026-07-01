@@ -184,6 +184,8 @@ export interface BuyAlertPendingRow {
   sector: string | null;
   confidence: string | null;
   enrichmentStatus: string;
+  /** Phase 1: Financial Health Score from fundamentals_cache.quality (null when not computed). */
+  qualityScore: number | null;
 }
 
 /** SELL signal row for Telegram exit alerts. */
@@ -225,7 +227,7 @@ export function listSellSignalsReadyToAlert(db: CueDatabase): SellAlertPendingRo
     .all() as SellAlertPendingRow[];
 }
 
-/** BUY rows not yet Telegram-alerted; enrichments joined when present. */
+/** BUY rows not yet Telegram-alerted; enrichments + quality joined when present. */
 export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[] {
   const stmt = db.prepare(`
     SELECT
@@ -245,9 +247,11 @@ export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[
       e.earnings_date AS earningsDate,
       e.sector AS sector,
       e.confidence AS confidence,
-      COALESCE(e.status, 'OK') AS enrichmentStatus
+      COALESCE(e.status, 'OK') AS enrichmentStatus,
+      CAST(json_extract(fc.payload_json, '$.quality.financialHealthScore') AS REAL) AS qualityScore
     FROM signals s
     LEFT JOIN enrichments e ON e.signal_id = s.id
+    LEFT JOIN fundamentals_cache fc ON fc.ticker = s.ticker AND fc.as_of_date = s.date
     WHERE s.signal = 'BUY' AND s.alerted = 0
     ORDER BY s.date ASC, s.ticker ASC
   `);
@@ -341,6 +345,8 @@ export interface RecentSignal {
   exit_reason: string | null;
   /** Populated for SELL rows only: realised P&L % vs entry price. */
   pnl_pct: number | null;
+  /** Phase 1: Financial Health Score (null when not computed). */
+  qualityScore: number | null;
 }
 
 export interface BacktestSummary {
@@ -586,6 +592,7 @@ export function extractDashboardPayloadFromDb(db: CueDatabase): DashboardPayload
         e.rationale AS rationale,
         e.sector AS sector,
         COALESCE(e.status, 'OK') AS enrichmentStatus,
+        CAST(json_extract(fc.payload_json, '$.quality.financialHealthScore') AS REAL) AS qualityScore,
         closed.exit_reason AS exit_reason,
         CASE
           WHEN closed.entry_price IS NOT NULL AND closed.entry_price > 0
@@ -600,6 +607,7 @@ export function extractDashboardPayloadFromDb(db: CueDatabase): DashboardPayload
         JOIN signals bs ON bs.id = p.signal_id
         WHERE p.status != 'OPEN'
       ) closed ON s.signal = 'SELL' AND closed.ticker = s.ticker AND closed.exit_date = s.date
+      LEFT JOIN fundamentals_cache fc ON fc.ticker = s.ticker AND fc.as_of_date = s.date
       WHERE s.signal IN ('BUY', 'SELL')
       ORDER BY s.date DESC
       LIMIT 20

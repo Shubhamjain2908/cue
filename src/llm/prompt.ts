@@ -11,12 +11,23 @@ export interface EnrichmentPrompt {
 }
 
 /**
+ * Optional quality block injected when available from fundamentals_cache.
+ * Bounded context: score + subscores + flags, no raw financials.
+ */
+export interface QualityBlock {
+  financialHealthScore: number;
+  subscores: { profitability: number; cashHealth: number; valuation: number };
+  flags: string[];
+}
+
+/**
  * Pure prompt builder: bounded context only, no external facts beyond DTO + signal row.
  */
 export function buildPrompt(
   ticker: string,
   yahoo: YahooEnrichmentDto,
   signal: BuySignalForEnrichmentRow,
+  qualityBlock?: QualityBlock | null,
 ): EnrichmentPrompt {
   const signalDate = signal.date;
   const returnPctDisplay = signal.momentum12_1Return * 100;
@@ -62,6 +73,17 @@ ${earningsRiskClause}`;
     loadUniverseTickers().length,
   );
 
+  const qualityBlockStr =
+    qualityBlock === null || qualityBlock === undefined
+      ? ""
+      : `\nFinancial Health Score: ${qualityBlock.financialHealthScore.toFixed(1)}/10\n` +
+        `Profitability: ${(qualityBlock.subscores.profitability * 100).toFixed(0)}% | ` +
+        `Cash Health: ${(qualityBlock.subscores.cashHealth * 100).toFixed(0)}% | ` +
+        `Valuation: ${(qualityBlock.subscores.valuation * 100).toFixed(0)}%` +
+        (qualityBlock.flags.length > 0
+          ? `\nFlags: ${qualityBlock.flags.join(", ")}`
+          : "");
+
   const user = `Ticker: ${ticker}
 Sector (from overview): ${yahoo.sector ?? "unknown"}
 Market Cap: ${yahoo.marketCap === null ? "unknown" : String(yahoo.marketCap)}
@@ -75,7 +97,7 @@ Days Until Earnings (from signal date ${signalDate}): ${daysUntil}
 12-1 Momentum Rank: ${rankLabel} (score: ${returnPctDisplay.toFixed(2)}%)
 Current Price: ${signal.price}
 ATR(14): ${signal.atr14}
-Initial Stop: ${signal.initialAtrStop ?? "N/A"}
+Initial Stop: ${signal.initialAtrStop ?? "N/A"}${qualityBlockStr}
 
 Assess sentiment and provide a one-paragraph rationale for this ${signal.signal} signal.`;
 

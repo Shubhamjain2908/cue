@@ -214,6 +214,15 @@ export function formatTelegramAlert(row: BuyAlertPendingRow): string {
     `Sector: ${row.sector ?? "N/A"}  |  Earnings: ${row.earningsDate ?? "N/A"}`,
   ];
 
+  // Phase 1: Financial Health Score advisory line
+  if (row.qualityScore !== null) {
+    let qualityLine = `Quality: ${row.qualityScore.toFixed(1)}/10`;
+    if (row.qualityScore < 4) {
+      qualityLine = `Quality: ${row.qualityScore.toFixed(1)}/10  ⚠️ LOW`;
+    }
+    lines.push(qualityLine);
+  }
+
   if (row.enrichmentStatus !== "OK") {
     lines.push(`⚠️ enrichment unavailable (${row.enrichmentStatus})`);
   }

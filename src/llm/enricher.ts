@@ -16,7 +16,7 @@ import { LLMTimeoutError } from "../errors.js";
 import { EnrichmentResultSchema, type EnrichmentResult } from "./enrichment.js";
 import { getLlmProvider } from "./factory.js";
 import { LlmJsonValidationError } from "./json.js";
-import { buildPrompt, calendarDaysBetweenIso } from "./prompt.js";
+import { buildPrompt, calendarDaysBetweenIso, type QualityBlock } from "./prompt.js";
 import type { LlmProvider } from "./types.js";
 import { fetchYahooEnrichmentDto, type YahooFinanceHandle } from "./yahooContext.js";
 
@@ -125,7 +125,41 @@ export async function runEnrichment(
 
   try {
     const yahoo = await (deps.fetchYahoo ?? fetchYahooEnrichmentDto)(row.ticker, deps.yahooFinance);
-    const { system, user } = buildPrompt(row.ticker, yahoo, row);
+
+    // Phase 1: read quality block from fundamentals_cache (best-effort, same DB handle)
+    let qualityBlock: QualityBlock | null = null;
+    try {
+      const qcRow = db
+        .prepare(
+          `SELECT CAST(json_extract(payload_json, '$.quality.financialHealthScore') AS REAL) AS score,
+                  json_extract(payload_json, '$.quality.subscores') AS subscores,
+                  json_extract(payload_json, '$.quality.flags') AS flags
+           FROM fundamentals_cache WHERE ticker = ? AND as_of_date = ?`,
+        )
+        .get(row.ticker, row.date) as
+        | { score: number | null; subscores: string | null; flags: string | null }
+        | undefined;
+      if (qcRow && qcRow.score !== null && qcRow.subscores !== null) {
+        const parsed = JSON.parse(qcRow.subscores) as {
+          profitability: number;
+          cashHealth: number;
+          valuation: number;
+        };
+        qualityBlock = {
+          financialHealthScore: qcRow.score,
+          subscores: {
+            profitability: parsed.profitability ?? 0,
+            cashHealth: parsed.cashHealth ?? 0,
+            valuation: parsed.valuation ?? 0,
+          },
+          flags: qcRow.flags ? (JSON.parse(qcRow.flags) as string[]) : [],
+        };
+      }
+    } catch {
+      // Non-critical: quality block is advisory only
+    }
+
+    const { system, user } = buildPrompt(row.ticker, yahoo, row, qualityBlock);
     const config = getConfig();
     const llm = deps.provider ?? getLlmProvider();
     const timeoutMs = config.VERTEX_TIMEOUT_MS;
