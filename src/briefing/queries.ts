@@ -273,6 +273,8 @@ export interface WatchlistBriefingRow {
   rationale: string | null;
   earningsFlag: number | null;
   earningsDate: string | null;
+  /** Phase 1.5: Financial Health Score from fundamentals_cache (null when not computed). */
+  qualityScore: number | null;
 }
 
 /** Unalerted WATCHLIST rows for session `asOf`, with optional enrichment join. */
@@ -298,9 +300,11 @@ export function listWatchlistSignalsForBriefing(
       e.sector AS sector,
       e.rationale AS rationale,
       e.earnings_flag AS earningsFlag,
-      e.earnings_date AS earningsDate
+      e.earnings_date AS earningsDate,
+      CAST(json_extract(fc.payload_json, '$.quality.financialHealthScore') AS REAL) AS qualityScore
     FROM signals s
     LEFT JOIN enrichments e ON e.signal_id = s.id
+    LEFT JOIN fundamentals_cache fc ON fc.ticker = s.ticker AND fc.as_of_date = s.date
     WHERE s.signal = 'WATCHLIST'
       AND s.date = @asOf
       AND s.alerted = 0

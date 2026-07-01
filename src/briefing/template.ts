@@ -78,6 +78,14 @@ export function formatWatchlistRationale(rationale: string | null): string | nul
   return truncateAtWord(picked, WATCHLIST_RATIONALE_MAX);
 }
 
+function formatWatchlistQuality(score: number | null): string {
+  if (score === null) {
+    return "";
+  }
+  const label = score < 4 ? `Health: ${score.toFixed(1)}/10 ⚠️` : `Health: ${score.toFixed(1)}/10`;
+  return `  |  ${label}`;
+}
+
 function formatWatchlistHeadLine(row: WatchlistBriefingRow): string {
   const ticker = row.ticker.padEnd(TICKER_COL_WIDTH).slice(0, TICKER_COL_WIDTH);
   const price = `$${row.price.toFixed(2)}`.padStart(PRICE_COL_WIDTH);
@@ -85,12 +93,13 @@ function formatWatchlistHeadLine(row: WatchlistBriefingRow): string {
   const sentiment = formatSentimentWithConfidence(row.sentiment, row.confidence);
   const sector = formatWatchlistSector(row.sector);
   const earnings = formatWatchlistEarnings(row.earningsFlag, row.earningsDate);
+  const quality = formatWatchlistQuality(row.qualityScore);
   const rankLabel = formatMomentumRankLabel(
     row.momentumRank,
     row.universeRankedCount ?? loadUniverseTickers().length,
     loadUniverseTickers().length,
   );
-  return `${rankLabel}  ${ticker} ${price}  12-1: ${mom}  ${sentiment} | ${sector} | ${earnings}`;
+  return `${rankLabel}  ${ticker} ${price}  12-1: ${mom}  ${sentiment} | ${sector} | ${earnings}${quality}`;
 }
 
 /** Telegram "Next in Rank" bench — read-only context, not an entry signal. */
