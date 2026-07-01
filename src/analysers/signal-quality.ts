@@ -38,6 +38,20 @@ export interface QualityInputFinancials {
   revenueGrowth: number | null;
 }
 
+/** Sector median financials for sector-relative scoring (Phase 3 research). */
+export interface SectorFinancialMedians {
+  /** Median trailing P/E for this sector. */
+  trailingPE: number;
+  /** Median price-to-sales for this sector. */
+  priceToSales: number;
+  /** Median price-to-book for this sector. */
+  priceToBook: number;
+  /** Median debt-to-equity for this sector. */
+  debtToEquity: number;
+  /** Median return-on-equity for this sector. */
+  returnOnEquity: number;
+}
+
 export interface QualityInput {
   /** Financial metrics from Yahoo (pre-computed modules). */
   financials: QualityInputFinancials;
@@ -51,6 +65,13 @@ export interface QualityInput {
    * Phase 1: defaults to null if omitted.
    */
   priceAboveSma200?: boolean | null;
+  /**
+   * Sector median financials for sector-relative scoring (Phase 3).
+   * When provided, valuation / cash health / profitability are scored
+   * relative to sector peers instead of using absolute thresholds.
+   * Defaults to undefined (absolute scoring).
+   */
+  sectorMedians?: SectorFinancialMedians;
 }
 
 export interface QualitySubscores {
@@ -126,14 +147,23 @@ function normaliseLowerIsBetter(value: number | null, floorAt: number): number {
 /**
  * Profitability sub-score (0-1).
  *
- * Averages normalised ROE, ROA, gross margins, and operating margins.
- * Fewer available fields → lower weight per field but still tries to score.
+ * When sectorMedians are provided, scores ROE relative to sector median.
+ * Otherwise uses absolute thresholds on available fields.
  */
-export function computeProfitability(financials: QualityInputFinancials): number {
+export function computeProfitability(
+  financials: QualityInputFinancials,
+  sectorMedians?: SectorFinancialMedians,
+): number {
   const scores: number[] = [];
 
-  // ROE: 20%+ = full score
-  scores.push(normaliseHigherIsBetter(financials.returnOnEquity, 0.2));
+  // ROE: sector-relative when medians available, else absolute (20%+ = full score)
+  if (financials.returnOnEquity !== null) {
+    if (sectorMedians && sectorMedians.returnOnEquity > 0) {
+      scores.push(scoreRoeRelative(financials.returnOnEquity, sectorMedians.returnOnEquity));
+    } else {
+      scores.push(normaliseHigherIsBetter(financials.returnOnEquity, 0.2));
+    }
+  }
   // ROA: 10%+ = full score
   scores.push(normaliseHigherIsBetter(financials.returnOnAssets, 0.1));
   // Gross margins: 60%+ = full score
@@ -143,15 +173,43 @@ export function computeProfitability(financials: QualityInputFinancials): number
   // Profit margins: 15%+ = full score (bonus signal)
   scores.push(normaliseHigherIsBetter(financials.profitMargins, 0.15));
 
-  return scores.reduce((a, b) => a + b, 0) / scores.length;
+  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+}
+
+/**
+ * Score ROE relative to sector median.
+ * Higher ROE than sector peers = better.
+ */
+function scoreRoeRelative(roe: number, medianRoe: number): number {
+  if (roe >= medianRoe * 2.0) return 1;    // > 2× sector median — exceptional
+  if (roe >= medianRoe * 1.5) return 0.85;  // 1.5-2× sector median — strong
+  if (roe >= medianRoe * 1.0) return 0.7;   // at/below sector median
+  if (roe >= medianRoe * 0.5) return 0.4;   // below median but positive
+  if (roe > 0) return 0.2;                   // positive but well below median
+  return 0;                                   // negative ROE
+}
+
+/**
+ * Score D/E relative to sector median.
+ * Lower leverage than sector peers = better.
+ */
+function scoreDeRelative(de: number, medianDe: number): number {
+  if (de <= medianDe * 0.5) return 1;       // half the sector median — very healthy
+  if (de <= medianDe * 1.0) return 0.7;      // at/below sector median
+  if (de <= medianDe * 1.5) return 0.4;      // moderately above median
+  return 0.1;                                  // significantly above median (high leverage)
 }
 
 /**
  * Cash-health sub-score (0-1).
  *
  * Combines operating cashflow, free cashflow, leverage, and liquidity.
+ * When sectorMedians are provided, D/E is scored relative to sector median.
  */
-export function computeCashHealth(financials: QualityInputFinancials): number {
+export function computeCashHealth(
+  financials: QualityInputFinancials,
+  sectorMedians?: SectorFinancialMedians,
+): number {
   const scores: number[] = [];
 
   // Operating cashflow positive → 1, else 0
@@ -162,8 +220,14 @@ export function computeCashHealth(financials: QualityInputFinancials): number {
   if (financials.freeCashflow !== null) {
     scores.push(financials.freeCashflow > 0 ? 1 : 0);
   }
-  // Debt-to-equity: < 0.5 ideal, decays after 1.0
-  scores.push(normaliseLowerIsBetter(financials.debtToEquity, 0.5));
+  // Debt-to-equity: sector-relative when medians available, else absolute (< 0.5 ideal)
+  if (financials.debtToEquity !== null) {
+    if (sectorMedians && sectorMedians.debtToEquity > 0) {
+      scores.push(scoreDeRelative(financials.debtToEquity, sectorMedians.debtToEquity));
+    } else {
+      scores.push(normaliseLowerIsBetter(financials.debtToEquity, 0.5));
+    }
+  }
   // Current ratio: 1.5-3 ideal; penalise below 1 or above 5
   if (financials.currentRatio !== null) {
     const cr = financials.currentRatio;
@@ -182,51 +246,86 @@ export function computeCashHealth(financials: QualityInputFinancials): number {
 }
 
 /**
- * Valuation sub-score (0-1) — absolute thresholds (Phase 1).
- *
- * Uses trailing P/E, forward P/E, P/S, and P/B against fixed thresholds.
- * Sector-relative mode will be added in Phase 2 when sector-peer cache fills.
+ * Score a single valuation metric relative to a sector median.
+ * Used by computeValuation when sector medians are available.
  */
-export function computeValuation(financials: QualityInputFinancials): number {
+function scoreRelativeToMedian(metric: number, median: number): number {
+  if (metric <= median * 0.67) return 1;      // Significantly cheaper than sector
+  if (metric <= median * 1.0) return 0.7;      // At or below sector median
+  if (metric <= median * 1.5) return 0.4;      // Moderately above median
+  return 0.1;                                   // Significantly above median (expensive)
+}
+
+/**
+ * Score a single valuation metric against absolute thresholds.
+ * Used by computeValuation as fallback when no sector medians.
+ */
+function scoreAbsolute(metric: number): number {
+  // Accept any positive value; thresholds scale with metric category
+  if (metric < 15) return 1;
+  if (metric < 25) return 0.7;
+  if (metric < 40) return 0.4;
+  return 0.1;
+}
+
+/**
+ * Valuation sub-score (0-1).
+ *
+ * When `sectorMedians` are provided, uses sector-relative thresholds:
+ * - metric <= median * 0.67 → 1 (significantly cheaper)
+ * - metric <= median * 1.0 → 0.7 (at/below median)
+ * - metric <= median * 1.5 → 0.4 (moderately above)
+ * - metric > median * 1.5 → 0.1 (significantly above)
+ *
+ * Falls back to absolute thresholds when no medians provided.
+ */
+export function computeValuation(
+  financials: QualityInputFinancials,
+  sectorMedians?: SectorFinancialMedians,
+): number {
   const scores: number[] = [];
 
-  // Trailing P/E: < 15 ideal, < 25 ok, < 40 stretched
+  const useRelative = sectorMedians !== undefined;
+
+  // Trailing P/E
   if (financials.trailingPE !== null && financials.trailingPE > 0) {
-    const pe = financials.trailingPE;
-    if (pe < 15) scores.push(1);
-    else if (pe < 25) scores.push(0.7);
-    else if (pe < 40) scores.push(0.4);
-    else scores.push(0.1);
+    scores.push(
+      useRelative && sectorMedians!.trailingPE > 0
+        ? scoreRelativeToMedian(financials.trailingPE, sectorMedians!.trailingPE)
+        : scoreAbsolute(financials.trailingPE),
+    );
   }
 
-  // Forward P/E: < 15 ideal, < 25 ok
+  // Forward P/E
   if (financials.forwardPE !== null && financials.forwardPE > 0) {
-    const fpe = financials.forwardPE;
-    if (fpe < 15) scores.push(1);
-    else if (fpe < 25) scores.push(0.7);
-    else if (fpe < 40) scores.push(0.4);
-    else scores.push(0.1);
+    scores.push(
+      useRelative && sectorMedians!.trailingPE > 0
+        ? scoreRelativeToMedian(financials.forwardPE, sectorMedians!.trailingPE)
+        : scoreAbsolute(financials.forwardPE),
+    );
   }
 
-  // Price-to-sales: < 5 ideal, < 10 ok, < 20 stretched
+  // Price-to-sales
   if (financials.priceToSalesTrailing12Months !== null && financials.priceToSalesTrailing12Months > 0) {
     const ps = financials.priceToSalesTrailing12Months;
-    if (ps < 5) scores.push(1);
-    else if (ps < 10) scores.push(0.7);
-    else if (ps < 20) scores.push(0.4);
-    else scores.push(0.1);
+    scores.push(
+      useRelative && sectorMedians!.priceToSales > 0
+        ? scoreRelativeToMedian(ps, sectorMedians!.priceToSales)
+        : scoreAbsolute(ps),
+    );
   }
 
-  // Price-to-book: < 3 ideal, < 5 ok, < 10 stretched
+  // Price-to-book
   if (financials.priceToBook !== null && financials.priceToBook > 0) {
     const pb = financials.priceToBook;
-    if (pb < 3) scores.push(1);
-    else if (pb < 5) scores.push(0.7);
-    else if (pb < 10) scores.push(0.4);
-    else scores.push(0.1);
+    scores.push(
+      useRelative && sectorMedians!.priceToBook > 0
+        ? scoreRelativeToMedian(pb, sectorMedians!.priceToBook)
+        : scoreAbsolute(pb),
+    );
   }
 
-  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0.5; // neutral default
+  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0.5;
 }
 
 /**
@@ -344,12 +443,22 @@ export function extractQualityMetrics(financials: QualityInputFinancials): Quali
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Weights for the Financial Health Score.
+ *
+ * Adjusted for NDX (Phase 3 research):
+ * - profitability ↑ (0.30): ROE has good data coverage; make it matter more
+ * - cashHealth ↓ (0.20): only D/E is available; sector-relative helps but still sparse
+ * - valuation (0.25): P/E, P/S, P/B all available with sector-relative scoring
+ * - trendConfirm ↑ (0.20): SMA200 is reliable binary signal for momentum context
+ * - completeness ↓ (0.05): 13/15 fields are null in NDX; don't penalise uniformly
+ */
 const WEIGHTS = {
-  profitability: 0.25,
-  cashHealth: 0.25,
+  profitability: 0.30,
+  cashHealth: 0.20,
   valuation: 0.25,
-  trendConfirm: 0.15,
-  completeness: 0.10,
+  trendConfirm: 0.20,
+  completeness: 0.05,
 } as const;
 
 /**
@@ -370,9 +479,9 @@ const WEIGHTS = {
  * ```
  */
 export function computeFinancialHealthScore(input: QualityInput): QualityResult {
-  const profitability = computeProfitability(input.financials);
-  const cashHealth = computeCashHealth(input.financials);
-  const valuation = computeValuation(input.financials);
+  const profitability = computeProfitability(input.financials, input.sectorMedians);
+  const cashHealth = computeCashHealth(input.financials, input.sectorMedians);
+  const valuation = computeValuation(input.financials, input.sectorMedians);
   const trendConfirm = computeTrendConfirm(input.priceAboveSma200);
   const completeness = computeCompleteness(input.financials);
 

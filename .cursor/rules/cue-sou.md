@@ -259,7 +259,9 @@ See **`src/config/index.ts`** for the full **`zod`** schema. Highlights:
 | 7 — Bug fixes + capital safety + instrumentation | `REBALANCE_DROP` exit reason; backtest `strategy` discriminator; corporate actions split adjuster; bear backtest extension (Sharpe 0.956 documented); healthcheck cron; watchlist bench #4–#8; **Saturday rebalance** cadence fix | ✅ Complete |
 | 8 — Scheduler reliability + stop audit | Scheduler idempotency (`pipeline_state`); trailing-stop audit log (`stop_movements`); parallel LLM enrichment; P7-G VIX research (falsified) | ✅ Complete |
 | 9 — Stop-replay correctness + ingestor modernisation | `replayExitReason` stale-stop fix; ratchet `nextHigh` over all unevaluated bars; SELL Telegram alerts; same-day artefact filter; T+0-first ingestor + auto-backfill; scheduler 06:00 ET window | ✅ Complete |
-| **9b — Arch-review gap closure (June 2026)** | PR-4: corporate actions + split adjust; PR-5: Yahoo 15s timeout, T-1 staleness flag, sizer fallback 5% cap; PR-6: `REBALANCE_DROP` in `backtest_trades` (migration `015`) + backtest gate id=82; PR-7: `alerted_at` audit column (migration `016`); PR-9: SQLite WAL + pragmas; PR-10: unified `PIPELINE_STEPS` registry, SELL `signal_type: "MOMENTUM"`, pulse suppression, `verifyMigrations`, reason emoji labels; PR-11: trading-days fix + `alerted_at` on Recent Signals dashboard; PR-12: `positions.current_rank` stamped each rebalance (migration `017`); PR-13: Massive holiday `results` omit → T−1 fallback (not ingest Zod abort) | ✅ Complete |
+| **9b — Arch-review gap closure (June 2026)** | PR-4: corporate actions + split adjust; PR-5: Yahoo 15s timeout, T-1 staleness flag, sizer fallback 5% cap; PR-6: `REBALANCE_DROP` in `backtest_trades` (migration `015`) + backtest gate id=82; PR-7: `alerted_at` audit column (migration `016`); PR-9: SQLite WAL + pragmas; PR-10: unified `PIPELINE_STEPS` registry, SELL `signal_type: "MOMENTUM"`, pulse suppression, `verifyMigrations`, reason emoji labels; PR-11: trading-days fix + `alerted_at` on Recent Signals dashboard; PR-12: `positions.current_rank` stamped each rebalance (migration `017`); PR-13: Massive holiday `results` omit → T−1 fallback (not ingest Zod abort); PR-14: `enrich-fundamentals` batch rotation via `fundamentals_cache` | ✅ Complete |
+
+| **Phase 3 — Quality floor research** | Sector-relative Financial Health Score calibration for NDX. Sweep at thresholds 1.0–6.0 with SMA200 trend confirm, sector-relative P/E/P/S/P/B/D/E/ROE, and rebalanced weights (profitability 0.30, cashHealth 0.20, valuation 0.25, trendConfirm 0.20, completeness 0.05). Soft gate **Q ≥ 1.5** viable (22.07% CAGR, 1.237 Sharpe, 97 trades). Hard gate not recommended. | ✅ Research complete, soft gate documented |
 
 
 ---
@@ -374,7 +376,7 @@ Full record: **`spec/cue-phase9-complete.md`**.
 
 **Phase 2 — Soft gates (deferred):** sector concentration warning, LOW QUALITY badge in Telegram BUY header. No BUY suppression.
 
-**Phase 3 — Hard gates (backtest research required):** Piotroski-style quality floors, max sector allocation caps.
+**Phase 3 — Hard gates (backtest research completed):** Calibrated sector-relative Financial Health Score for NDX. Soft gate at **Q ≥ 1.5** (advisory exclusion floor — does not degrade baseline: 22.07% CAGR, 1.237 Sharpe, 97 trades). Hard gate not viable — any threshold ≥ 2.0 cuts CAGR by more than half. See **`spec/cue-phase3-complete.md`** for full research archive.
 
 ---
 
