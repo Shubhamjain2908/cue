@@ -315,8 +315,9 @@ export async function fetchExtendedYahooContext(
   exchangeDate: string,
   yf: YahooFinanceHandle = new YahooFinance({ suppressNotices: ["yahooSurvey"] }),
   nowMs: number = Date.now(),
+  forceRefresh?: boolean,
 ): Promise<YahooFundamentalsPayload> {
-  const dto = await fetchYahooEnrichmentDto(ticker, yf, nowMs);
+  const dto = await fetchYahooEnrichmentDto(ticker, yf, nowMs, forceRefresh);
   return buildValidatedFundamentalsPayload(ticker, exchangeDate, dto);
 }
 
@@ -324,6 +325,7 @@ export async function fetchYahooEnrichmentDto(
   ticker: string,
   yf: YahooFinanceHandle = new YahooFinance({ suppressNotices: ["yahooSurvey"] }),
   nowMs: number = Date.now(),
+  forceRefresh?: boolean,
 ): Promise<YahooEnrichmentDto> {
   const config = getConfig();
   const root = path.join(resolveCacheRoot(config.CACHE_DIR), "yahoo");
@@ -332,7 +334,8 @@ export async function fetchYahooEnrichmentDto(
   const calPath = path.join(root, `${safe}_calendar.json`);
   const profPath = path.join(root, `${safe}_profile.json`);
 
-  let headlines =
+  let headlines: Array<{ title: string; source?: string; publishedAt?: string }> | null =
+    forceRefresh ? null :
     readJsonCache(newsPath, NEWS_TTL_MS, cachedNewsBundleSchema)?.headlines ?? null;
   if (headlines === null) {
     // Quotes are unused; skip quote validation (Yahoo `typeDisp` casing drifts vs library schema).
@@ -351,7 +354,7 @@ export async function fetchYahooEnrichmentDto(
   }
 
   let nextEarningsDate: string | null;
-  const calCached = readJsonCache(calPath, CALENDAR_TTL_MS, cachedCalendarBundleSchema);
+  const calCached = forceRefresh ? null : readJsonCache(calPath, CALENDAR_TTL_MS, cachedCalendarBundleSchema);
   if (calCached !== null) {
     nextEarningsDate = calCached.nextEarningsDate;
   } else {
@@ -367,7 +370,7 @@ export async function fetchYahooEnrichmentDto(
     });
   }
 
-  let profile = readJsonCache(profPath, PROFILE_TTL_MS, cachedProfileBundleSchema);
+  let profile = forceRefresh ? null : readJsonCache(profPath, PROFILE_TTL_MS, cachedProfileBundleSchema);
   if (profile !== null && profile.financials === undefined) {
     profile = null;
   }
