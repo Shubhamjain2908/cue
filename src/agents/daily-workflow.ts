@@ -34,13 +34,21 @@ export interface PipelineStep {
 export const PIPELINE_STEPS: PipelineStep[] = [
   { name: "ingest", cueArgs: ["ingest"], critical: true, runOn: "both" },
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
+  { name: "screen", cueArgs: ["screen"], critical: true, runOn: "rebalance" },
   {
     name: "enrich-fundamentals",
     cueArgs: ["enrich-fundamentals"],
     critical: false,
     runOn: "rebalance",
   },
-  { name: "screen", cueArgs: ["screen"], critical: true, runOn: "rebalance" },
+  {
+    // Runs after enrich-fundamentals so the Yahoo payload is already in
+    // fundamentals_cache before we merge the quality block (last writer wins).
+    name: "quality-snapshot",
+    cueArgs: ["quality-snapshot"],
+    critical: false,
+    runOn: "rebalance",
+  },
   {
     name: "execute-stops",
     cueArgs: ["execute-stops"],

@@ -77,6 +77,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   backfill-prices      Deep grouped-daily OHLCV backfill for universe ranking gaps
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUY and WATCHLIST signals
+  quality-snapshot     Phase 1: compute Financial Health Score for BUY tickers (reads Yahoo payload, persists quality block)
   refresh-thesis       Daily position thesis refresh (P7-F; gated on 15+ genuine closed trades)
   llm-smoke            Live LLM check: text + JSON + mini thesis (active provider)
   brief                Static HTML dashboard + Telegram alerts
@@ -242,6 +243,29 @@ screen.action(
     }
     const { runScreenCli } = await import("./analysers/momentum-screener.js");
     runScreenCli(tail);
+  }),
+);
+
+const qualitySnapshot = program
+  .command("quality-snapshot")
+  .description("Financial Health Score for BUY tickers (reads Yahoo payload from fundamentals_cache, persists quality block)")
+  .option("--ticker <symbol>", "repeatable: snapshot specific tickers (default: today's unalerted BUY signals)")
+  .allowUnknownOption(true);
+
+qualitySnapshot.action(
+  wrap("quality-snapshot", async () => {
+    const argv = process.argv;
+    const idx = argv.indexOf("quality-snapshot");
+    const rest = idx >= 0 ? argv.slice(idx + 1) : [];
+    const tickers: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === "--ticker" && i + 1 < rest.length) {
+        tickers.push(rest[i + 1]!.toUpperCase());
+        i++;
+      }
+    }
+    const { runQualitySnapshotCli } = await import("./analysers/quality-snapshot-cli.js");
+    await runQualitySnapshotCli({ tickers: tickers.length > 0 ? tickers : undefined });
   }),
 );
 

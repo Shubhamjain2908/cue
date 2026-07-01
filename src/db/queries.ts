@@ -44,6 +44,44 @@ export function upsertFundamentalsCache(ticker: string, asOfDate: string, payloa
 }
 
 /**
+ * Read the `payload_json` for a fundamentals_cache row.
+ * Returns `null` when no row exists.
+ */
+export function readFundamentalsPayload(
+  ticker: string,
+  asOfDate: string,
+  db: SqliteConnection = getDbHandleForFundamentals(),
+): Record<string, unknown> | null {
+  const row = db
+    .prepare(`SELECT payload_json FROM fundamentals_cache WHERE ticker = ? AND as_of_date = ?`)
+    .get(ticker.toUpperCase(), asOfDate) as { payload_json: string } | undefined;
+  if (row === undefined) return null;
+  try {
+    return JSON.parse(row.payload_json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge a quality block into an existing `fundamentals_cache.payload_json`.
+ * Reads the current payload, injects `payload.quality = { … }`, and upserts.
+ * Safe to call when no row exists yet (creates one with just the quality block).
+ */
+export function upsertFundamentalsPayloadQuality(
+  ticker: string,
+  asOfDate: string,
+  qualityBlock: Record<string, unknown>,
+): void {
+  const existing = readFundamentalsPayload(ticker, asOfDate);
+  const merged = {
+    ...(existing ?? {}),
+    quality: qualityBlock,
+  };
+  upsertFundamentalsCache(ticker, asOfDate, JSON.stringify(merged));
+}
+
+/**
  * Next fundamentals batch: universe order, skipping tickers already in
  * `fundamentals_cache` for `asOfDate`. Used by `cue enrich-fundamentals` rate-limit guard.
  */
