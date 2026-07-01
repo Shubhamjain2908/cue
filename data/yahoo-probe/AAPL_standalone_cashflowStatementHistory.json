@@ -1,0 +1,27 @@
+{
+  "cashflowStatementHistory": {
+    "cashflowStatements": [
+      {
+        "maxAge": 1,
+        "endDate": "2025-09-30T00:00:00.000Z",
+        "netIncome": 112010000000
+      },
+      {
+        "maxAge": 1,
+        "endDate": "2024-09-30T00:00:00.000Z",
+        "netIncome": 93736000000
+      },
+      {
+        "maxAge": 1,
+        "endDate": "2023-09-30T00:00:00.000Z",
+        "netIncome": 96995000000
+      },
+      {
+        "maxAge": 1,
+        "endDate": "2022-09-30T00:00:00.000Z",
+        "netIncome": 99803000000
+      }
+    ],
+    "maxAge": 86400
+  }
+}

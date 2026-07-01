@@ -1,0 +1,23 @@
+{
+  "balanceSheetHistoryQuarterly": {
+    "balanceSheetStatements": [
+      {
+        "maxAge": 1,
+        "endDate": "2026-05-31T00:00:00.000Z"
+      },
+      {
+        "maxAge": 1,
+        "endDate": "2026-02-28T00:00:00.000Z"
+      },
+      {
+        "maxAge": 1,
+        "endDate": "2025-11-30T00:00:00.000Z"
+      },
+      {
+        "maxAge": 1,
+        "endDate": "2025-08-31T00:00:00.000Z"
+      }
+    ],
+    "maxAge": 86400
+  }
+}
