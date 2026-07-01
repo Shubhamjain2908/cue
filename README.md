@@ -16,7 +16,7 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 
 - Pulls **EOD OHLCV** for the configured universe and stores it in SQLite.
 - **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
-- On **Sunday rebalance** path (uses **Friday** EOD bars): **split adjustment**, fundamentals prefetch, full screen with `--force-rebalance`, LLM enrich, then brief (BUY alerts + optional **Next in Rank** bench).
+- On **Sunday rebalance** path (uses **Friday** EOD bars): **split adjustment**, full screen with `--force-rebalance`, batch enrich-fundamentals, quality-snapshot (Financial Health Score), LLM enrich, then brief (BUY alerts + quality line + optional **Next in Rank** bench).
 - On **Tue–Sat stop** path: price refresh, **split adjustment**, **execute-stops**, then brief (no rebalance-style screen).
 - After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, pipeline output, and critical-step exit codes in `pipeline_state`, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
@@ -41,6 +41,8 @@ flowchart LR
   Screen --> DB
   DB --> Fund["enrich-fundamentals\nYahoo → cache"]
   Fund --> Disk[("disk cache\nCACHE_DIR")]
+  DB --> Qual["quality-snapshot\nFinancial Health Score"]
+  Qual --> DB
   DB --> Stops["execute-stops\nTue–Sat scheduler"]
   Stops --> DB
   DB --> LLM["enrich\nLLM + Yahoo context"]
@@ -138,7 +140,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- backfill-prices` | Deep grouped-daily OHLCV backfill for universe + QQQ over a date range (fills &lt;252-bar ranking gaps). Options: `--from YYYY-MM-DD` (default: 600 calendar days before `--to`), `--to YYYY-MM-DD` (default: latest QQQ date in DB), `--min-bars N` (coverage report threshold, default 252) |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache + `fundamentals_cache`. Default: 3 uncached tickers/run (rotates through universe). `--force` = full universe in one run; `--limit N` = larger batch; `--ticker SYM` = one name |
 | `pnpm run cue -- screen` | Momentum screener / ranking. Ranks eligible tickers only (&lt;252 bars excluded, logged); alerts show `#rank of eligible (universe total)`. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
-| `pnpm run cue -- quality-snapshot` | **Phase 1** — compute Financial Health Score for tickers (reads widened Yahoo payload from `fundamentals_cache`, writes `payload_json.quality`). `--ticker SYM` (repeatable). _Available after PR 2 merges._ |
+| `pnpm run cue -- quality-snapshot` | Compute Financial Health Score for BUY tickers (reads Yahoo payload from `fundamentals_cache`, writes `payload_json.quality`). `--ticker SYM` (repeatable). |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
 
 ### LLM & brief
@@ -219,7 +221,8 @@ cue/
   src/
     agents/           thesis-generator, daily-workflow (registry), scheduler.ts, healthcheck.ts
     analysers/        momentum-screener (screen, execute-stops CLI),
-                      signal-quality (Financial Health Score — Phase 1 advisory)
+                      signal-quality (Financial Health Score),
+                      quality-snapshot-cli (CLI entry for quality-snapshot)
     briefing/         dashboard HTML, Telegram dispatcher
     cli/              doctor, llm-smoke, shared CLI helpers (`ymd-arg.ts`)
     config/           env (zod), cue-timezone.ts
