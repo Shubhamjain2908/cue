@@ -42,6 +42,25 @@ const cachedFinancialsSchema = z.object({
   trailingPE: z.number().nullable(),
   returnOnEquity: z.number().nullable(),
   debtToEquity: z.number().nullable(),
+  // Extended fields (Phase 1 quality-score; required like original 3 — old cache files
+  // missing these will fail validation and be re-fetched within 7-day PROFILE_TTL_MS).
+  returnOnAssets: z.number().nullable(),
+  grossMargins: z.number().nullable(),
+  operatingMargins: z.number().nullable(),
+  profitMargins: z.number().nullable(),
+  operatingCashflow: z.number().nullable(),
+  freeCashflow: z.number().nullable(),
+  currentRatio: z.number().nullable(),
+  totalDebt: z.number().nullable(),
+  totalCash: z.number().nullable(),
+  priceToSalesTrailing12Months: z.number().nullable(),
+  forwardPE: z.number().nullable(),
+  priceToBook: z.number().nullable(),
+  bookValue: z.number().nullable(),
+  earningsGrowth: z.number().nullable(),
+  revenueGrowth: z.number().nullable(),
+  enterpriseValue: z.number().nullable(),
+  netIncomeToCommon: z.number().nullable(),
 });
 
 const cachedProfileBundleSchema = z.object({
@@ -83,6 +102,23 @@ export type YahooEnrichmentDto = {
     trailingPE: number | null;
     returnOnEquity: number | null;
     debtToEquity: number | null;
+    returnOnAssets: number | null;
+    grossMargins: number | null;
+    operatingMargins: number | null;
+    profitMargins: number | null;
+    operatingCashflow: number | null;
+    freeCashflow: number | null;
+    currentRatio: number | null;
+    totalDebt: number | null;
+    totalCash: number | null;
+    priceToSalesTrailing12Months: number | null;
+    forwardPE: number | null;
+    priceToBook: number | null;
+    bookValue: number | null;
+    earningsGrowth: number | null;
+    revenueGrowth: number | null;
+    enterpriseValue: number | null;
+    netIncomeToCommon: number | null;
   };
 };
 
@@ -194,12 +230,55 @@ function parseSearchNews(raw: unknown): Array<{
 
 function extractFinancialsFromQuoteSummary(qs: {
   summaryDetail?: { trailingPE?: unknown };
-  financialData?: { returnOnEquity?: unknown; debtToEquity?: unknown };
+  financialData?: {
+    returnOnEquity?: unknown;
+    debtToEquity?: unknown;
+    returnOnAssets?: unknown;
+    grossMargins?: unknown;
+    operatingMargins?: unknown;
+    profitMargins?: unknown;
+    operatingCashflow?: unknown;
+    freeCashflow?: unknown;
+    currentRatio?: unknown;
+    totalDebt?: unknown;
+    totalCash?: unknown;
+    priceToSalesTrailing12Months?: unknown;
+    earningsGrowth?: unknown;
+    revenueGrowth?: unknown;
+    enterpriseValue?: unknown;
+    netIncomeToCommon?: unknown;
+  };
+  defaultKeyStatistics?: {
+    priceToBook?: unknown;
+    bookValue?: unknown;
+    forwardPE?: unknown;
+    enterpriseValue?: unknown;
+    netIncomeToCommon?: unknown;
+  };
 }): YahooEnrichmentDto["financials"] {
+  const fd = qs.financialData ?? {};
+  const dk = qs.defaultKeyStatistics ?? {};
   return {
     trailingPE: numOrNull(qs.summaryDetail?.trailingPE),
-    returnOnEquity: numOrNull(qs.financialData?.returnOnEquity),
-    debtToEquity: numOrNull(qs.financialData?.debtToEquity),
+    returnOnEquity: numOrNull(fd.returnOnEquity),
+    debtToEquity: numOrNull(fd.debtToEquity),
+    returnOnAssets: numOrNull(fd.returnOnAssets),
+    grossMargins: numOrNull(fd.grossMargins),
+    operatingMargins: numOrNull(fd.operatingMargins),
+    profitMargins: numOrNull(fd.profitMargins),
+    operatingCashflow: numOrNull(fd.operatingCashflow),
+    freeCashflow: numOrNull(fd.freeCashflow),
+    currentRatio: numOrNull(fd.currentRatio),
+    totalDebt: numOrNull(fd.totalDebt),
+    totalCash: numOrNull(fd.totalCash),
+    priceToSalesTrailing12Months: numOrNull(fd.priceToSalesTrailing12Months),
+    forwardPE: numOrNull(dk.forwardPE),
+    priceToBook: numOrNull(dk.priceToBook),
+    bookValue: numOrNull(dk.bookValue),
+    earningsGrowth: numOrNull(fd.earningsGrowth),
+    revenueGrowth: numOrNull(fd.revenueGrowth),
+    enterpriseValue: numOrNull(dk.enterpriseValue ?? fd.enterpriseValue),
+    netIncomeToCommon: numOrNull(dk.netIncomeToCommon ?? fd.netIncomeToCommon),
   };
 }
 
@@ -295,7 +374,7 @@ export async function fetchYahooEnrichmentDto(
 
   if (profile === null) {
     const qs = await yf.quoteSummary(ticker, {
-      modules: ["assetProfile", "summaryDetail", "financialData"],
+      modules: ["assetProfile", "summaryDetail", "financialData", "defaultKeyStatistics"],
     });
     const sector = qs.assetProfile?.sector ?? qs.assetProfile?.sectorDisp ?? null;
     const marketCap =
@@ -315,6 +394,23 @@ export async function fetchYahooEnrichmentDto(
     trailingPE: null,
     returnOnEquity: null,
     debtToEquity: null,
+    returnOnAssets: null,
+    grossMargins: null,
+    operatingMargins: null,
+    profitMargins: null,
+    operatingCashflow: null,
+    freeCashflow: null,
+    currentRatio: null,
+    totalDebt: null,
+    totalCash: null,
+    priceToSalesTrailing12Months: null,
+    forwardPE: null,
+    priceToBook: null,
+    bookValue: null,
+    earningsGrowth: null,
+    revenueGrowth: null,
+    enterpriseValue: null,
+    netIncomeToCommon: null,
   };
 
   return {
