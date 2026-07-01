@@ -193,7 +193,7 @@ export function renderHtml(payload: DashboardPayload): string {
       <div class="card">
         <table>
           <thead><tr>
-            <th>Session Date</th><th>Alerted</th><th>Ticker</th><th>Type</th><th>Sector</th><th>Sentiment</th><th>Rationale</th>
+            <th>Session Date</th><th>Alerted</th><th>Ticker</th><th>Type</th><th>Sector</th><th>Quality</th><th>Sentiment</th><th>Rationale</th>
           </tr></thead>
           <tbody id="signals-body"></tbody>
         </table>
@@ -339,16 +339,15 @@ export function renderHtml(payload: DashboardPayload): string {
 
     // Signals table
     const sentimentColor = s => s === 'BULLISH' ? 'var(--green)' : s === 'BEARISH' ? 'var(--red)' : 'var(--amber)';
+    const qualityColor = q => q == null ? '' : q >= 7 ? 'var(--green)' : q >= 4 ? 'var(--amber)' : 'var(--red)';
+    const qualityBadge = q => q == null ? '—'
+      : '<span style="color:' + qualityColor(q) + ';font-weight:600">' + q.toFixed(1) + '</span>';
     document.getElementById('signals-body').innerHTML = d.recent_signals.map(s => {
       let sectorCell, sentimentCell, rationaleCell;
       if (s.signal_type === 'SELL') {
         const pnl = s.pnl_pct;
         const pnlStr = pnl == null ? '—' : (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%';
         const pnlColor = pnl == null ? 'var(--muted)' : pnl >= 0 ? 'var(--green)' : 'var(--red)';
-        sectorCell = exitReasonLabel(s.exit_reason);
-        sentimentCell = '<span style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</span>';
-        rationaleCell = '';
-      } else {
         const rat = s.rationale ?? '';
         sectorCell = s.sector ?? '—';
         sentimentCell = '<span style="color:' + sentimentColor(s.sentiment) + '">' + (s.sentiment ?? '—') + '</span>';
@@ -366,6 +365,7 @@ export function renderHtml(payload: DashboardPayload): string {
         '<td class="ticker">' + s.ticker + '</td>' +
         '<td><span class="badge ' + (s.signal_type === 'BUY' ? 'badge-green' : 'badge-red') + '">' + s.signal_type + '</span></td>' +
         '<td>' + sectorCell + '</td>' +
+        '<td>' + qualityBadge(s.qualityScore) + '</td>' +
         '<td>' + sentimentCell + '</td>' +
         '<td class="rationale-cell">' + rationaleCell + '</td>' +
         '</tr>'
