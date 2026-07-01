@@ -258,6 +258,30 @@ export function listBuySignalsReadyToAlert(db: CueDatabase): BuyAlertPendingRow[
   return stmt.all() as BuyAlertPendingRow[];
 }
 
+/** Sector concentration row: a sector with 3+ OPEN positions (Phase 2 advisory). */
+export interface SectorConcentrationRow {
+  sector: string;
+  count: number;
+}
+
+/** OPEN positions grouped by sector, filtered to sectors with 3+ positions. Advisory only — no BUY suppression. */
+export function getSectorConcentrationRows(db: CueDatabase): SectorConcentrationRow[] {
+  return db
+    .prepare(
+      `
+      SELECT e.sector AS sector, COUNT(*) AS count
+      FROM positions p
+      INNER JOIN signals sig ON sig.id = p.signal_id
+      INNER JOIN enrichments e ON e.signal_id = sig.id
+      WHERE p.status = 'OPEN' AND e.sector IS NOT NULL AND e.sector != ''
+      GROUP BY e.sector
+      HAVING COUNT(*) >= 3
+      ORDER BY count DESC
+    `,
+    )
+    .all() as SectorConcentrationRow[];
+}
+
 /** WATCHLIST bench row for Telegram "Next in Rank" message. */
 export interface WatchlistBriefingRow {
   id: number;
