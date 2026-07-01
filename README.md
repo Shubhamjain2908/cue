@@ -138,6 +138,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- backfill-prices` | Deep grouped-daily OHLCV backfill for universe + QQQ over a date range (fills &lt;252-bar ranking gaps). Options: `--from YYYY-MM-DD` (default: 600 calendar days before `--to`), `--to YYYY-MM-DD` (default: latest QQQ date in DB), `--min-bars N` (coverage report threshold, default 252) |
 | `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache + `fundamentals_cache`. Default: 3 uncached tickers/run (rotates through universe). `--force` = full universe in one run; `--limit N` = larger batch; `--ticker SYM` = one name |
 | `pnpm run cue -- screen` | Momentum screener / ranking. Ranks eligible tickers only (&lt;252 bars excluded, logged); alerts show `#rank of eligible (universe total)`. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
+| `pnpm run cue -- quality-snapshot` | **Phase 1** — compute Financial Health Score for tickers (reads widened Yahoo payload from `fundamentals_cache`, writes `payload_json.quality`). `--ticker SYM` (repeatable). _Available after PR 2 merges._ |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
 
 ### LLM & brief
@@ -217,7 +218,8 @@ cue/
     universe/       `nasdaq100.json` (constituents) + `_meta.json` (as-of, counts, QQQ note)
   src/
     agents/           thesis-generator, daily-workflow (registry), scheduler.ts, healthcheck.ts
-    analysers/        momentum-screener (screen, execute-stops CLI)
+    analysers/        momentum-screener (screen, execute-stops CLI),
+                      signal-quality (Financial Health Score — Phase 1 advisory)
     briefing/         dashboard HTML, Telegram dispatcher
     cli/              doctor, llm-smoke, shared CLI helpers (`ymd-arg.ts`)
     config/           env (zod), cue-timezone.ts
