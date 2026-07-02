@@ -82,6 +82,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   llm-smoke            Live LLM check: text + JSON + mini thesis (active provider)
   brief                Static HTML dashboard + Telegram alerts
   execute-stops        Stop-day path: trailing stops, high-water, stop-outs (no rebalance BUYs)
+  restamp-entry-fills  Restamp open positions' entry price from signal close to next-bar open
   run-all              Run full pipeline once (subprocess chain, same as scheduled window)
   schedule             Scheduler daemon (Tue–Sat 06:00–06:10 ET stop; Sun rebalance 06:00–06:10 ET)
   healthcheck          Post-pipeline verification + Telegram alert (after morning window)
@@ -371,6 +372,16 @@ executeStops.action(
     runExecuteStopsCli(tail);
   }),
 );
+
+program
+  .command("restamp-entry-fills")
+  .description("Restamp open positions' entry price from signal close to earliest next-bar open")
+  .action(
+    wrap("restamp-entry-fills", async () => {
+      const { runRestampEntryCli } = await import("./analysers/restamp-entry-fills.js");
+      await runRestampEntryCli();
+    }),
+  );
 
 program
   .command("run-all")
