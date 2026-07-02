@@ -14,6 +14,7 @@ import { getPipelineState } from "../db/queries.js";
 import type { CueDatabase } from "../db/provider.js";
 import { getStaleOpenPositions } from "../briefing/queries.js";
 import { resolveLastETSession } from "../ingestors/massive-price-ingestor.js";
+import { loadUniverseTickers } from "../universe/load-universe.js";
 
 export type CheckStatus = "PASS" | "FAIL" | "WARN" | "SKIP";
 
@@ -158,6 +159,110 @@ export function checkQqqLag(db: CueDatabase, now: Date): CheckResult {
     name,
     status: "FAIL",
     message: `QQQ stale: max=${qqqMax}, expected ${expectedSession} (regime data materially behind)`,
+  };
+}
+
+/** Key fields expected to be non-null in a healthy fundamentals_cache snapshot. */
+const FUNDAMENTALS_COVERAGE_FIELDS = [
+  "returnOnAssets",
+  "operatingMargins",
+  "profitMargins",
+  "operatingCashflow",
+  "freeCashflow",
+  "currentRatio",
+  "priceToSalesTrailing12Months",
+  "forwardPE",
+  "priceToBook",
+  "earningsGrowth",
+  "revenueGrowth",
+] as const;
+
+export function checkFundamentalsCoverage(db: CueDatabase): CheckResult {
+  const name = "fundamentals_coverage";
+  const universe = loadUniverseTickers();
+
+  // Find the latest as_of_date that has data for any ticker
+  const maxDateRow = db
+    .prepare(`SELECT MAX(as_of_date) AS d FROM fundamentals_cache`)
+    .get() as { d: string | null };
+
+  if (maxDateRow.d === null) {
+    return {
+      name,
+      status: "WARN",
+      message: "fundamentals_cache is empty — run cue enrich-fundamentals",
+    };
+  }
+
+  // Count total tickers with data at latest snapshot
+  const countRow = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM fundamentals_cache WHERE as_of_date = ?`,
+    )
+    .get(maxDateRow.d) as { c: number };
+
+  if (countRow.c === 0) {
+    return {
+      name,
+      status: "WARN",
+      message: `no fundamentals for as_of_date=${maxDateRow.d} — latest snapshot is unreliable`,
+    };
+  }
+
+  // Check non-null rates for extended fields
+  const lowCoverageFields: Array<{ field: string; nonNullPct: number }> = [];
+  for (const field of FUNDAMENTALS_COVERAGE_FIELDS) {
+    const row = db
+      .prepare(
+        `
+        SELECT
+          ROUND(
+            CAST(SUM(CASE WHEN json_extract(payload_json, '$.yahoo.financials.${field}') IS NOT NULL THEN 1 ELSE 0 END) AS REAL)
+            / CAST(COUNT(*) AS REAL) * 100,
+            1
+          ) AS pct
+        FROM fundamentals_cache
+        WHERE as_of_date = ?
+      `,
+      )
+      .get(maxDateRow.d) as { pct: number | null };
+
+    const pct = row.pct;
+    if (pct !== null && pct < 80) {
+      lowCoverageFields.push({ field, nonNullPct: pct });
+    }
+  }
+
+  const tickerCoveragePct = (countRow.c / universe.length) * 100;
+  if (tickerCoveragePct < 80) {
+    return {
+      name,
+      status: "WARN",
+      message:
+        `fundamentals_cache: ${String(countRow.c)}/${String(universe.length)} tickers at ${maxDateRow.d} ` +
+        `(${tickerCoveragePct.toFixed(1)}%)`,
+    };
+  }
+
+  if (lowCoverageFields.length > 0) {
+    const details = lowCoverageFields
+      .map((f) => `${f.field}=${f.nonNullPct.toFixed(1)}%`)
+      .join(", ");
+    return {
+      name,
+      status: "WARN",
+      message:
+        `fundamentals_cache: ${String(countRow.c)} tickers at ${maxDateRow.d}, ` +
+        `low coverage fields: ${details}`,
+    };
+  }
+
+  return {
+    name,
+    status: "PASS",
+    message:
+      `fundamentals_cache: ${String(countRow.c)} tickers at ${maxDateRow.d}, ` +
+      `all key fields ≥80% non-null`,
   };
 }
 
@@ -389,6 +494,7 @@ export async function runHealthcheck(
   const results: CheckResult[] = [
     checkDailyPricesCurrency(db, now),
     checkIngestStaleness(db),
+    checkFundamentalsCoverage(db),
     checkQqqLag(db, now),
     checkStalePositions(db, now),
     checkPipelineRanToday(db, now),
