@@ -115,7 +115,7 @@ describe("computeProfitability", () => {
     expect(score).toBeLessThan(0.5);
   });
 
-  it("returns 0 for all-null input", () => {
+  it("returns null for all-null input", () => {
     const allNull: QualityInputFinancials = {
       trailingPE: null,
       returnOnEquity: null,
@@ -133,7 +133,7 @@ describe("computeProfitability", () => {
       earningsGrowth: null,
       revenueGrowth: null,
     };
-    expect(computeProfitability(allNull)).toBe(0);
+    expect(computeProfitability(allNull)).toBeNull();
   });
 
   it("scores perfect company at or near 1.0", () => {
@@ -160,7 +160,7 @@ describe("computeCashHealth", () => {
     expect(score).toBeLessThan(0.6);
   });
 
-  it("returns 0 for all-null input", () => {
+  it("returns null for all-null input", () => {
     const allNull: QualityInputFinancials = {
       trailingPE: null,
       returnOnEquity: null,
@@ -178,7 +178,7 @@ describe("computeCashHealth", () => {
       earningsGrowth: null,
       revenueGrowth: null,
     };
-    expect(computeCashHealth(allNull)).toBe(0);
+    expect(computeCashHealth(allNull)).toBeNull();
   });
 
   it("perfect gets near-1.0", () => {
@@ -205,7 +205,7 @@ describe("computeValuation", () => {
     expect(score).toBeLessThanOrEqual(1);
   });
 
-  it("returns 0.5 neutral default for all-null input", () => {
+  it("returns null for all-null input", () => {
     const allNull: QualityInputFinancials = {
       trailingPE: null,
       returnOnEquity: null,
@@ -223,7 +223,7 @@ describe("computeValuation", () => {
       earningsGrowth: null,
       revenueGrowth: null,
     };
-    expect(computeValuation(allNull)).toBe(0.5);
+    expect(computeValuation(allNull)).toBeNull();
   });
 
   it("perfect company scores near-1.0", () => {
@@ -363,7 +363,7 @@ describe("computeFlags", () => {
 // ---------------------------------------------------------------------------
 
 describe("computeFinancialHealthScore", () => {
-  it("MU-like scores 5-8 out of 10", () => {
+  it("MU-like scores 7-9.5 out of 10 with updated weights", () => {
     const result = computeFinancialHealthScore({
       ticker: "MU",
       sector: "Technology",
@@ -371,9 +371,10 @@ describe("computeFinancialHealthScore", () => {
       priceAboveSma200: true,
     });
     // MU: strong profitability, decent cash, moderate valuation, strong trend, full data
-    expect(result.financialHealthScore).toBeGreaterThanOrEqual(5);
-    expect(result.financialHealthScore).toBeLessThanOrEqual(8);
-    expect(result.subscores.profitability).toBeGreaterThan(0.5);
+    // With profitability=0.40, valuation=0.30, cashHealth=0.20 weights, MU scores ~8.7
+    expect(result.financialHealthScore!).toBeGreaterThanOrEqual(7);
+    expect(result.financialHealthScore!).toBeLessThanOrEqual(9.5);
+    expect(result.subscores.profitability as number).toBeGreaterThan(0.5);
     expect(result.valuationMode).toBe("absolute");
     expect(result.sectorPeerCount).toBe(0);
   });
@@ -391,19 +392,19 @@ describe("computeFinancialHealthScore", () => {
       financials: INTC_LIKE,
       priceAboveSma200: false,
     });
-    expect(intcResult.financialHealthScore).toBeLessThan(muResult.financialHealthScore);
+    expect(intcResult.financialHealthScore!).toBeLessThan(muResult.financialHealthScore!);
   });
 
-  it("sparse input scores low due to completeness penalty", () => {
+  it("sparse input returns null due to <2 non-null sub-scores", () => {
     const result = computeFinancialHealthScore({
       ticker: "SPARSE",
       sector: null,
       financials: SPARSE,
     });
-    // Only P/S available → valuation ~0.7, completeness ~0.07, everything else 0
-    // 0.25*0 + 0.25*0 + 0.25*0.7 + 0.15*0 + 0.10*0.07 = 0.182 → 1.8/10
-    expect(result.financialHealthScore).toBeLessThan(4);
+    // Only valuation has data (P/S=12); profitability+cashHealth both null → nonNullCount=1 < 2
+    expect(result.financialHealthScore).toBeNull();
     expect(result.flags).toEqual([]);
+    expect(result.valuationMode).toBe("absolute");
   });
 
   it("perfect company scores 9+", () => {
@@ -445,15 +446,15 @@ describe("computeFinancialHealthScore", () => {
       sector: "Technology",
       financials: MU_LIKE,
       priceAboveSma200: true,
-    });
+    })!;
     const withoutTrend = computeFinancialHealthScore({
       ticker: "MU",
       sector: "Technology",
       financials: MU_LIKE,
       priceAboveSma200: false,
-    });
-    expect(withoutTrend.financialHealthScore).toBeLessThan(withTrend.financialHealthScore);
-    // Difference should be at most 0.15 * 10 = 1.5
-    expect(withTrend.financialHealthScore - withoutTrend.financialHealthScore).toBeLessThanOrEqual(1.6);
+    })!;
+    expect(withoutTrend.financialHealthScore!).toBeLessThan(withTrend.financialHealthScore!);
+    // Difference should be at most 0.05 * 10 = 0.5 (trendConfirm=0.05 weight)
+    expect(withTrend.financialHealthScore! - withoutTrend.financialHealthScore!).toBeLessThanOrEqual(0.6);
   });
 });

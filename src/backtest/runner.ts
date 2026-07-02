@@ -614,7 +614,9 @@ export function loadQualityScoresForBacktest(db: SqliteConnection): Map<string, 
         sectorMedians: medians,
       });
 
-      scores.set(ticker, result.financialHealthScore);
+      if (result.financialHealthScore !== null) {
+        scores.set(ticker, result.financialHealthScore);
+      }
     } catch {
       continue;
     }

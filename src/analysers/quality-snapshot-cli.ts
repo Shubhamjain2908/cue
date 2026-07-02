@@ -119,8 +119,9 @@ async function runQualitySnapshotForTicker(
   //     is already in the DB — this only adds/substitutes the quality sub-object).
   upsertFundamentalsPayloadQuality(ticker, asOfDate, result as unknown as Record<string, unknown>);
 
+  const scoreStr = result.financialHealthScore !== null ? result.financialHealthScore.toFixed(1) : "null";
   cueLogger.info(
-    `quality_snapshot_done ticker=${ticker} score=${result.financialHealthScore.toFixed(1)} ` +
+    `quality_snapshot_done ticker=${ticker} score=${scoreStr} ` +
       `flags=${result.flags.join(",") || "none"}`,
   );
 }
