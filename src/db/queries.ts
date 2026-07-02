@@ -587,16 +587,24 @@ export interface BacktestRunInsert {
   windowLabel?: string | null;
   /** 1 = dashboard reference pin; default 0 (unlocked research). */
   locked?: number;
+  /** Serialized JSON of key config parameters (position sizing, slippage, ranking config). */
+  configSnapshotJson?: string | null;
+  /** Short git SHA from `git rev-parse --short HEAD`; null when git unavailable. */
+  gitSha?: string | null;
+  /** SHA256 of sorted universe tickers + _meta.json as_of_date. */
+  universeFingerprint?: string | null;
 }
 
 export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert): { lastInsertRowid: bigint } {
   const stmt = db.prepare(`
     INSERT INTO backtest_runs (
       run_date, from_date, to_date, cagr, max_drawdown, win_rate, sharpe_ratio, total_trades, benchmark_cagr,
-      expectancy, strategy, window_label, locked
+      expectancy, strategy, window_label, locked,
+      config_snapshot_json, git_sha, universe_fingerprint
     ) VALUES (
       @runDate, @fromDate, @toDate, @cagr, @maxDrawdown, @winRate, @sharpeRatio, @totalTrades, @benchmarkCagr,
-      @expectancy, @strategy, @windowLabel, @locked
+      @expectancy, @strategy, @windowLabel, @locked,
+      @configSnapshotJson, @gitSha, @universeFingerprint
     )
   `);
   const info = stmt.run({
@@ -613,6 +621,9 @@ export function insertBacktestRun(db: SqliteConnection, row: BacktestRunInsert):
     strategy: row.strategy,
     windowLabel: row.windowLabel ?? null,
     locked: row.locked ?? 0,
+    configSnapshotJson: row.configSnapshotJson ?? null,
+    gitSha: row.gitSha ?? null,
+    universeFingerprint: row.universeFingerprint ?? null,
   });
   return { lastInsertRowid: BigInt(info.lastInsertRowid) };
 }
