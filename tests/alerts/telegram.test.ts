@@ -100,6 +100,7 @@ function sampleBuyAlertRow(overrides: Partial<BuyAlertPendingRow> = {}): BuyAler
     sector: "Technology",
     confidence: "HIGH",
     enrichmentStatus: "OK",
+    qualityScore: null,
     ...overrides,
   };
 }
@@ -129,12 +130,12 @@ describe("deriveBuyAlertShares fallback cap", () => {
     expect(shares).toBe(20);
   });
 
-  it("floors shares to 1 when entry mid is extreme", () => {
+  it("returns 0 shares when 1 share exceeds the 5% cap", () => {
     const { shares } = deriveBuyAlertShares(
       sampleBuyAlertRow({ price: 999_999 }),
       fallbackConfig({ POSITION_SIZE_USD: 1_000 }),
     );
-    expect(shares).toBe(1);
+    expect(shares).toBe(0);
   });
 });
 
@@ -188,6 +189,7 @@ describe("formatWatchlistBench", () => {
             "AI accelerator demand recovery; analyst upgrades on data centre GPU attach rate.",
           earningsFlag: 1,
           earningsDate: "2026-07-29",
+          qualityScore: null,
         },
       ],
       "2026-05-29",
@@ -218,6 +220,7 @@ describe("formatWatchlistBench", () => {
           rationale: null,
           earningsFlag: 0,
           earningsDate: null,
+          qualityScore: null,
         },
       ],
       "2026-05-29",
@@ -244,6 +247,7 @@ describe("formatWatchlistBench", () => {
             "The sentiment for AMD is bullish, driven by several highly positive news headlines. Custom silicon wins are accelerating design-ins.",
           earningsFlag: 0,
           earningsDate: null,
+          qualityScore: null,
         },
       ],
       "2026-05-29",
@@ -272,6 +276,7 @@ describe("formatWatchlistBench", () => {
           rationale: long,
           earningsFlag: 1,
           earningsDate: "2026-08-14",
+          qualityScore: null,
         },
       ],
       "2026-05-29",
@@ -296,6 +301,7 @@ describe("formatWatchlistBench", () => {
           rationale: null,
           earningsFlag: 0,
           earningsDate: null,
+          qualityScore: null,
         },
         {
           id: 8,
@@ -310,6 +316,7 @@ describe("formatWatchlistBench", () => {
           rationale: null,
           earningsFlag: 0,
           earningsDate: null,
+          qualityScore: null,
         },
       ],
       "2026-05-29",
@@ -334,6 +341,7 @@ describe("formatWatchlistBench", () => {
           rationale: "Cloud re-acceleration.",
           earningsFlag: 1,
           earningsDate: "2026-07-23",
+          qualityScore: null,
         },
       ],
       "2026-05-29",
