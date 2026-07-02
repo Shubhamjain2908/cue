@@ -6,8 +6,11 @@
  * with sub-scores, flags, and key metrics.
  *
  * Formula (weighted):
- *   0.25 × profitability + 0.25 × cashHealth + 0.25 × valuation
- * + 0.15 × trendConfirm + 0.10 × completeness
+ *   0.40 × profitability + 0.20 × cashHealth + 0.30 × valuation
+ * + 0.05 × trendConfirm + 0.05 × completeness
+ *
+ * Sub-scores returning null are excluded and weights are renormalized.
+ * Requires ≥2 non-null sub-scores; otherwise financialHealthScore is null.
  *
  * All sub-scores are normalised 0-1. The final score is 0-10.
  *
@@ -75,11 +78,11 @@ export interface QualityInput {
 }
 
 export interface QualitySubscores {
-  profitability: number; // 0-1
-  cashHealth: number; // 0-1
-  valuation: number; // 0-1
-  trendConfirm: number; // 0-1
-  completeness: number; // 0-1
+  profitability: number | null; // 0-1, null when insufficient data
+  cashHealth: number | null; // 0-1, null when insufficient data
+  valuation: number | null; // 0-1, null when insufficient data
+  trendConfirm: number; // 0-1 (always available, defaults to 0)
+  completeness: number; // 0-1 (always available)
 }
 
 export interface QualityMetrics {
@@ -97,20 +100,17 @@ export interface QualityMetrics {
 }
 
 export interface QualityResult {
-  /** Aggregate score 0-10 (higher = better). */
-  financialHealthScore: number;
-  /** Sub-scores by category (0-1 each). */
+  /** Aggregate score 0-10 (higher = better). Null when <2 sub-scores available. */
+  financialHealthScore: number | null;
+  /** Sub-scores by category (0-1 each, null when unavailable). */
   subscores: QualitySubscores;
   /** Key metrics for display / LLM context. */
   metrics: QualityMetrics;
   /** Warning flags, e.g. ["HIGH_DEBT", "RICH_VS_SECTOR"]. */
   flags: string[];
-  /**
-   * Count of sector peers in the fundamentals cache.
-   * 0 in Phase 1 (no sector-relative scoring yet).
-   */
+  /** Count of sector peers in the fundamentals cache; 0 when no sector medians provided. */
   sectorPeerCount: number;
-  /** "absolute" (Phase 1) or "sector_relative" (Phase 2+). */
+  /** "absolute" (no sector medians) or "sector_relative" (scored vs sector peers). */
   valuationMode: "absolute" | "sector_relative";
   /** ISO date string when this was computed. */
   computedAt: string;
@@ -153,7 +153,7 @@ function normaliseLowerIsBetter(value: number | null, floorAt: number): number {
 export function computeProfitability(
   financials: QualityInputFinancials,
   sectorMedians?: SectorFinancialMedians,
-): number {
+): number | null {
   const scores: number[] = [];
 
   // ROE: sector-relative when medians available, else absolute (20%+ = full score)
@@ -165,15 +165,23 @@ export function computeProfitability(
     }
   }
   // ROA: 10%+ = full score
-  scores.push(normaliseHigherIsBetter(financials.returnOnAssets, 0.1));
+  if (financials.returnOnAssets !== null) {
+    scores.push(normaliseHigherIsBetter(financials.returnOnAssets, 0.1));
+  }
   // Gross margins: 60%+ = full score
-  scores.push(normaliseHigherIsBetter(financials.grossMargins, 0.6));
+  if (financials.grossMargins !== null) {
+    scores.push(normaliseHigherIsBetter(financials.grossMargins, 0.6));
+  }
   // Operating margins: 20%+ = full score
-  scores.push(normaliseHigherIsBetter(financials.operatingMargins, 0.2));
+  if (financials.operatingMargins !== null) {
+    scores.push(normaliseHigherIsBetter(financials.operatingMargins, 0.2));
+  }
   // Profit margins: 15%+ = full score (bonus signal)
-  scores.push(normaliseHigherIsBetter(financials.profitMargins, 0.15));
+  if (financials.profitMargins !== null) {
+    scores.push(normaliseHigherIsBetter(financials.profitMargins, 0.15));
+  }
 
-  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 }
 
 /**
@@ -209,7 +217,7 @@ function scoreDeRelative(de: number, medianDe: number): number {
 export function computeCashHealth(
   financials: QualityInputFinancials,
   sectorMedians?: SectorFinancialMedians,
-): number {
+): number | null {
   const scores: number[] = [];
 
   // Operating cashflow positive → 1, else 0
@@ -242,7 +250,7 @@ export function computeCashHealth(
     }
   }
 
-  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 }
 
 /**
@@ -282,7 +290,7 @@ function scoreAbsolute(metric: number): number {
 export function computeValuation(
   financials: QualityInputFinancials,
   sectorMedians?: SectorFinancialMedians,
-): number {
+): number | null {
   const scores: number[] = [];
 
   const useRelative = sectorMedians !== undefined;
@@ -325,7 +333,7 @@ export function computeValuation(
     );
   }
 
-  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0.5;
+  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 }
 
 /**
@@ -446,18 +454,18 @@ export function extractQualityMetrics(financials: QualityInputFinancials): Quali
 /**
  * Weights for the Financial Health Score.
  *
- * Adjusted for NDX (Phase 3 research):
- * - profitability ↑ (0.30): ROE has good data coverage; make it matter more
- * - cashHealth ↓ (0.20): only D/E is available; sector-relative helps but still sparse
- * - valuation (0.25): P/E, P/S, P/B all available with sector-relative scoring
- * - trendConfirm ↑ (0.20): SMA200 is reliable binary signal for momentum context
- * - completeness ↓ (0.05): 13/15 fields are null in NDX; don't penalise uniformly
+ * Adjusted after rolling-window re-gate (Phase 5):
+ * - profitability ↑ (0.40): ROE has good data coverage; best predictor of quality
+ * - cashHealth (0.20): unchanged; D/E + FCF are informative
+ * - valuation ↑ (0.30): P/E, P/S, P/B all available with sector-relative scoring
+ * - trendConfirm ↓ (0.05): mechanically ~1 for momentum candidates (above SMA200 by construction)
+ * - completeness (0.05): unchanged; mostly metadata
  */
 const WEIGHTS = {
-  profitability: 0.30,
+  profitability: 0.40,
   cashHealth: 0.20,
-  valuation: 0.25,
-  trendConfirm: 0.20,
+  valuation: 0.30,
+  trendConfirm: 0.05,
   completeness: 0.05,
 } as const;
 
@@ -485,22 +493,47 @@ export function computeFinancialHealthScore(input: QualityInput): QualityResult 
   const trendConfirm = computeTrendConfirm(input.priceAboveSma200);
   const completeness = computeCompleteness(input.financials);
 
-  const weightedScore =
-    profitability * WEIGHTS.profitability +
-    cashHealth * WEIGHTS.cashHealth +
-    valuation * WEIGHTS.valuation +
-    trendConfirm * WEIGHTS.trendConfirm +
-    completeness * WEIGHTS.completeness;
+  // Collect non-null sub-scores with their weights
+  const pairs: Array<{ score: number; weight: number }> = [];
 
+  if (profitability !== null) pairs.push({ score: profitability, weight: WEIGHTS.profitability });
+  if (cashHealth !== null) pairs.push({ score: cashHealth, weight: WEIGHTS.cashHealth });
+  if (valuation !== null) pairs.push({ score: valuation, weight: WEIGHTS.valuation });
+  // trendConfirm is always 0-1 (never null)
+  pairs.push({ score: trendConfirm, weight: WEIGHTS.trendConfirm });
+  // completeness is always 0-1 (never null)
+  pairs.push({ score: completeness, weight: WEIGHTS.completeness });
+
+  const totalWeight = pairs.reduce((s, p) => s + p.weight, 0);
+
+  // Require ≥2 non-null sub-scores (trendConfirm + completeness always present)
+  const nonNullCount = [profitability, cashHealth, valuation].filter((s) => s !== null).length;
   const flags = computeFlags(input.financials);
+
+  if (nonNullCount < 2 || totalWeight === 0) {
+    return {
+      financialHealthScore: null,
+      subscores: { profitability, cashHealth, valuation, trendConfirm, completeness },
+      metrics: extractQualityMetrics(input.financials),
+      flags,
+      sectorPeerCount: 0,
+      valuationMode: "absolute",
+      computedAt: new Date().toISOString().slice(0, 10),
+    };
+  }
+
+  const weightedScore = pairs.reduce((sum, p) => sum + p.score * (p.weight / totalWeight), 0);
+
+  const valuationMode = input.sectorMedians !== undefined ? "sector_relative" : "absolute";
+  // sectorPeerCount is populated from medians metadata upstream, not here; keep 0
 
   return {
     financialHealthScore: clamp01(weightedScore) * 10,
     subscores: { profitability, cashHealth, valuation, trendConfirm, completeness },
     metrics: extractQualityMetrics(input.financials),
     flags,
-    sectorPeerCount: 0, // Phase 2+
-    valuationMode: "absolute", // Phase 1: no sector peers
+    sectorPeerCount: 0,
+    valuationMode,
     computedAt: new Date().toISOString().slice(0, 10),
   };
 }
