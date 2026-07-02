@@ -101,9 +101,11 @@ describe("runHealthcheck", () => {
     expect(code).toBe(0);
     expect(sendTelegram).toHaveBeenCalledTimes(1);
     const text = sendTelegram.mock.calls[0]![0] as string;
-    expect(text).toContain("✅ Cue healthcheck passed");
+    // fundamentals_coverage warns because only 1/101 tickers seeded in test DB
+    expect(text).toContain("⚠️ Cue healthcheck passed with warnings");
     expect(text).toContain("daily_prices current to");
     expect(text).toContain(`signals present for session ${expectedSession}`);
+    expect(text).toContain("fundamentals_coverage:");
     expect(text).toContain("pipeline_step_state:");
     db.close();
   });
@@ -218,7 +220,9 @@ describe("runHealthcheck", () => {
 
     expect(code).toBe(0);
     const text = sendTelegram.mock.calls[0]![0] as string;
-    expect(text).toContain("✅");
+    // fundamentals_coverage warns because only 1/101 tickers seeded in test DB
+    expect(text).toContain("⚠️");
+    expect(text).toContain("fundamentals_coverage:");
     expect(text).toContain("All critical steps exited 0");
     db.close();
   });
