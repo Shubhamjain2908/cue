@@ -135,15 +135,12 @@ async function fetchSubmissions(cik: string): Promise<SecSubmissionsResponse | n
   }
 }
 
-/** Extract 10-K and 10-Q filing dates from SEC submissions response. */
-function extractFilingDates(
-  data: SecSubmissionsResponse,
-): Array<{ reportDate: string; formType: string }> {
-  const recent = data.filings?.recent;
-  if (!recent) return [];
-
+/** Extract 10-K and 10-Q filing dates from a filings.recent block. */
+function extractFromRecentBlock(recent: {
+  form: string[];
+  filingDate: string[];
+}): Array<{ reportDate: string; formType: string }> {
   const dates: Array<{ reportDate: string; formType: string }> = [];
-
   for (let i = 0; i < recent.form.length; i++) {
     const form = recent.form[i]!;
     if (form === "10-K" || form === "10-Q") {
@@ -153,9 +150,61 @@ function extractFilingDates(
       }
     }
   }
-
-  dates.sort((a, b) => a.reportDate.localeCompare(b.reportDate));
   return dates;
+}
+
+/**
+ * Fetch a historical filing file from SEC (for older filings beyond `recent`).
+ * Each `file` entry in `filings.files` points to an additional JSON with more filings.
+ */
+async function fetchHistoricalFilingFile(cik: string, fileName: string): Promise<SecSubmissionsResponse | null> {
+  const url = `https://data.sec.gov/submissions/CIK${cik}.json?file=${encodeURIComponent(fileName)}`;
+  try {
+    const text = await fetchText(url);
+    return JSON.parse(text) as SecSubmissionsResponse;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract 10-K and 10-Q filing dates from SEC submissions response, including historical files. */
+async function extractFilingDates(
+  data: SecSubmissionsResponse,
+  cik: string,
+): Promise<Array<{ reportDate: string; formType: string }>> {
+  const allDates: Array<{ reportDate: string; formType: string }> = [];
+
+  // 1. Process recent filings
+  if (data.filings?.recent) {
+    const recentDates = extractFromRecentBlock(data.filings.recent);
+    allDates.push(...recentDates);
+  }
+
+  // 2. Process historical filing files (covers data beyond ~4 years)
+  const files = data.filings?.files;
+  if (files && files.length > 0) {
+    for (const file of files) {
+      const fileData = await fetchHistoricalFilingFile(cik, file.name);
+      if (fileData?.filings?.recent) {
+        const historicalDates = extractFromRecentBlock(fileData.filings.recent);
+        allDates.push(...historicalDates);
+      }
+      await delay(100); // rate-limit between historical file fetches
+    }
+  }
+
+  // Dedup by reportDate and sort
+  const seen = new Set<string>();
+  const unique: Array<{ reportDate: string; formType: string }> = [];
+  for (const d of allDates) {
+    if (!seen.has(d.reportDate)) {
+      seen.add(d.reportDate);
+      unique.push(d);
+    }
+  }
+
+  unique.sort((a, b) => a.reportDate.localeCompare(b.reportDate));
+  return unique;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +265,7 @@ export async function fetchAndPersistEarnings(
     return;
   }
 
-  const dates = extractFilingDates(data);
+  const dates = await extractFilingDates(data, cik);
   if (dates.length === 0) {
     console.warn(`  ${tickerUpper}: no 10-K/10-Q filings found`);
     return;
