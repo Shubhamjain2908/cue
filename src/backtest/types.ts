@@ -117,4 +117,17 @@ export interface MomentumBacktestOptions {
   qualityFloor?: number;
   /** Phase 3: pre-computed quality scores keyed by ticker. `financialHealthScore` from signal-quality. */
   qualityByTicker?: ReadonlyMap<string, number>;
+  /**
+   * Task 8: Earnings-blackout veto research.
+   * Map from ticker to sorted array of historical earnings report dates (YYYY-MM-DD).
+   * When provided together with `earningsBlackoutDays`, BUYs are skipped for tickers
+   * whose earnings report date falls within the blackout window.
+   */
+  earningsByTicker?: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Task 8: Number of calendar days before and after an earnings report to skip BUYs.
+   * E.g. 5 = skip BUY if an earnings report falls within ±5 calendar days of the rebalance date.
+   * Default 0 (no filter). Only active when `earningsByTicker` is also provided.
+   */
+  earningsBlackoutDays?: number;
 }
