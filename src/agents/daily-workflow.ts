@@ -36,8 +36,13 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   { name: "adjust-splits", cueArgs: ["adjust-splits"], critical: false, runOn: "both" },
   { name: "screen", cueArgs: ["screen"], critical: true, runOn: "rebalance" },
   {
+    // Default limit 101 = full universe. selectFundamentalsBatchTickers skips
+    // tickers already cached for today's as_of_date, so re-runs are idempotent.
+    // This creates a weekly full-universe PIT snapshot every Sunday.
+    // The 7-day disk cache TTL (yahooContext.ts PROFILE_TTL_MS) means most
+    // fetches hit local cache — ~20s wall-clock for 101 tickers with 200ms delay.
     name: "enrich-fundamentals",
-    cueArgs: ["enrich-fundamentals"],
+    cueArgs: ["enrich-fundamentals", "--limit", "101"],
     critical: false,
     runOn: "rebalance",
   },
