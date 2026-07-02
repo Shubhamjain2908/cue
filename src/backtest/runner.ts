@@ -23,7 +23,7 @@ import { insertBacktestRun, insertBacktestTrade } from "../db/queries.js";
 import { initSchema } from "../db/schema.js";
 import { computeTrailingStop, rankUniverse } from "../analysers/ranker.js";
 import { atr, sma } from "../enrichers/indicators.js";
-import { DEFAULT_RANKING_CONFIG, type RankingConfig } from "../enrichers/momentum-types.js";
+import { DEFAULT_RANKING_CONFIG, type RankingConfig, type RankedTicker } from "../enrichers/momentum-types.js";
 import {
   aggregateExitBuckets,
   benchmarkBuyHoldCagrPct,
@@ -318,11 +318,34 @@ export function runBacktest(
           priceMap.set(t, slice.map((b) => b.close));
         }
 
-        const ranked = rankUniverse(priceMap, {
+        const qualityWeight = options?.qualityWeight ?? 0;
+        const qualityFloor = options?.qualityFloor;
+        const qualityByTicker = options?.qualityByTicker;
+
+        let ranked: RankedTicker[] = rankUniverse(priceMap, {
           lookbackDays: cfg.lookbackDays,
           skipDays: cfg.skipDays,
           topN: cfg.topN,
         });
+
+        // Phase 3: composite momentum × quality re-ranking
+        if (qualityWeight > 0 && qualityByTicker !== undefined) {
+          const totalScored = ranked.length;
+          if (totalScored > 0) {
+            ranked = ranked
+              .map((r) => {
+                const momRankPos = r.rank / totalScored; // 0..1, 0 = best momentum
+                const qualScore = (qualityByTicker.get(r.ticker) ?? 5) / 10; // 0..1
+                const composite =
+                  (1 - qualityWeight) * (1 - momRankPos) +
+                  qualityWeight * qualScore;
+                return { ...r, composite };
+              })
+              .sort((a, b) => b.composite - a.composite)
+              .map(({ composite: _, ...rest }) => rest);
+          }
+        }
+
         const topSet = new Set(ranked.slice(0, cfg.topN).map((r) => r.ticker));
 
         for (const [ticker] of [...positions.entries()]) {
@@ -334,9 +357,6 @@ export function runBacktest(
         const allowNewBuys = allowNewBuysForVixSession(date, options?.vixGate);
         if (allowNewBuys) {
           // Phase 3: quality floor filter — skip tickers below threshold
-          const qualityFloor = options?.qualityFloor;
-          const qualityByTicker = options?.qualityByTicker;
-
           for (const t of ranked.slice(0, cfg.topN)) {
             if (positions.size + pendingBuys.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
               break;
@@ -626,11 +646,15 @@ function parseCli(): {
   to: string;
   strategy: "momentum" | "quality-garp" | "vix-momentum";
   qualityFloor: number | null;
+  qualityWeight: number | null;
+  sweepWeights: boolean;
 } {
   let from = "2021-01-01";
   let to = "2023-12-31";
   let strategy: "momentum" | "quality-garp" | "vix-momentum" = "momentum";
   let qualityFloor: number | null = null;
+  let qualityWeight: number | null = null;
+  let sweepWeights = false;
   let fromExplicit = false;
   let toExplicit = false;
   const argv = process.argv.slice(2);
@@ -654,6 +678,11 @@ function parseCli(): {
     } else if (a === "--quality-floor" && argv[i + 1]) {
       const parsed = Number(argv[++i]);
       qualityFloor = Number.isFinite(parsed) ? parsed : null;
+    } else if (a === "--quality-weight" && argv[i + 1]) {
+      const parsed = Number(argv[++i]);
+      qualityWeight = Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null;
+    } else if (a === "--sweep-weights") {
+      sweepWeights = true;
     }
   }
   if (strategy === "quality-garp") {
@@ -672,7 +701,7 @@ function parseCli(): {
       to = "2025-12-31";
     }
   }
-  return { from, to, strategy, qualityFloor };
+  return { from, to, strategy, qualityFloor, qualityWeight, sweepWeights };
 }
 
 function realOrZero(x: number | null): number {
@@ -763,6 +792,9 @@ const isMain =
 
 /** Phase 3 quality-floor sweep thresholds — includes lower values to find actual cutting point. */
 const QUALITY_FLOOR_THRESHOLDS = [1, 1.5, 2, 2.5, 3, 4] as const;
+
+/** Phase 3 composite-weight sweep ratios (momentum_weight / quality_weight). */
+const QUALITY_WEIGHT_SWEEP = [0.2, 0.3, 0.5] as const;
 
 interface QualitySweepRow {
   label: string;
@@ -928,6 +960,107 @@ if (isMain) {
           label: "Baseline (no quality filter)",
         });
 
+        return;
+      }
+
+      // Phase 3: composite weight sweep (opt-in via --sweep-weights)
+      if (cli.sweepWeights) {
+        const baseline = runSingleBacktestWithLogs(db, cli.from, cli.to, "Baseline (w=0)", undefined);
+        const rows: QualitySweepRow[] = [baseline];
+
+        console.log(`\nLoading quality scores from fundamentals_cache...`);
+        const qualityByTicker = loadQualityScoresForBacktest(db);
+        console.log(`Loaded ${qualityByTicker.size} quality scores.`);
+
+        for (const weight of QUALITY_WEIGHT_SWEEP) {
+          const label = `Quality weight ${weight} (mom ${(1 - weight).toFixed(1)})`;
+          const r = runSingleBacktestWithLogs(
+            db, cli.from, cli.to,
+            label,
+            { qualityWeight: weight, qualityByTicker },
+          );
+          rows.push(r);
+        }
+
+        // Print comparison table
+        const labelW = Math.max(...rows.map((r) => r.label.length));
+        console.log("");
+        console.log("=".repeat(105));
+        console.log("Phase 3 — Composite Momentum × Quality Weight Sweep");
+        console.log(`Window: ${cli.from}  →  ${cli.to}`);
+        console.log("=".repeat(105));
+
+        const hdr = [
+          "Filter".padEnd(labelW),
+          "CAGR".padStart(9),
+          "MaxDD".padStart(8),
+          "Sharpe".padStart(8),
+          "WinRate".padStart(8),
+          "Expct".padStart(9),
+          "Trades".padStart(7),
+        ].join("  ");
+        console.log(hdr);
+        console.log("-".repeat(105));
+
+        for (const r of rows) {
+          const highlight = r !== rows[0] && parseFloat(r.cagr) > parseFloat(baseline.cagr)
+            ? " ← BEST CAGR"
+            : "";
+          console.log([
+            r.label.padEnd(labelW),
+            r.cagr.padStart(9),
+            r.maxDd.padStart(8),
+            r.sharpe.padStart(8),
+            r.winRate.padStart(8),
+            r.expectancy.padStart(9),
+            String(r.trades).padStart(7),
+            highlight,
+          ].join("  "));
+        }
+        console.log("-".repeat(105));
+        console.log("");
+        return;
+      }
+
+      // Phase 3: single run with composite score (opt-in via --quality-weight W)
+      if (cli.qualityWeight !== null) {
+        console.log(`\nLoading quality scores for composite (weight=${cli.qualityWeight})...`);
+        const qualityByTicker = loadQualityScoresForBacktest(db);
+        console.log(`Loaded ${qualityByTicker.size} quality scores.\n`);
+
+        const result = runBacktest(db, cli.from, cli.to, {
+          qualityWeight: cli.qualityWeight,
+          qualityByTicker,
+        });
+        const expectancyPctPerTrade = mean(
+          result.closedTrades.map((t) =>
+            t.entryFillPrice !== 0
+              ? ((t.exitFillPrice - t.entryFillPrice) / t.entryFillPrice) * 100
+              : 0,
+          ),
+        );
+        const exitAgg = aggregateExitBuckets(result.closedTrades);
+        printBacktestSummary({
+          fromDate: cli.from,
+          toDate: cli.to,
+          metrics: result.metrics,
+          benchmarkCagrPct: result.benchmarkCagrPct,
+          expectancyPctPerTrade,
+          exitBuckets: exitAgg,
+          label: `Composite (mom ${((1 - cli.qualityWeight) * 100).toFixed(0)}% × qual ${(cli.qualityWeight * 100).toFixed(0)}%)`,
+        });
+
+        if (result.metrics.totalTrades === 0 && result.equityPoints.length > 0) {
+          console.warn(
+            "Backtest: 0 round-trip trades — regime gate, ranking, or data window produced no fills.",
+          );
+        }
+
+        const dbAbsPath = path.resolve(process.cwd(), config.DB_PATH);
+        const { runId, tradesInserted } = persistBacktestArtifacts(db, cli.from, cli.to, result, "MOMENTUM_COMPOSITE");
+        console.log(
+          `Saved backtest run to SQLite (id=${runId.toString()}, trades=${tradesInserted}, file=${dbAbsPath}).`,
+        );
         return;
       }
 

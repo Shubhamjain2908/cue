@@ -117,4 +117,11 @@ export interface MomentumBacktestOptions {
   qualityFloor?: number;
   /** Phase 3: pre-computed quality scores keyed by ticker. `financialHealthScore` from signal-quality. */
   qualityByTicker?: ReadonlyMap<string, number>;
+  /**
+   * Phase 3: composite score weight for quality (0-1).
+   * 0 = pure momentum (baseline), 1 = pure quality.
+   * When > 0, final ranking blends momentum rank position with quality score:
+   *   composite = (1-w) * (1 - momentumRankPosition) + w * (qualityScore / 10)
+   */
+  qualityWeight?: number;
 }
