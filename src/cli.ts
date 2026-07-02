@@ -76,6 +76,8 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
   backfill-prices      Deep grouped-daily OHLCV backfill for universe ranking gaps
   backtest-rolling     Rolling-window re-gate harness (research-only, no strategy change)
+  backtest-earnings-veto  Earnings-blackout veto research (SEC EDGAR, Task 8)
+  earnings-ingestor    SEC EDGAR earnings history ingest (10-K/10-Q filing dates)
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUY and WATCHLIST signals
   quality-snapshot     Phase 1: compute Financial Health Score for BUY tickers (reads Yahoo payload, persists quality block)
@@ -404,6 +406,42 @@ backtestRolling.action(
       persist: o.persist,
       report: o.report,
     });
+  }),
+);
+
+const earningsVeto = program
+  .command("backtest-earnings-veto")
+  .description("Earnings-blackout veto research (SEC EDGAR data) — test if skipping BUYs near earnings improves performance")
+  .option("--from <ymd>", "start date YYYY-MM-DD")
+  .option("--to <ymd>", "end date YYYY-MM-DD")
+  .option("--days <list>", "comma-separated blackout window sizes (default: 0,1,3,5,10)", "0,1,3,5,10")
+  .option("--persist", "persist baseline window results to backtest_runs", false)
+  .option("--report <path>", "write report file (e.g. docs/research/earnings-veto.md)");
+
+earningsVeto.action(
+  wrap("backtest-earnings-veto", async () => {
+    const o = earningsVeto.opts<{ from?: string; to?: string; days: string; persist: boolean; report?: string }>();
+    const { runEarningsVetoCli } = await import("./backtest/earnings-veto.js");
+    await runEarningsVetoCli({
+      from: o.from,
+      to: o.to,
+      days: o.days,
+      persist: o.persist,
+      report: o.report,
+    });
+  }),
+);
+
+const earnIngest = program
+  .command("earnings-ingestor")
+  .description("SEC EDGAR earnings history ingest — fetch 10-K/10-Q filing dates for universe tickers")
+  .option("--ticker <symbol>", "fetch a single ticker only");
+
+earnIngest.action(
+  wrap("earnings-ingestor", async () => {
+    const o = earnIngest.opts<{ ticker?: string }>();
+    const { runEarningsIngestor } = await import("./ingestors/earnings-ingestor.js");
+    await runEarningsIngestor({ ticker: o.ticker });
   }),
 );
 

@@ -338,6 +338,9 @@ export function runBacktest(
           // Phase 3: quality floor filter — skip tickers below threshold
           const qualityFloor = options?.qualityFloor;
           const qualityByTicker = options?.qualityByTicker;
+          // Task 8: earnings-blackout filter
+          const earningsByTicker = options?.earningsByTicker;
+          const earningsBlackoutDays = options?.earningsBlackoutDays ?? 0;
 
           for (const t of ranked.slice(0, cfg.topN)) {
             if (positions.size + pendingBuys.size >= BACKTEST_MAX_CONCURRENT_POSITIONS) {
@@ -351,6 +354,21 @@ export function runBacktest(
               const score = qualityByTicker.get(t.ticker);
               if (score === undefined || score < qualityFloor) {
                 continue;
+              }
+            }
+            // Apply earnings blackout if configured
+            if (earningsBlackoutDays > 0 && earningsByTicker !== undefined) {
+              const earningsDates = earningsByTicker.get(t.ticker);
+              if (earningsDates !== undefined && earningsDates.length > 0) {
+                const inBlackout = earningsDates.some((ed) => {
+                  return (
+                    compareIsoDate(ed, addCalendarDays(date, -earningsBlackoutDays)) >= 0 &&
+                    compareIsoDate(ed, addCalendarDays(date, earningsBlackoutDays)) <= 0
+                  );
+                });
+                if (inBlackout) {
+                  continue;
+                }
               }
             }
             const series = byTicker.get(t.ticker);
