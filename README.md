@@ -4,7 +4,7 @@ A **personal US-equity signal and briefing pipeline** for the **Nasdaq 100** (pl
 
 **Not an auto-trader** — Cue does not place orders. You review signals and execute trades yourself (for example via a broker app). The system is built as **small, testable TypeScript modules** plus a **SQLite** ledger so you can re-run any stage in isolation.
 
-> **Status:** Core engine, LLM enrichment, dashboard, Telegram, and **unattended scheduler** are in place. EOD data comes from **Massive.com** (Polygon-compatible key in env). Scheduling and all “market day” logic use **`America/New_York`** civil time with locale **`en-US`** (see `src/config/cue-timezone.ts`). Phase 4 **fundamentals** path: Yahoo context is cached on disk; `fundamentals_cache` exists for future persistence.
+> **Status:** Core engine, LLM enrichment, dashboard, Telegram, and **unattended scheduler** are in place (**Phase 9b complete**). EOD data comes from **Massive.com** (Polygon-compatible key in env). Scheduling and all “market day” logic use **`America/New_York`** civil time with locale **`en-US`** (see `src/config/cue-timezone.ts`). **Phase 1 quality score** is shipped as an **advisory-only** overlay (no BUY suppression). **Phase 3 quality-floor** work is backtest research (archive), not live gating.
 
 ---
 
@@ -16,12 +16,12 @@ Retail tools often optimize for either raw charts or a black-box screener. Cue s
 
 - Pulls **EOD OHLCV** for the configured universe and stores it in SQLite.
 - **Screens** for BUY/HOLD/SELL style outcomes, maintains **open positions** and **trailing stop** state.
-- On **Sunday rebalance** path (uses **Friday** EOD bars): **split adjustment**, full screen with `--force-rebalance`, batch enrich-fundamentals, quality-snapshot (Financial Health Score), LLM enrich, then brief (BUY alerts + quality line + optional **Next in Rank** bench).
+- On **Sunday rebalance** path (uses **Friday** EOD bars): **split adjustment**, batch enrich-fundamentals, full screen with `--force-rebalance`, quality-snapshot (Financial Health Score), LLM enrich, then brief (BUY alerts + quality line + optional **Next in Rank** bench).
 - On **Tue–Sat stop** path: price refresh, **split adjustment**, **execute-stops**, then brief (no rebalance-style screen).
-- After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, pipeline output, and critical-step exit codes in `pipeline_state`, then Telegram ✅/⚠️.
+- After the **06:00–06:10 ET** pipeline window: optional **`cue healthcheck`** verifies ingest currency, ingest staleness (`pipeline_state.last_ingest_was_stale`), pipeline output, and critical-step exit codes in `pipeline_state`, then Telegram ✅/⚠️.
 - Builds **`dist/dashboard.html`** and sends **Telegram** messages according to `--mode` (`rebalance` vs `stop`).
 
-Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
+Authoritative architecture, locked strategy parameters, and pipeline details: **`.cursor/rules/cue-sou.md`**. Hard constraints: **`.cursor/rules/cue-guardrails.md`**. Schema: **`.cursor/rules/cue-db-schema.md`**.
 
 ---
 
@@ -62,7 +62,7 @@ flowchart LR
 | **Scheduler daemon** | `cue schedule`, `cue pipeline` (no `--now`) | **Sun 06:00–06:10 ET** rebalance; **Tue–Sat 06:00–06:10 ET** stops; **Monday** idle. |
 | **Healthcheck** | `cue healthcheck` | Post-window DB checks + Telegram; PM2 **`cue-healthcheck`** on Sun/Tue-Sat. |
 
-**LLM:** `src/llm/provider.ts` chooses **Anthropic**, **OpenAI**, **Google AI**, or **Vertex AI** from `LLM_PROVIDER`. The runtime contract is `LLMProvider.complete(messages, maxTokens)`; structured outputs are validated with **Zod** after parsing JSON from the model.
+**LLM:** `src/llm/factory.ts` resolves **Anthropic**, **OpenAI**, **Google Studio**, **Vertex AI**, or **mock** from `LLM_PROVIDER`. Structured outputs are validated with **Zod** before writing enrichments.
 
 ---
 
@@ -134,11 +134,11 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 
 | Command | Description |
 |---------|-------------|
-| `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (default: previous ET weekday session, T-1; Mon → Fri), `--ticker SYM`, `--force` refetches that session |
-| `pnpm run cue -- adjust-splits` | Yahoo split events → `corporate_actions`; adjusts OPEN `positions` / linked `signals` and retroactive `daily_prices` (OHLC ÷ factor, volume × factor) for `date < ex_date`. Idempotent via `corporate_actions` UNIQUE |
+| `pnpm run cue -- ingest` | Massive grouped daily OHLCV (one REST call) for a session date; universe + QQQ. Options: `--date YYYY-MM-DD` (single-session explicit mode), `--ticker SYM`, `--force`. Default path tries **T+0 ET weekday session** first, then falls back to **T-1** on 0 bars/recoverable fetch failure; holiday payloads with omitted `results` are treated as 0 bars (not schema-fatal). |
+| `pnpm run cue -- adjust-splits` | Yahoo split events → `corporate_actions`; adjusts OPEN `positions` / linked `signals` and retroactive `daily_prices` (OHLC ÷ factor, volume × factor) for `date < ex_date`. Idempotent via `corporate_actions` UNIQUE. **Non-critical** pipeline step (Yahoo outage must not block stops). |
 | `pnpm run cue -- backfill-splits` | One-shot: replay existing `corporate_actions` rows against `daily_prices` (idempotent via `pipeline_state`; run once when the ledger has historical splits) |
 | `pnpm run cue -- backfill-prices` | Deep grouped-daily OHLCV backfill for universe + QQQ over a date range (fills &lt;252-bar ranking gaps). Options: `--from YYYY-MM-DD` (default: 600 calendar days before `--to`), `--to YYYY-MM-DD` (default: latest QQQ date in DB), `--min-bars N` (coverage report threshold, default 252) |
-| `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache + `fundamentals_cache`. Default: 3 uncached tickers/run (rotates through universe). `--force` = full universe in one run; `--limit N` = larger batch; `--ticker SYM` = one name |
+| `pnpm run cue -- enrich-fundamentals` | Yahoo bundles → disk cache + `fundamentals_cache`. Default: 3 uncached tickers/run (walks universe file order, skipping names already cached for today's ET `as_of_date`; when all are cached, step skips API calls). `--force` = full universe in one run; `--limit N` = larger batch; `--ticker SYM` = one name |
 | `pnpm run cue -- screen` | Momentum screener / ranking. Ranks eligible tickers only (&lt;252 bars excluded, logged); alerts show `#rank of eligible (universe total)`. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- quality-snapshot` | Compute Financial Health Score for BUY tickers (reads Yahoo payload from `fundamentals_cache`, writes `payload_json.quality`). `--ticker SYM` (repeatable). |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
@@ -149,7 +149,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 |---------|-------------|
 | `pnpm run cue -- enrich` | LLM enrichment for pending **BUY** and **WATCHLIST** signals (`thesis-generator`) |
 | `pnpm run cue -- llm-smoke` | Live smoke: text + JSON + mini thesis (`pnpm llm-smoke`) |
-| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Rebalance: BUY alerts + **Next in Rank** bench (`WATCHLIST_BENCH_DEPTH`, default 5). Dashboard: **Live Performance** (strategy exits only; excludes `MANUAL` / `REBALANCE_DROP`) and **backtest ref** from latest **`MOMENTUM` + `locked = 1`** run (`window_label` in UI). Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
+| `pnpm run cue -- brief` | Dashboard HTML + Telegram. Both modes dispatch **SELL alerts first** (🔴 `TRAILING_STOP`, 🔄 `REBALANCE_DROP`, ⏱ `TIME_EXIT`, ✋ `MANUAL`). Rebalance: BUY alerts + **Next in Rank** bench (`WATCHLIST_BENCH_DEPTH`, default 5). Dashboard: **Live Performance** excludes `MANUAL` / `REBALANCE_DROP` and same-day artefacts; backtest reference pins to latest locked **`MOMENTUM`** run (currently id=82, `window_label` shown in UI). Options: `--mode rebalance\|stop`, `--skip-dashboard`, `--skip-alert`, `--open` |
 | `pnpm run cue -- brief:dashboard` | Write `dist/dashboard.html` only (`pnpm dashboard`, `pnpm dashboard:open`) |
 | `pnpm run cue -- brief:alert` | Telegram only (internal; expects `--mode` in argv) |
 
@@ -161,7 +161,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- pipeline --now` | Same as `run-all` (explicit one-shot) |
 | `pnpm run cue -- pipeline` | **No `--now`:** same daemon as **`pnpm run cue -- schedule`** |
 | `pnpm run cue -- schedule` | Scheduler daemon (`pnpm schedule`) |
-| `pnpm run cue -- healthcheck` | Post-pipeline checks (`daily_prices`, signals/stops, `pipeline_state` step exits) + Telegram alert |
+| `pnpm run cue -- healthcheck` | Post-pipeline checks (`daily_prices`, ingest staleness flag, signals/stops, `pipeline_state` step exits) + Telegram alert |
 
 ### Other scripts (`package.json`)
 
@@ -170,7 +170,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm cue` | `tsx src/cli.ts` (pass args after the script name, e.g. `pnpm run cue ingest --date …` or `pnpm run cue -- ingest --date …`) |
 | `pnpm db:init` | `tsx src/db/schema.ts` (init + migrate from config) |
 | `pnpm db:migrate` | `pnpm run cue -- db:migrate` |
-| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Phase 3 quality-floor research: `pnpm run backtest -- --quality-floor N` runs a sweep at thresholds ≥ N with sector-relative Financial Health Scores. Override window with `--from` / `--to` |
+| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Phase 3 quality-floor research archive: `pnpm run backtest -- --quality-floor N` sweeps thresholds with sector-relative Financial Health Scores (research only; not active live gating). Override window with `--from` / `--to` |
 | `pnpm ingest` / `pnpm fetch` | `pnpm run cue -- ingest` |
 | `pnpm screen` | `pnpm run cue -- screen` |
 | `pnpm enrich` | `pnpm run cue -- enrich` |
@@ -186,7 +186,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 2. **`DB_PATH`** — default `./db/cue.db`.
 3. **`LOCK_PATH`** — cross-process scheduler PID lockfile (default `./db/cue.lock`; cleared when holder PID is dead).
 4. **`CACHE_DIR`** — Yahoo / ingest caches (default `./data/cache`).
-5. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google` \| `vertex` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
+5. **`LLM_PROVIDER`** — `anthropic` \| `openai` \| `google-studio` \| `vertex` \| `mock` (provider-specific keys required; Vertex needs `VERTEX_PROJECT_ID` + ADC or service account per `google-auth-library` usage in code).
 
 Strategy thresholds (`MAX_POSITIONS`, `WATCHLIST_BENCH_DEPTH`, `STOP_LOSS_PCT`, RSI gates, etc.) are loaded with the same env object; see **`.cursor/rules/cue-sou.md`** for **locked** momentum / ATR / regime rules. Set **`WATCHLIST_BENCH_DEPTH=0`** to disable watchlist rows and the rebalance **Next in Rank** Telegram message.
 
@@ -251,9 +251,16 @@ Conventions: strict TypeScript, ESM **`import`/`export`**, no ORM (prepared SQL 
 
 ---
 
-## Backtest Research: Quality Floor (Phase 3)
+## Financial Health Score: Production vs Research
 
-Phase 3 developed a **sector-relative Financial Health Score** calibrated for the Nasdaq 100 and ran a full backtest sweep (2023–2025) to find a viable quality floor.
+### Production (Phase 1)
+
+- Live pipeline behavior is **advisory-only** quality scoring (`cue quality-snapshot`): score is surfaced in BUY/bench Telegram copy, dashboard badges, and LLM prompt context.
+- Guardrail: **no BUY suppression** from quality score in production.
+
+### Research archive (Phase 3 quality floor)
+
+Phase 3 developed a **sector-relative Financial Health Score** calibration for the Nasdaq 100 and ran a full backtest sweep (2023–2025) to test quality-floor gating.
 
 ### Formula (NDX-calibrated)
 
@@ -274,17 +281,18 @@ Phase 3 developed a **sector-relative Financial Health Score** calibrated for th
 | Q ≥ 2.0 | 8.64% | 9.15% | 0.456 | 51.4% | 74 |
 | Q ≥ 3.0 | 6.63% | 11.07% | 0.303 | 49.2% | 59 |
 
-### Verdict
+### Phase 3 verdict
 
-- **Soft gate (Q ≥ 1.5):** ✅ Viable — slightly beats baseline with better Sharpe and lower drawdown. Excludes only 5 of the worst-quality tickers.
-- **Hard gate (≥ 2.0):** ❌ Not recommended — any threshold that excludes >10% of trades cuts CAGR by more than half.
+- **Soft gate (Q ≥ 1.5):** ✅ Viable in backtest — slightly beats baseline with better Sharpe and lower drawdown.
+- **Hard gate (≥ 2.0):** ❌ Not recommended — thresholds that exclude too much quality-flagged flow cut CAGR sharply.
+- **Live status:** not promoted as a production BUY gate; production remains advisory-only quality overlay.
 
 Run the sweep yourself:
 ```bash
 pnpm run backtest -- --quality-floor 1.5 --from 2023-01-01 --to 2025-12-31
 ```
 
-Full research archive: **`spec/cue-phase3-complete.md`**.
+Full research archive: **`spec/cue-handoff.md`** (§3.5) with summary in **`spec/cue-reference.md`** (§5.3).
 
 ---
 

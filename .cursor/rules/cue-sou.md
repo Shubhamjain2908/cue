@@ -376,7 +376,7 @@ Full record: **`spec/cue-phase9-complete.md`**.
 
 **Phase 2 — Soft gates (deferred):** sector concentration warning, LOW QUALITY badge in Telegram BUY header. No BUY suppression.
 
-**Phase 3 — Hard gates (backtest research completed):** Calibrated sector-relative Financial Health Score for NDX. Soft gate at **Q ≥ 1.5** (advisory exclusion floor — does not degrade baseline: 22.07% CAGR, 1.237 Sharpe, 97 trades). Hard gate not viable — any threshold ≥ 2.0 cuts CAGR by more than half. See **`spec/cue-phase3-complete.md`** for full research archive.
+**Phase 3 — Hard gates (backtest research completed):** Calibrated sector-relative Financial Health Score for NDX. Soft gate at **Q ≥ 1.5** (advisory exclusion floor — does not degrade baseline: 22.07% CAGR, 1.237 Sharpe, 97 trades). Hard gate not viable — any threshold ≥ 2.0 cuts CAGR by more than half. Full archive is merged into **`spec/cue-handoff.md`** (§3.5), with compressed summary in **`spec/cue-reference.md`** (§5.3).
 
 ---
 
