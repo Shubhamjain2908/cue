@@ -451,6 +451,22 @@ async function run(argv: readonly string[] = process.argv): Promise<void> {
         lookback: 5,
         logger,
       });
+
+      // After bars are committed, restamp open position entry fills from
+      // signal close to earliest next-bar open (aligns live with backtest basis).
+      // Idempotent — once restamped, subsequent runs are no-ops.
+      try {
+        const { restampPendingEntryFills } = await import(
+          "../analysers/restamp-entry-fills.js"
+        );
+        const count = restampPendingEntryFills(db);
+        if (count > 0) {
+          logger.info(`ingest: restamped ${String(count)} position(s) to next-bar open`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`ingest: restamp-entry-fills error: ${msg}`);
+      }
     }
   } finally {
     db.close();
