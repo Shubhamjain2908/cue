@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,7 +52,7 @@ import {
   BACKTEST_SETTLEMENT_EXTENSION_CALENDAR_DAYS,
   BACKTEST_WARMUP_CALENDAR_DAYS,
 } from "./types.js";
-import { loadUniverseTickers } from "../universe/load-universe.js";
+import { loadUniverseTickers, tryLoadUniverseMeta } from "../universe/load-universe.js";
 import { computeFinancialHealthScore, type QualityInputFinancials, type SectorFinancialMedians } from "../analysers/signal-quality.js";
 import {
   printQualityGarpSummary,
@@ -701,6 +703,32 @@ function backtestTradesTableExists(db: SqliteConnection): boolean {
   return row !== undefined;
 }
 
+/** Capture short git SHA, null on failure (VM may run from tarball). */
+function captureGitSha(): string | null {
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** SHA256 of sorted universe tickers + _meta.json as_of_date for reproducibility. */
+function captureUniverseFingerprint(): string | null {
+  try {
+    const tickers = loadUniverseTickers();
+    const sorted = [...tickers].sort((a, b) => a.localeCompare(b)).join(",");
+    const meta = tryLoadUniverseMeta();
+    const metaStr = meta !== null ? `|${meta.as_of_date}|${meta.total_ticker_count}` : "";
+    return crypto.createHash("sha256").update(sorted + metaStr).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
 export function persistBacktestArtifacts(
   db: SqliteConnection,
   from: string,
@@ -709,7 +737,11 @@ export function persistBacktestArtifacts(
   strategy: string,
   windowLabel?: string,
   locked = 0,
+  /** Optional quality floor threshold used in this run (null = no filter). */
+  qualityFloor?: number | null,
 ): { runId: bigint; tradesInserted: number } {
+  const cfg = rankingConfigFromDefaults();
+  const appCfg = getConfig();
   const expectancyPctPerTrade = mean(
     result.closedTrades.map((t) =>
       t.entryFillPrice !== 0
@@ -718,6 +750,18 @@ export function persistBacktestArtifacts(
     ),
   );
   const runDate = new Date().toISOString().slice(0, 10);
+  const configSnapshotJson = JSON.stringify({
+    positionUsd: appCfg.POSITION_SIZE_USD ?? BACKTEST_POSITION_USD,
+    initialCash: BACKTEST_INITIAL_CASH_USD,
+    maxConcurrent: BACKTEST_MAX_CONCURRENT_POSITIONS,
+    slippageBuy: BACKTEST_SLIPPAGE_BUY_MULTIPLIER,
+    slippageSell: BACKTEST_SLIPPAGE_SELL_MULTIPLIER,
+    rankingConfig: cfg,
+    qualityFloor: qualityFloor ?? null,
+  });
+  const gitSha = captureGitSha();
+  const universeFingerprint = captureUniverseFingerprint();
+
   const { lastInsertRowid } = insertBacktestRun(db, {
     runDate,
     fromDate: from,
@@ -732,6 +776,9 @@ export function persistBacktestArtifacts(
     strategy,
     windowLabel,
     locked,
+    configSnapshotJson,
+    gitSha,
+    universeFingerprint,
   });
 
   let tradesInserted = 0;

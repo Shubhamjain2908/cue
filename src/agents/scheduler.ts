@@ -24,7 +24,7 @@ const PIPELINE_STATE_LAST_SUCCESSFUL_RUN_DATE = "last_successful_run_date";
 
 // MAINTAINER NOTE: bump this string whenever a new migration is added.
 // verifyMigrations() will exit(2) if the DB is behind HEAD.
-export const HEAD_MIGRATION = "017_positions_current_rank";
+export const HEAD_MIGRATION = "018_backtest_run_snapshot";
 
 const logger = createCueLogger("scheduler");
 
