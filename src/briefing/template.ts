@@ -78,8 +78,8 @@ export function formatWatchlistRationale(rationale: string | null): string | nul
   return truncateAtWord(picked, WATCHLIST_RATIONALE_MAX);
 }
 
-function formatWatchlistQuality(score: number | null): string {
-  if (score === null) {
+function formatWatchlistQuality(score: number | null | undefined): string {
+  if (score == null) {
     return "";
   }
   const label = score < 4 ? `Health: ${score.toFixed(1)}/10 ⚠️` : `Health: ${score.toFixed(1)}/10`;

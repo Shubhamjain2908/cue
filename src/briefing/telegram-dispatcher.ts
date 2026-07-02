@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { createCueLogger, cueLogger } from "../cli/cue-logger.js";
 import { getConfig } from "../config/index.js";
+import { DEFAULT_RANKING_CONFIG } from "../enrichers/momentum-types.js";
 import { formatMomentumRankLabel } from "../shared/momentum-rank-label.js";
 import { loadUniverseTickers } from "../universe/load-universe.js";
 import { getExchangeDateString } from "../config/cue-timezone.js";
@@ -67,7 +68,7 @@ export function deriveBuyAlertShares(
   let shares: number;
   if (config.PORTFOLIO_VALUE_USD !== undefined) {
     const portfolio = config.PORTFOLIO_VALUE_USD;
-    const riskPerShare = row.atr14 * 2;
+    const riskPerShare = row.atr14 * DEFAULT_RANKING_CONFIG.atrMultiplierBase;
     const rawShares = Math.floor((portfolio * 0.01) / riskPerShare);
     const capShares = Math.floor((portfolio * 0.05) / entryMid);
     shares = Math.min(rawShares, capShares);
@@ -86,12 +87,10 @@ export function deriveBuyAlertShares(
           `(5% cap on implied book ${String(impliedBookSize)})`,
       );
     }
-    shares = Math.max(shares, 1);
   }
 
   if (shares === 0) {
-    logger.warn(`BUY alert ${row.ticker}: shares resolved to 0, flooring to 1`);
-    shares = 1;
+    logger.warn(`BUY alert ${row.ticker}: shares resolved to 0 — 1 share exceeds 5% cap`);
   }
 
   const positionUsd = Math.round(shares * entryMid);
@@ -211,13 +210,32 @@ export function formatTelegramAlert(
   const lines = [
     header,
     RULE,
-    `Entry range : $${entryLo} – $${entryHi}   (±1% last close)`,
-    `Stop loss   : $${stop}  (${stopPct}% | ${multiplierLabel})`,
-    `1R target   : $${target}  (1:1 R-multiple above entry mid)`,
-    `Position    : $${positionUsd} → ~${shares} shares @ $${round2(entryMid)}`,
-    RULE,
-    `Sector: ${row.sector ?? "N/A"}  |  Earnings: ${row.earningsDate ?? "N/A"}`,
   ];
+
+  if (shares === 0) {
+    // Calculate 5% cap for the skip message (reuse outer `config`)
+    let capUsd: number;
+    if (config.PORTFOLIO_VALUE_USD !== undefined) {
+      capUsd = config.PORTFOLIO_VALUE_USD * 0.05;
+    } else {
+      const impliedBook = config.POSITION_SIZE_USD * config.MAX_POSITIONS;
+      capUsd = impliedBook * 0.05;
+    }
+    lines.push(
+      `Position    : SKIP — 1 share ($${round2(entryMid)}) exceeds 5% cap ($${round2(capUsd)})`,
+    );
+    lines.push(RULE);
+    lines.push(`Sector: ${row.sector ?? "N/A"}  |  Earnings: ${row.earningsDate ?? "N/A"}`);
+  } else {
+    lines.push(
+      `Entry range : $${entryLo} – $${entryHi}   (±1% last close)`,
+      `Stop loss   : $${stop}  (${stopPct}% | ${multiplierLabel})`,
+      `1R target   : $${target}  (1:1 R-multiple above entry mid)`,
+      `Position    : $${positionUsd} → ~${shares} shares @ $${round2(entryMid)}`,
+      RULE,
+      `Sector: ${row.sector ?? "N/A"}  |  Earnings: ${row.earningsDate ?? "N/A"}`,
+    );
+  }
 
   // Phase 1: Financial Health Score advisory line
   if (row.qualityScore !== null) {
