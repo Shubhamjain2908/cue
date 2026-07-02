@@ -283,16 +283,16 @@ Phase 3 developed a **sector-relative Financial Health Score** calibration for t
 
 ### Phase 3 verdict
 
-- **Soft gate (Q ≥ 1.5):** ✅ Viable in backtest — slightly beats baseline with better Sharpe and lower drawdown.
-- **Hard gate (≥ 2.0):** ❌ Not recommended — thresholds that exclude too much quality-flagged flow cut CAGR sharply.
+> **⚠️ Caveat (July 2026):** The Phase 3 quality-floor sweep was conducted before the fundamentals data refresh (PR-3). At research time, 12/15 Financial Health Score input fields were 100% null in `fundamentals_cache` (only P/E, ROE, and D/E were consistently populated). Scores were computed on a sparse data diet. Additionally, `loadQualityScoresForBacktest` reads the **latest snapshot** fundamentals and applies them across the entire backtest window — a **look-ahead** violation. The results below should be treated as preliminary and re-run after the fundamentals refresh and `signal-quality.ts` cleanup.
+
+- **Soft gate (Q ≥ 1.5):** ✅ Tentatively viable in backtest, but subject to data-quality caveats above.
+- **Hard gate (≥ 2.0):** ❌ Not recommended based on current data.
 - **Live status:** not promoted as a production BUY gate; production remains advisory-only quality overlay.
 
 Run the sweep yourself:
 ```bash
 pnpm run backtest -- --quality-floor 1.5 --from 2023-01-01 --to 2025-12-31
 ```
-
-Full research archive: **`spec/cue-handoff.md`** (§3.5) with summary in **`spec/cue-reference.md`** (§5.3).
 
 ---
 
