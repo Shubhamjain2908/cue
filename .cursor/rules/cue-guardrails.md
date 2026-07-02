@@ -1,5 +1,5 @@
 # Cue — Guardrails
-*v1.8 · July 2026 — Phase 1 quality score (advisory, no BUY suppression)*
+*v1.9 · July 2026 — Phase 1 quality score (advisory, no BUY suppression) + earnings-blackout research guardrail*
 
 Guardrails are hard constraints. They are not configurable at runtime and must
 not be bypassed without an explicit gate override (documented in **`.cursor/rules/cue-sou.md`** + committed to repo).
@@ -27,6 +27,7 @@ not be bypassed without an explicit gate override (documented in **`.cursor/rule
 | **Backtest gate** | Any strategy parameter change must re-run backtest and clear: CAGR > 12%, MaxDD < 20%, Sharpe > 1.0, Expectancy > 0. | Manual / CI process |
 | **Quality score advisory (Phase 1)** | Financial Health Score surfaced in Telegram, dashboard, and LLM prompt — **no BUY suppression**. Scores are informational only. Phase 2+ requires backtest research and a separate gate ceremony. | `src/analysers/signal-quality.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/template.ts`, `src/llm/prompt.ts` |
 | **Quality-last-writer** | `quality-snapshot` runs **after** `enrich-fundamentals` in the Sunday rebalance pipeline — it is the last writer to `fundamentals_cache.payload_json.quality`. The Yahoo payload must already be in the DB before the quality block is merged. | `src/agents/daily-workflow.ts`, `src/analysers/quality-snapshot-cli.ts` |
+| **Earnings-blackout research only** | `cue earnings-ingestor` and `cue backtest-earnings-veto` are **research-only** CLI tools. The SEC EDGAR earnings ingestor reads from `data.sec.gov` (not Yahoo) and stores filing dates in `earnings_events`. The backtest parser tests blackout windows — no production gating. Earnings data is not used by the live pipeline. | `src/ingestors/earnings-ingestor.ts`, `src/backtest/earnings-veto.ts` |
 
 ---
 

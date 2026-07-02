@@ -2,7 +2,7 @@
 
 *Living document for this repository. Maps architecture intent onto **actual paths**, CLI, migrations, **Phase 9b** behaviour (T-1 next-morning ingestor, 06:00 ET pipeline window, stop-replay correctness, SELL Telegram alerts, arch-review gap closure), and **Phase 1 quality score** (advisory Financial Health Score, 3 PRs).*
 
-**Also read:** root **`README.md`** (operator quickstart), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`016`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
+**Also read:** root **`README.md`** (operator quickstart), **`.cursor/rules/cue-db-schema.md`** (migrations `001`–`020`), **`.cursor/rules/cue-guardrails.md`** (hard rules).
 
 ---
 
@@ -164,6 +164,8 @@ interface PipelineStep {
 | Briefing | `src/briefing/dashboard.ts`, `src/briefing/telegram-dispatcher.ts`, `src/briefing/queries.ts`, `src/briefing/template.ts` (`formatWatchlistBench`, `formatBacktestRef` + `window_label`) | `cue brief`, `brief:dashboard`, `brief:alert` *(rebalance BUY alerts + watchlist bench; stop-path Daily Pulse; dashboard Live Performance + exit-reason breakout + **locked** MOMENTUM backtest ref)* |
 | DB | `src/db/migrations/*.sql`, `src/db/migrate.ts` (re-exports runner), `queries.ts`, `provider.ts` | `cue db:migrate`, `db:init` |
 | Backtest | `src/backtest/runner.ts` | `pnpm run backtest` |
+| Earnings ingestor (SEC EDGAR) | `src/ingestors/earnings-ingestor.ts` | `cue earnings-ingestor` |
+| Earnings-veto research CLI | `src/backtest/earnings-veto.ts` | `cue backtest-earnings-veto` |
 
 ---
 
@@ -199,7 +201,7 @@ interface PipelineStep {
 
 ## 7. Schema & migrations
 
-- **Applied DDL:** `001`–`017` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/cue-db-schema.md`**.
+- **Applied DDL:** `001`–`018` under `src/db/migrations/` (ledger **`_migrations`**); authoritative column list in **`.cursor/rules/cue-db-schema.md`**. Migrations `019`–`020` (earnings work) pending from PR-7/8.
 - **Post-migrate shape:** `signals` **`UNIQUE (ticker, date, signal, signal_type)`** + **`alerted_at TEXT`** (migration `016`); `positions` with trailing-stop + **`pnl_pct`** / **`exit_reason`** (incl. **`REBALANCE_DROP`** via `006`) + **`current_rank INTEGER`** (migration `017`); **`corporate_actions`** (`008`); **`backtest_runs.strategy`**, **`window_label`**, **`locked`** (`007`, `009`); `backtest_trades` with **`REBALANCE_DROP`** in exit_reason CHECK (`015`).
 - **Dashboard backtest reference:** latest **`MOMENTUM` + `locked = 1`** run (**id=82**, 2023–2025 bull window; PR-6 ceremony 2026-06-04 — `REBALANCE_DROP` mapping fix). Migration `009` locked ids 73–74; id=82 supersedes via ceremony. Unlocked research runs do not displace the pin.
 - **Split adjustment (PR-4):** `cue adjust-splits` records splits in **`corporate_actions`**, adjusts OPEN **`positions` / `signals`**, and retroactively adjusts **`daily_prices`** for `date < ex_date` (OHLC ÷ `factor`, volume × `factor`) so momentum/backtest inputs stay continuous. One-shot **`cue backfill-splits`** replays existing ledger rows (oldest `ex_date` first); idempotent via **`pipeline_state`** key `backfill_split_applied:{ticker}:{ex_date}`.
@@ -210,7 +212,7 @@ interface PipelineStep {
 - **Pipeline step exit codes:** `runPipelineWithSteps` persists `step:{name}:last_exit_code` / `step:{name}:last_run_at` after every registry step. `healthcheck.ts` **`checkPipelineStepState`** FAILs when critical steps (`ingest`+`screen` on Sunday, `ingest`+`execute-stops` Tue–Sat) last exited non-zero; absent keys warn only.
 - **SQLite pragmas:** `applySqlitePragmas()` in `db/provider.ts` sets WAL, `busy_timeout=5000`, `synchronous=NORMAL`, `cache_size=-64000`, `mmap_size=268435456`, `temp_store=MEMORY` on every read-write connection. `openCueDbReadonly()` applies `busy_timeout=5000` only.
 - **`fundamentals_cache`:** disk cache first, then best-effort SQLite upserts keyed by (`ticker`, `as_of_date`). Batch CLI skips tickers already cached for today's `as_of_date` (see §6.2).
-- **Next migration ID:** **`017`**.
+- **Next migration ID:** **`020`** (earnings work applies migrations `019`, `020`).
 - **Reference:** **`.cursor/rules/cue-db-schema.md`** (repo agent summary tied to applied migrations).
 
 ---
@@ -359,7 +361,55 @@ Full record: **`spec/cue-phase9-complete.md`**.
 | Massive holiday `results` omit → T−1 fallback (not Zod abort) | PR-13 | ✅ `fetchGroupedDaily()` pre-check in `massive-price-ingestor.ts` |
 | `enrich-fundamentals` batch rotation via `fundamentals_cache` | PR-14 | ✅ `selectFundamentalsBatchTickers()` in `queries.ts` |
 
-**Queued PRs:** None.
+**Queued PRs:** PR-7 (`earnings-blackout-veto` research), PR-8 (`sec-edgar-earnings` ingestor). See §14e.
+
+## 14e. Earnings-Blackout Veto Research (July 2026)
+
+*Research-only tool to determine if skipping entries during earnings blackout windows improves strategy performance. Uses SEC EDGAR filings data (not Yahoo) for 10+ years of historical 10-K and 10-Q filing dates.*
+
+### Data Source
+
+| Detail | Value |
+|--------|-------|
+| Source | SEC EDGAR Submissions API |
+| Filing types | 10-K (annual) + 10-Q (quarterly) |
+| Coverage | `filings.recent` (~4 years) + `filings.files[]` (10+ years) |
+| Events ingested | **3,214** across **95** tickers |
+| Date range | 2007–2026 |
+| Non-US tickers without EDGAR | ASML, CCEP, PDD, ARM, TRI, FER |
+
+### Pipeline
+
+1. **`cue earnings-ingestor`** — downloads `company_tickers.json` from SEC (ticker→CIK mapping, cached 24h), fetches `submissions/CIK##########.json` per ticker, extracts 10-K/10-Q filing dates, stores in `earnings_events` table. Rate-limited (250ms delay between tickers, 100ms between historical files).
+2. **`cue backtest-earnings-veto`** — runs rolling-window backtest grid (7 windows × blackout sizes 0,1,3,5,10d), compares each blackout size vs baseline, reports skipped trades.
+
+### Results
+
+| Blackout | Median CAGR | Median Sharpe | Median Expectancy | Trades Skipped |
+|----------|:-----------:|:-------------:|:-----------------:|:--------------:|
+| Baseline | 34.44% | 1.794 | 7.83% | — |
+| 1d | 33.34% | 1.782 | 7.64% | 5,219 |
+| 3d | 33.35% | 1.789 | 7.86% | 5,219 |
+| 5d | 32.93% | 1.782 | 8.06% | 5,219 |
+| 10d | 34.40% | **1.953** | **9.13%** | 5,219 |
+
+**Verdict: No statistically significant improvement.** The 10-day blackout shows marginal Sharpe improvement (1.953 vs 1.794) but CAGR is flat (34.40% vs 34.44%). Bootstrap 95% CIs overlap substantially across all sizes — the effect could be noise.
+
+### Files
+
+| File | Role |
+|------|------|
+| `src/ingestors/earnings-ingestor.ts` | SEC EDGAR earnings ingestor |
+| `src/backtest/earnings-veto.ts` | Research CLI (rolling-window comparison) |
+| `src/backtest/types.ts` | `earningsByTicker` + `earningsBlackoutDays` options |
+| `src/backtest/runner.ts` | Earnings blackout filter in rebalance loop |
+| `src/db/migrations/019_earnings_events.sql` | `earnings_events` table |
+| `src/db/migrations/020_earnings_events_form_type.sql` | Add `form_type` column |
+| `docs/research/earnings-veto.md` | Full research report |
+
+**Live status:** research only — no production gating.
+
+---
 
 ## 14f. Phase 1 — Quality Score (July 2026)
 
@@ -401,7 +451,7 @@ Full record: **`spec/cue-phase9-complete.md`**.
 | Document | Role |
 |---|---|
 | `.cursor/rules/cue-sou.md` | Living engineering spec (this file) |
-| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`017`) |
+| `.cursor/rules/cue-db-schema.md` | Schema summary tied to **applied** migrations (`001`–`020`) |
 | `.cursor/rules/cue-guardrails.md` | Hard constraints |
 | `spec/cue-reference.md` | Compressed living spec (Phase 9 current) |
 | `spec/cue-handoff.md` | Locked architectural decisions + research archive |

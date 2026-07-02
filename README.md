@@ -4,7 +4,7 @@ A **personal US-equity signal and briefing pipeline** for the **Nasdaq 100** (pl
 
 **Not an auto-trader** — Cue does not place orders. You review signals and execute trades yourself (for example via a broker app). The system is built as **small, testable TypeScript modules** plus a **SQLite** ledger so you can re-run any stage in isolation.
 
-> **Status:** Core engine, LLM enrichment, dashboard, Telegram, and **unattended scheduler** are in place (**Phase 9b complete**). EOD data comes from **Massive.com** (Polygon-compatible key in env). Scheduling and all “market day” logic use **`America/New_York`** civil time with locale **`en-US`** (see `src/config/cue-timezone.ts`). **Phase 1 quality score** is shipped as an **advisory-only** overlay (no BUY suppression). **Phase 3 quality-floor** work is backtest research (archive), not live gating.
+> **Status:** Core engine, LLM enrichment, dashboard, Telegram, and **unattended scheduler** are in place (**Phase 9b complete**). EOD data comes from **Massive.com** (Polygon-compatible key in env). Scheduling and all “market day” logic use **`America/New_York`** civil time with locale **`en-US`** (see `src/config/cue-timezone.ts`). **Phase 1 quality score** is shipped as an **advisory-only** overlay (no BUY suppression). **Phase 3 quality-floor** work is backtest research (archive), not live gating. **Earnings-blackout veto research** is complete (SEC EDGAR data source, no statistically significant improvement found).
 
 ---
 
@@ -142,6 +142,8 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm run cue -- screen` | Momentum screener / ranking. Ranks eligible tickers only (&lt;252 bars excluded, logged); alerts show `#rank of eligible (universe total)`. `--date YYYY-MM-DD` (default: latest QQQ session in DB), `--ticker`, `--force-rebalance` |
 | `pnpm run cue -- quality-snapshot` | Compute Financial Health Score for BUY tickers (reads Yahoo payload from `fundamentals_cache`, writes `payload_json.quality`). `--ticker SYM` (repeatable). |
 | `pnpm run cue -- execute-stops` | Trailing stops / max-hold for OPEN positions (stop-day path). `--date YYYY-MM-DD` (default: latest QQQ session); `--dry-run` reserved |
+| `pnpm run cue -- earnings-ingestor` | Fetch historical earnings filing dates from SEC EDGAR for the universe. Downloads `company_tickers.json` (ticker→CIK mapping), fetches `submissions/CIK##########.json` per ticker, extracts 10-K / 10-Q filing dates from `filings.recent` + `filings.files[]` (10+ year coverage). Stores in `earnings_events` table. Options: `--ticker SYM` (single ticker). |
+| `pnpm run cue -- backtest-earnings-veto` | Research CLI: tests skipping entries during earnings blackout windows. Runs rolling-window backtest grid (7 windows, 90d step) with configurable blackout sizes. Options: `--days 0,1,3,5,10` (comma-separated blackout sizes), `--fetch` (ingest missing earnings data first), `--report PATH` (save markdown report). |
 
 ### LLM & brief
 
@@ -170,7 +172,7 @@ All commands go through **`pnpm run cue -- <subcommand>`** (or **`pnpm run cue -
 | `pnpm cue` | `tsx src/cli.ts` (pass args after the script name, e.g. `pnpm run cue ingest --date …` or `pnpm run cue -- ingest --date …`) |
 | `pnpm db:init` | `tsx src/db/schema.ts` (init + migrate from config) |
 | `pnpm db:migrate` | `pnpm run cue -- db:migrate` |
-| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Phase 3 quality-floor research archive: `pnpm run backtest -- --quality-floor N` sweeps thresholds with sector-relative Financial Health Scores (research only; not active live gating). Override window with `--from` / `--to` |
+| `pnpm backtest` | `tsx src/backtest/runner.ts` (default momentum). Research: `pnpm run backtest -- --strategy quality-garp` (defaults `2023-01-01`→`2025-12-31`), `pnpm run backtest -- --strategy vix-momentum` (P7-G sweep; defaults `2022-01-01`→`2025-12-31`). Phase 3 quality-floor research archive: `pnpm run backtest -- --quality-floor N` sweeps thresholds with sector-relative Financial Health Scores (research only; not active live gating). Override window with `--from` / `--to`. Earnings-veto research: `pnpm run cue -- backtest-earnings-veto`. |
 | `pnpm ingest` / `pnpm fetch` | `pnpm run cue -- ingest` |
 | `pnpm screen` | `pnpm run cue -- screen` |
 | `pnpm enrich` | `pnpm run cue -- enrich` |
@@ -228,12 +230,14 @@ cue/
     config/           env (zod), cue-timezone.ts
     db/               migrations/, queries.ts, provider.ts, schema.ts
     enrichers/        momentum types / math used by screener
-    ingestors/        Massive price ingest, corporate-actions (splits), enrich-fundamentals CLI
+    ingestors/        Massive price ingest, corporate-actions (splits), enrich-fundamentals CLI,
+                      earnings-ingestor (SEC EDGAR)
     universe/         shared `load-universe.ts` (tickers + `_meta.json`)
     llm/              provider adapters, enricher, prompt, yahooContext
     backtest/         historical runner (separate tsx entry)
   deploy/             PM2 ecosystem example
   tests/              vitest
+  docs/               research reports (rolling-window re-gate, earnings-veto, etc.)
 ```
 
 ---
@@ -293,6 +297,45 @@ Run the sweep yourself:
 ```bash
 pnpm run backtest -- --quality-floor 1.5 --from 2023-01-01 --to 2025-12-31
 ```
+
+---
+
+## Earnings-Blackout Veto Research
+
+Research-only tool to test if skipping entries during earnings blackout windows improves strategy performance. Uses **SEC EDGAR** filings data (not Yahoo) for 10+ years of historical 10-K / 10-Q filing dates.
+
+### Data Source
+
+| Detail | Value |
+|--------|-------|
+| Source | SEC EDGAR Submissions API (`data.sec.gov/submissions/CIK##########.json`) |
+| Ticker→CIK | `company_tickers.json` (cached 24h) |
+| Filing types | 10-K (annual) + 10-Q (quarterly) |
+| Coverage | `filings.recent` (~4 years) + `filings.files[]` (10+ years) |
+| Events fetched | **3,214** across **95** tickers (6 non-US tickers have no EDGAR filings) |
+| Date range | 2007–2026 |
+
+### Backtest Results (7 windows, 5 blackout sizes)
+
+| Blackout | Median CAGR | Median Sharpe | Median Expectancy | Trades Skipped |
+|----------|:-----------:|:-------------:|:-----------------:|:--------------:|
+| **Baseline** | **34.44%** | 1.794 | 7.83% | — |
+| 1d | 33.34% | 1.782 | 7.64% | 5,219 |
+| 3d | 33.35% | 1.789 | 7.86% | 5,219 |
+| 5d | 32.93% | 1.782 | 8.06% | 5,219 |
+| **10d** | **34.40%** | **1.953** | **9.13%** | 5,219 |
+
+### Verdict
+
+**Not statistically significant.** The 10-day blackout shows marginal Sharpe improvement (1.953 vs 1.794) but CAGR is flat. Bootstrap 95% CIs overlap substantially across all sizes — the effect could be noise. 38 fewer trades at 10d vs baseline (412 vs 450) is not enough to degrade or improve overall performance.
+
+Run it yourself:
+```bash
+pnpm run cue -- earnings-ingestor          # fetch SEC EDGAR data (one-time)
+pnpm run cue -- backtest-earnings-veto    # run comparison
+```
+
+Full report: `docs/research/earnings-veto.md`
 
 ---
 

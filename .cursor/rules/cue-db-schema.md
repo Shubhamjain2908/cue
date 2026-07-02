@@ -28,6 +28,9 @@ This document summarizes tables, important columns, and how they relate to pipel
 | `015_backtest_rebalance_drop` | Rebuild `backtest_trades`; CHECK adds **`REBALANCE_DROP`**; re-index ticker + run_id |
 | `016_signals_alerted_at` | ALTER TABLE `signals` ADD COLUMN `alerted_at` TEXT; NULL until alert fires; written by `markSignalAlerted` |
 | `017_positions_current_rank` | ALTER TABLE `positions` ADD COLUMN `current_rank` INTEGER; NULL until first Sunday rebalance after migration; stamped by `runLiveScreen()` on rebalance path |
+| `018_backtest_run_snapshot` | `backtest_runs` snapshot columns: `config_json`, `git_sha`, `universe_fingerprint`, `notes` |
+| `019_earnings_events` | `earnings_events` table: ticker, report_date, fiscal_quarter, eps_actual, eps_estimate, source='sec_edgar'; indexes on ticker and report_date |
+| `020_earnings_events_form_type` | ALTER TABLE `earnings_events` ADD COLUMN `form_type` TEXT (10-K / 10-Q); backfills from source data using UNIQUE (ticker, report_date) |
 
 **`payload_json` quality block (Phase 1, advisory):** `cue quality-snapshot` writes a `quality` key into `payload_json` after the Yahoo payload is persisted. Shape:
 
@@ -58,7 +61,7 @@ This document summarizes tables, important columns, and how they relate to pipel
 }
 ```
 
-**Next migration:** `018`
+**Next migration:** `020`
 
 There is **no CHECK** on `signals.signal` — values are enforced in application types (`BUY`, `SELL`, `HOLD`, `WATCHLIST`).
 
@@ -235,6 +238,30 @@ Scheduler idempotency key/value store (`010_pipeline_state`).
 
 ## Fundamentals (Phase 4+)
 
+### `earnings_events`
+
+Historical earnings filing dates from SEC EDGAR (`019_earnings_events`).
+
+| Column | Notes |
+|--------|-------|
+| `id` | INTEGER PK AUTOINCREMENT |
+| `ticker` | TEXT NOT NULL |
+| `report_date` | TEXT NOT NULL ISO `YYYY-MM-DD` — filing date of the earnings report |
+| `fiscal_quarter` | TEXT — e.g. `Q1 2024` (from Yahoo; may be NULL for SEC-sourced rows) |
+| `eps_actual` | REAL — actual EPS (from Yahoo; may be NULL for SEC-sourced rows) |
+| `eps_estimate` | REAL — consensus EPS estimate (from Yahoo; may be NULL for SEC-sourced rows) |
+| `form_type` | TEXT — `10-K` (annual) or `10-Q` (quarterly); added by migration `020` |
+| `source` | TEXT NOT NULL DEFAULT `'sec_edgar'` — data provenance |
+| `created_at` | TEXT DEFAULT `CURRENT_TIMESTAMP` |
+
+**UNIQUE** `(ticker, report_date)` — idempotent `INSERT OR IGNORE` for data collection.
+
+**Written by:** `cue earnings-ingestor` (`src/ingestors/earnings-ingestor.ts`).
+
+**Consumed by:** `cue backtest-earnings-veto` (`src/backtest/earnings-veto.ts`) for research-only backtest comparison. Not consumed by live pipeline.
+
+---
+
 ### `fundamentals_cache`
 
 | Column | Notes |
@@ -308,6 +335,7 @@ positions 1──* stop_movements   (append-only; no CASCADE delete)
 positions 1──* position_notes   (append-only; no CASCADE delete)
 daily_prices (ticker, date)
 corporate_actions (ticker, ex_date)
+earnings_events (ticker, report_date)  — research only; not consumed by live pipeline
 backtest_runs 1──* backtest_trades
 pipeline_state (key → value)
 ```
