@@ -75,6 +75,7 @@ Subcommands (run \`pnpm run cue --help\` or \`pnpm run cue <name> --help\` for f
   adjust-splits        Adjust open position price levels for recent stock splits (Yahoo)
   enrich-fundamentals  Phase 4: Yahoo Finance context → disk cache (placeholder for fundamentals_cache)
   backfill-prices      Deep grouped-daily OHLCV backfill for universe ranking gaps
+  backtest-rolling     Rolling-window re-gate harness (research-only, no strategy change)
   screen               Momentum screen / technical ranking (or --ticker probe)
   enrich               LLM sentiment + thesis for pending BUY and WATCHLIST signals
   quality-snapshot     Phase 1: compute Financial Health Score for BUY tickers (reads Yahoo payload, persists quality block)
@@ -382,6 +383,29 @@ program
       await runRestampEntryCli();
     }),
   );
+
+const backtestRolling = program
+  .command("backtest-rolling")
+  .description("Rolling-window re-gate harness — research-only strategy viability assessment")
+  .option("--from <ymd>", "start date YYYY-MM-DD (default: earliest data + warmup days)")
+  .option("--to <ymd>", "end date YYYY-MM-DD (default: latest QQQ date)")
+  .option("--perturb", "re-run grid for topN∈{2,3,4} × atrBase∈{3.5,4.0,4.5}", false)
+  .option("--persist", "persist window results to backtest_runs", false)
+  .option("--report <path>", "write report file (e.g. spec/research/report.md)");
+
+backtestRolling.action(
+  wrap("backtest-rolling", async () => {
+    const o = backtestRolling.opts<{ from?: string; to?: string; perturb: boolean; persist: boolean; report?: string }>();
+    const { runRollingGateCli } = await import("./backtest/rolling-gate.js");
+    runRollingGateCli({
+      from: o.from,
+      to: o.to,
+      perturb: o.perturb,
+      persist: o.persist,
+      report: o.report,
+    });
+  }),
+);
 
 program
   .command("run-all")
